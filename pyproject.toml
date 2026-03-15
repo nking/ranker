@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=72", "wheel", "tomli"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "movie_lens_ranker"
+version = "0.1.0"
+description = "Ranker class for Kaggle recommender systems project"
+authors = [
+    { name = "Nichole King" },
+]
+#readme = "README.md"
+requires-python = ">=3.12.0"
+# de
+dependencies = [
+  'rax=0.4.0', 'jax-ai-stack=2025.10.28',
+  'jraphx=0.0.4'
+]
+readme = "README.md"
+license = "MIT"
+
+classifiers = [
+  #   3 - Alpha
+  #   4 - Beta
+  #   5 - Production/Stable
+  "Development Status :: 1 - development",
+]
+
+
+[tool.setuptools]
+
+[tool.setuptools.packages.find]
+where = ["src/main/python"]
+include = ['movie_lens_ranker',]
+#exclude = ["tests"]
+
+[project.urls]
+Homepage = "https://www.kaggle.com/code/nicholeasuniquename/ranker/"
+Repository = "https://github.com/nking/ranker.git"
+
+[project.optional-dependencies]
+test = ["pytest", ]

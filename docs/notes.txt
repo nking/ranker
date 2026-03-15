@@ -1,0 +1,45 @@
+goal is to make a ranker for the recommender systems
+and MLOps pipelines for it.
+
+In choosing the LTR model, there are 3 basic approaches:
+(1) gradient boosting
+    - good for tabular data, very fast, very accurate
+    - cannot handle OOV, that is, cold starts
+    - lightGBM, use objective lambdarank
+    - xgboost, use objective rank:ndcg or rank:pairwise
+    - catboost, use loss function yetirank or pairlogit
+    - lightgbm and xgboost have Dask integrations for distributed training
+    - MMLSpark for lightgbm for distr training
+    - ray for distributed training
+(2) DNN listwise ranker
+  - TF-Ranking is deprecated
+  - Rax (JAx based ranking) is active
+(3) graph based listewise ranker
+    Graph Transformer (GAT) as graph contextualized listwise ranker:
+  - Jraphx + Flax NNX + Rax
+    - first:
+      GNN Encoder (JraphX): 
+      Processes the local graph (user + candidates) to capture 
+      structural relationships (e.g., "This movie is similar to 3 others you liked").
+      has support for GAT 
+    - then:
+      Listwise Interaction (Flax NNX): 
+      A small Transformer block that "compares" all candidates 
+      in the list simultaneously.
+    - then Ranking Loss (Rax): 
+      Optimizes the entire list order using a listwise objective 
+      like rax.softmax_loss.
+
+Note: Gemini was used in searching for ranking architectures
+and getting to the graph solution, but a few manual efforts 
+were needed to retrieve information to modernize the solution.
+
+For the MLOps pipelines, will use kubeflow for cloud agnositic
+and cpu compatibility along with
+- built on kubernetes
+- automated hyper-param tuning with katib
+- highly scalable, distributable architecture
+- capable of handling all AI lifecycles
+- support for management, security, role-based access
+
+
