@@ -39,7 +39,7 @@ Local testing:
       src/main/python
 
     using right click menu, mark the test tree directory:
-      src/test/python/movie_lens_retrieval
+      src/test/python/movie_lens_ranker
 
     then pycharm tests will correctly resolve paths.
 
