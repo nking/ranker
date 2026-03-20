@@ -1,6 +1,5 @@
 import os
 from typing import List
-import tensorflow as tf
 
 def get_kaggle() -> bool:
   cwd = os.getcwd()
@@ -17,7 +16,7 @@ def get_project_dir() -> str:
   while head and head != os.sep:
     head, tail = os.path.split(head)
     if tail:  # Add only if not an empty string (e.g., from root or multiple separators)
-      if tail == "retrieval":
+      if tail == "ranker":
         proj_dir = os.path.join(head, tail)
         break
   return proj_dir

@@ -21,6 +21,7 @@ marshmallow==3.26.2
 mdurl==0.1.2
 ml_dtypes==0.5.3
 more-itertools==10.8.0
+-e git+ssh://git@github.com/nking/ranker.git@656e639ae3b97efb2d2ffde1468635611d6cd162#egg=movie_lens_ranker
 msgpack==1.1.2
 mypy_extensions==1.1.0
 nest-asyncio==1.6.0
