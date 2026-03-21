@@ -27,9 +27,12 @@ instructions:
   install this project:
     pip install --editable .
   else you can find the required libraries in pyproject.toml
-  or setup.py
+  or setup.py or requirements.txt
 
   the unit tests show how to run the code.
+  The data are only present as DVC commits because some are
+  large files.  The files can be recreated following notes
+  in src/test/resources/README.txt
 
 Local testing:
 
@@ -48,6 +51,3 @@ Local testing:
     python and pytest can be used from the project's base
     directory
 
---------
-versions
-rax 0.4.0 was release jan 7, 2025 so might need jax v0.4.38

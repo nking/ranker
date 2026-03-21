@@ -8,7 +8,8 @@ setup(
   package_dir={'': 'src/main/python'},
   install_requires = [
     'rax==0.4.0', 'jax-ai-stack==2025.10.28', 'jraphx==0.0.4',
-    'jraph @ git+https://github.com/deepmind/jraph.git@51f5990104f7374492f8f3ea1cbc47feb411c69c'
+    'jraph @ git+https://github.com/deepmind/jraph.git@51f5990104f7374492f8f3ea1cbc47feb411c69c',
+    'dvc==3.67.0'
   ],
   extras_require={"test": ["pytest"]},
   classifiers=[ 'Natural Language :: English',
