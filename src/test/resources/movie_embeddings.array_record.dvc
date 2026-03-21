@@ -1,0 +1,5 @@
+outs:
+- md5: 3fc17f26b5978ff9982bb7b626876ac2
+  size: 917504
+  hash: md5
+  path: movie_embeddings.array_record
