@@ -5,3 +5,5 @@
 /ratings_part_1.array_record
 /ratings_part_2.array_record
 /movie_ids.array_record
+/movie_embeddings.array_record
+/user_embeddings.array_record
