@@ -1,5 +1,5 @@
 outs:
-- md5: 807549937248d7e0ffc13d27f497a4a0
-  size: 10158080
+- md5: 70a25d90f7c05fed4e91b7231dd74354
+  size: 851968
   hash: md5
   path: user_recommendations_disliked_in_train.array_record

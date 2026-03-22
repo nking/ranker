@@ -1,5 +1,5 @@
 outs:
-- md5: ed1fa6297cbf67087fc3ee3e4f6c095f
-  size: 86900736
+- md5: 1aabb75d7a182506717c0e93b9a0d583
+  size: 3342336
   hash: md5
   path: user_recommendations_without_train_val.array_record
