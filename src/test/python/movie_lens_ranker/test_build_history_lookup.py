@@ -22,7 +22,7 @@ class TestRanker(unittest.TestCase):
     def test_build_history_lookup(self):
         batch_size = 1024
         #expecting Dict[int, Tuple[list, list, list]]
-        history_dict = build_history_lookup(self.ratings_train_uri,
+        history_dict: Dict[int, Tuple[list, list, list]] = build_history_lookup(self.ratings_train_uri,
             batch_size=batch_size)
         self.assertTrue(isinstance(history_dict, dict))
         n_hist = len(history_dict) #number of users who rated movies in train dataset

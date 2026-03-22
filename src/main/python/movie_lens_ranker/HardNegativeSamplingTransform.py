@@ -32,7 +32,7 @@ def _read_user_recommendations_array_record(user_uri:str, batch_size:int=1048) -
         reader = array_record_module.ArrayRecordReader(user_uri)
         n_records = reader.num_records()
         for i in range(0, n_records, batch_size):
-            stop = min(i + batch_size, n_records - 1)
+            stop = min(i + batch_size, n_records)
             batch_bytes = reader.read([x for x in range(i, stop)])
             batch = [msgpack.unpackb(b, use_list=False) for b in batch_bytes]  # list of tuples user_id, movie_ids
             for record in batch:
@@ -57,7 +57,7 @@ def read_movies_array_record(movies_uri:str, batch_size:int=1048) -> List[int]:
         reader = array_record_module.ArrayRecordReader(movies_uri)
         n_records = reader.num_records()
         for i in range(0, n_records, batch_size):
-            stop = min(i + batch_size, n_records - 1)
+            stop = min(i + batch_size, n_records)
             batch_bytes = reader.read([x for x in range(i, stop)])
             batch = [msgpack.unpackb(b, use_list=False) for b in batch_bytes]  #list of ids
             movie_ids.extend(batch)
@@ -84,7 +84,7 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
     class to map a user's local history to the same local history enriched with negative sampling
     as "candidate_ids" and "labels"
     """
-    def __init__(self, history_lookup: Dict[int, Tuple[np.ndarray, np.ndarray, np.ndarray]],
+    def __init__(self, history_lookup: Dict[int, Tuple[list, list, list]],
         all_movie_ids:List[int], exact_negatives_dict:Dict[int, Set[int]],
         unseen_recommendations:Dict[int, Set[int]], num_candidates=20,
         seed:int = 0):
@@ -104,64 +104,69 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
         self.num_candidates = num_candidates
         self.rng = np.random.default_rng(seed)
 
-    def map(self, record:Dict[str, Union[int, np.ndarray]]) -> Dict[str, Union[int, np.ndarray]]:
+    def map(self, batch:List[Dict[str, Union[int, List[int]]]]) -> List[Dict[str, Union[int, List[int], np.ndarray]]]:
         """
         given the current user history, add a hard negative mining list as "column_ids" and "labels"
-        :param record: dictionary containing
+        :param batch: list of dictionaries containing
             'user_id':int
             'movie_id':int,
             'rating': int,
             'timestamp': int,
-            "history_movie_ids": np.ndarray,
-            "history_ratings": np.ndarray,
+            "history_movie_ids": list,
+            "history_ratings": list,
             "history_length": int
-        :return: dictionary containing
+        :return: list of dictionaries containing
             'user_id':int
             'movie_id':int,
             'rating': int,
             'timestamp': int,
-            "history_movie_ids": np.ndarray,
-            "history_ratings": np.ndarray,
+            "history_movie_ids": list,
+            "history_ratings": list,
             "history_length": int
             "candidate_ids": np.ndarray,
             "labels": np.ndarray
         """
-        user_id = record["user_id"]
-        pos_id = record["movie_id"]
-        
-        # Get Hard Negatives (from Retrieval model)
-        hard_negs = self.exact_negatives_dict.get(user_id, [])
-        hard_negs = [m for m in hard_negs if m != pos_id]
-        
-        n_approx = self.num_candidates//2
-        n_hard = self.num_candidates - 1 - n_approx
-        if len(hard_negs) < n_hard:
-            n_hard = len(hard_negs)
-            n_approx = self.num_candidates - 1 - n_hard
-        elif len(hard_negs) > n_hard:
-            hard_negs = self.rng.choice(hard_negs, size=n_hard, replace=False)
-
-        #choose approx negatives from "all movies - pos_id - has_seen - was recommended"
-        subtr = set(pos_id)
-        if self.history_lookup.get(user_id):
-            #tuple (timestamps, movie_ids, ratings)
-            subtr.add(self.history_lookup.get(user_id)[1])
-        if self.unseen_recommendations.get(user_id):
-            subtr.add(self.unseen_recommendations.get(user_id))
-        approx_negs = self.rng.choice(self.all_movie_ids, size=n_approx, replace=False)
-        
-        candidate_ids = np.array([pos_id] + hard_negs + approx_negs, dtype=np.int32)
-        
-        # Create Labels (1.0 for the first one, 0.0 for the rest)
-        labels = np.zeros((self.num_candidates,), dtype=np.float32)
-        labels[0] = 1.0
-        
-        # Shuffle the candidates and labels together!
-        # (Otherwise the model learns "index 0 is always the winner")
-        p = np.random.permutation(self.num_candidates)
-        
-        return {
-            **record,
-            "candidate_ids": candidate_ids[p],
-            "labels": labels[p]
-        }
+        results = []
+        for record in batch:
+            user_id = record["user_id"]
+            pos_id = record["movie_id"]
+            
+            # Get Hard Negatives (from Retrieval model)
+            hard_negs = self.exact_negatives_dict.get(user_id, [])
+            hard_negs = [m for m in hard_negs if m != pos_id]
+            
+            n_approx = self.num_candidates//2
+            n_hard = self.num_candidates - 1 - n_approx
+            if len(hard_negs) < n_hard:
+                n_hard = len(hard_negs)
+                n_approx = self.num_candidates - 1 - n_hard
+            elif len(hard_negs) > n_hard:
+                hard_negs = self.rng.choice(hard_negs, size=n_hard, replace=False).tolist()
+    
+            #choose approx negatives from "all movies - pos_id - has_seen - was recommended"
+            subtr = set([pos_id])
+            if self.history_lookup.get(user_id):
+                #tuple (timestamps, movie_ids, ratings)
+                subtr.update(self.history_lookup.get(user_id)[1])
+            if self.unseen_recommendations.get(user_id):
+                subtr.update(self.unseen_recommendations.get(user_id))
+            
+            approx_negs = self.rng.choice(self.all_movie_ids, size=n_approx + len(subtr), replace=False)
+            approx_negs = [int(x) for x in approx_negs if x not in subtr]
+            
+            candidate_ids = np.array([pos_id] + hard_negs + approx_negs[:n_approx], dtype=np.int32)
+            
+            # Create Labels (1.0 for the first one, 0.0 for the rest)
+            labels = np.zeros((self.num_candidates,), dtype=np.float32)
+            labels[0] = 1.0
+            
+            # Shuffle the candidates and labels together!
+            # (Otherwise the model learns "index 0 is always the winner")
+            p = np.random.permutation(self.num_candidates)
+            
+            results.append({
+                **record,
+                "candidate_ids": candidate_ids[p],
+                "labels": labels[p]
+            })
+        return results

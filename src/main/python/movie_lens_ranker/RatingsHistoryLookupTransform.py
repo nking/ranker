@@ -22,7 +22,7 @@ def build_history_lookup(ratings_uri:str,
         reader = array_record_module.ArrayRecordReader(ratings_uri)
         n_records = reader.num_records()
         for i in range(0, n_records, batch_size):
-            stop = min(i + batch_size, n_records - 1)
+            stop = min(i + batch_size, n_records)
             batch_bytes = reader.read([x for x in range(i, stop)])
             batch = [msgpack.unpackb(b, use_list=False) for b in batch_bytes]  # list of tuples
             for record in batch:
@@ -57,7 +57,7 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
         self.history_lookup = history_lookup
         self.max_history = max_history
     
-    def map(self, batch: Tuple[int, int, int, int]) -> List[Dict[str, Union[int, List]]]:
+    def map(self, batch: List[Tuple[int, int, int, int]]) -> List[Dict[str, Union[int, List]]]:
         """
         map the input train record dictionary to a dictionary containing it and padded history entries
         :param batch: a list, that is batch, of tuples containing the user_id, movie_id, rating, and timestamp
@@ -66,8 +66,8 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
             'movie_id':int,
             'rating': int,
             'timestamp': int,
-            "history_movie_ids": np.ndarray,
-            "history_ratings": np.ndarray,
+            "history_movie_ids": list,
+            "history_ratings": list,
             "history_length": int
         """
         results = []
