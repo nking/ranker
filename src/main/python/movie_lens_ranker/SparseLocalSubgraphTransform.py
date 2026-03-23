@@ -39,9 +39,6 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
         for record in batch:
             n_real_history = record["history_length"]
             n_candidates = len(record["candidate_ids"])
-            #max_hist = len(record["history_movie_ids"])
-            
-            # Define Node Counts
             total_nodes = 1 + n_real_history + n_candidates
             
             # Define Senders and Receivers (Edges)
@@ -49,28 +46,55 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
             # Edge: User (0) -> History (1..H)
             # then
             # Edge: User (0) -> Candidates (H+1..H+C)
-            senders = [0] * (n_real_history + n_candidates)
-            receivers = [i+1 for i in range(n_real_history + n_candidates)]
-            edge_features = [record["history_ratings"][i] for i in range(n_real_history)]
-            edge_features.extend([0] * n_candidates)
+            senders = []
+            receivers = []
+            edge_features = []
             
-            # 3. Construct the GraphsTuple
+            # History -> User (Inward)
+            # Senders: [1, 2, ... H], Receiver: [0, 0, ... 0]
+            for i in range(n_real_history):
+                senders.append(i + 1)  # History nodes
+                receivers.append(0)  # User node
+                edge_features.append(record["history_ratings"][i])
+            
+            # User -> Candidates (Outward)
+            # Sender: [0, 0, ... 0], Receivers: [H+1, ... H+C]
+            for i in range(n_candidates):
+                senders.append(0)  # User node
+                receivers.append(1 + n_real_history + i)  # Candidate nodes
+                edge_features.append(0)  # No rating for candidates
+            
+            node_ids = jnp.concatenate([
+                jnp.array([record["user_id"]]),
+                record["history_movie_ids"][:n_real_history],
+                record["candidate_ids"]
+            ])
+            
+            node_labels = jnp.concatenate([
+                jnp.array([0.0]),  # User (Type 0)
+                jnp.zeros(n_real_history),  # History (Type 1)
+                record["labels"]
+                # Candidates (Type 2) - should be size n_candidates
+            ])
+            
+            # Node attributes must match total_nodes
+            assert len(node_ids) == len(node_labels) == total_nodes
+            # Edge attributes must match the number of connections
+            assert len(senders) == len(receivers) == len(edge_features)
+            
+            #  Construct the GraphsTuple
             results.append(jraph.GraphsTuple(
                 nodes={
-                    "ids": np.concatenate([
-                        [record["user_id"]],
-                        record["history_movie_ids"][:n_real_history],
-                        record["candidate_ids"]
-                    ]),
-                    "type": np.array(
+                    "ids": node_ids,
+                    "label": node_labels,
+                    "type": jnp.array(
                         [0] + [1] * n_real_history + [2] * n_candidates)
-                    # 0=User, 1=Hist, 2=Cand
                 },
                 edges={"rating": jnp.array(edge_features)},
                 senders=jnp.array(senders),
                 receivers=jnp.array(receivers),
                 n_node=jnp.array([total_nodes]),
-                n_edge=jnp.array([len(edge_features)]),
+                n_edge=jnp.array([len(senders)]),
                 globals=None
             ))
         return results

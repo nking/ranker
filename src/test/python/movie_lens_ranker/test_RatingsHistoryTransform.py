@@ -4,6 +4,7 @@ from array_record.python import array_record_module
 from helper import *
 
 from movie_lens_ranker.RatingsHistoryLookupTransform import *
+from movie_lens_ranker.data_loading import *
 
 class TestRanker(unittest.TestCase):
     def setUp(self):

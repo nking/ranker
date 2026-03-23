@@ -1,4 +1,5 @@
 # ranker
+
 project to create a ranker model for the mid-tier
 in a 3 part recommendation system.  part 1 is
 the Two-tower bin-encoder + Scann for retrieval.

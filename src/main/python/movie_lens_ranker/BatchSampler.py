@@ -3,14 +3,13 @@ from typing import Optional
 import grain
 import numpy as np
 
-
 class BatchSampler(grain.samplers.SequentialSampler):
     """
     a sequential BatchSampler which facilitates batch sequential reads of
     the random access array_record for use with DataLoader.
     """
     def __init__(self, num_records: int, batch_size: int, shuffle:bool=False, seed:Optional[int]=None,
-            shard_options: grain.python.ShardOptions = grain.python.NoSharding()):
+            shard_options: grain.sharding.ShardOptions = grain.sharding.NoSharding()):
         super().__init__(num_records, shard_options, seed)
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -28,7 +27,7 @@ class BatchSampler(grain.samplers.SequentialSampler):
         )
     
     # override
-    def __getitem__(self, index: int) -> grain.python.RecordMetadata:
+    def __getitem__(self, index: int) -> grain.RecordMetadata:
         if index < 0 or index >= self._max_index:
             raise IndexError(
                 f"RecordMetadata object index is out of bounds; Got index {index},"
@@ -41,5 +40,5 @@ class BatchSampler(grain.samplers.SequentialSampler):
                 j = self.rng.integers(0, i) #inclusive so is [0,i]
                 if i != j:
                     indices[i], indices[j] = indices[j], indices[i]
-        return grain.python.RecordMetadata(index=[index, end],
+        return grain.RecordMetadata(index=[index, end],
             record_key=indices, rng=None)
