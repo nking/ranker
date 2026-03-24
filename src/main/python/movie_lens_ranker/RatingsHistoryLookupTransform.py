@@ -1,17 +1,19 @@
 from typing import Tuple, Dict, List, Union
 import grain.python as pgrain
-from collections import defaultdict
 import numpy as np
-import msgpack
 from array_record.python import array_record_module
 
 class RatingsHistoryLookupTransform(pgrain.MapTransform):
-    def __init__(self, history_lookup: Dict[int, Tuple[list, list, list]], max_history: int = 20):
+    def __init__(self, history_lookup: Dict[int, Tuple[list, list, list]],
+            user_id_fwd_dict:Dict[int,int], movie_id_fwd_dict:Dict[int,int],
+            max_history: int = 20):
         """
         history_lookup: the results of method build_history_lookup
         max_history: Fixed size for the history window (crucial for JAX).
         """
         self.history_lookup = history_lookup
+        self.user_id_fwd_dict = user_id_fwd_dict
+        self.movie_id_fwd_dict = movie_id_fwd_dict
         self.max_history = max_history
     
     def map(self, batch: List[Tuple[int, int, int, int]]) -> List[Dict[str, Union[int, List]]]:
@@ -30,7 +32,7 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
         results = []
         for record in batch:
         
-            user_id = record[0]
+            user_id = self.user_id_fwd_dict[record[0]]
             current_ts = record[3]
             
             # O(1) Lookup: Get this user's full history arrays
@@ -57,8 +59,8 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
             
             # Return updated record with the "Context" attached
             results.append({
-                'user_id': record[0],
-                'movie_id': record[1],
+                'user_id': user_id,
+                'movie_id': self.movie_id_fwd_dict[record[1]],
                 'rating': record[2],
                 'timestamp': record[3],
                 "history_movie_ids": recent_movies_history,

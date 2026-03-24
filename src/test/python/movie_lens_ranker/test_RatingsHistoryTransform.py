@@ -15,13 +15,26 @@ class TestRanker(unittest.TestCase):
         self.ratings_test_uri = os.path.join(get_project_dir(),
             "src/test/resources/ratings_part_2.array_record")
         
+        self.movie_embeddings_uri = os.path.join(get_project_dir(),
+            "src/test/resources/movie_embeddings.array_record")
+        
+        self.user_embeddings_uri = os.path.join(get_project_dir(),
+            "src/test/resources/user_embeddings.array_record")
+        
+        self.user_id_fwd_dict, self.movie_id_fwd_dict, self.embeddings = read_embeddings(
+            user_embeddings_uri=self.user_embeddings_uri,
+            movie_embeddings_uri=self.movie_embeddings_uri,
+            batch_size=1024)
+        
     def test_RatingsHistoryTransform(self):
         batch_size = 1024
         max_history = 2000 #a number large enough to test that padding works
-        history_dict : Dict[int, Tuple[List, List, List]] = build_history_lookup(self.ratings_train_uri,
+        history_dict, max_history__ = build_history_lookup(self.ratings_train_uri,
+            self.user_id_fwd_dict, self.movie_id_fwd_dict,
             batch_size=batch_size)
         
         transform = RatingsHistoryLookupTransform(history_lookup=history_dict,
+            user_id_fwd_dict=self.user_id_fwd_dict, movie_id_fwd_dict=self.movie_id_fwd_dict,
             max_history=max_history)
             
         '''

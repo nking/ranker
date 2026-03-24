@@ -61,11 +61,19 @@ class TestRanker(unittest.TestCase):
         batch_size = 1024
         worker_count = max(1, os.cpu_count() - 1)
         
+        user_id_fwd_dict, movie_id_fwd_dict, embeddings = read_embeddings(
+            user_embeddings_uri=self.user_embeddings_uri,
+            movie_embeddings_uri=self.movie_embeddings_uri,
+            batch_size=1024)
+        
         #each worker will have its own copy of these:
-        history_dict = build_history_lookup(self.ratings_train_uri, batch_size=batch_size)
-        user_exact_negatives = read_user_exact_negatives(self.exact_hard_negatives_uri, batch_size=batch_size)
-        all_movie_ids = read_movies_array_record(self.movie_ids_uri, batch_size=batch_size)
-        unseen_recommendations = read_user_unseen_recommendations(self.unseen_recommendations_uri, batch_size=batch_size)
+        history_dict, max_history__ = build_history_lookup(self.ratings_train_uri, user_id_fwd_dict,
+            movie_id_fwd_dict, batch_size=batch_size)
+        user_exact_negatives = read_user_exact_negatives(self.exact_hard_negatives_uri,
+            user_id_fwd_dict, movie_id_fwd_dict, batch_size=batch_size)
+        all_movie_ids = read_movies_array_record(self.movie_ids_uri, movie_id_fwd_dict, batch_size=batch_size)
+        unseen_recommendations = read_user_unseen_recommendations(self.unseen_recommendations_uri,
+            user_id_fwd_dict, movie_id_fwd_dict, batch_size=batch_size)
         
         batch_size = 2
         datasource = RandomAccessArrayRecordDataSource(self.ratings_train_uri)
@@ -79,7 +87,9 @@ class TestRanker(unittest.TestCase):
             sampler=ra_sampler,
             operations=[
                 #enrich the train records with local subgraphs:
-                RatingsHistoryLookupTransform(history_lookup=history_dict, max_history=max_history),
+                RatingsHistoryLookupTransform(history_lookup=history_dict,
+                    user_id_fwd_dict=user_id_fwd_dict,
+                    movie_id_fwd_dict=movie_id_fwd_dict, max_history = max_history),
                 HardNegativeSamplingTransform(history_lookup=history_dict, all_movie_ids=all_movie_ids,
                     exact_negatives_dict=user_exact_negatives,
                     unseen_recommendations=unseen_recommendations, num_candidates=num_candidates),

@@ -39,28 +39,39 @@ class TestRanker(unittest.TestCase):
         self.unseen_recommendations_uri = os.path.join(
             get_project_dir(),
             "src/test/resources/user_recommendations_without_train_val.array_record")
+        
+        self.user_id_fwd_dict, self.movie_id_fwd_dict, self.embeddings = read_embeddings(
+            user_embeddings_uri=self.user_embeddings_uri,
+            movie_embeddings_uri=self.movie_embeddings_uri,
+            batch_size=1024)
     
     def test_HardNegativesTransform(self):
         batch_size = 1024
         max_history = 20
         num_candidates = 20
         
-        history_dict : Dict[int, Tuple[List, List, List]] = build_history_lookup(self.ratings_train_uri,
+        history_dict, max_history__ = build_history_lookup(self.ratings_train_uri,
+            self.user_id_fwd_dict, self.movie_id_fwd_dict,
             batch_size=batch_size)
         all_movie_ids: List[int] = read_movies_array_record(
-            self.movie_ids_uri, batch_size=batch_size)
+            self.movie_ids_uri, self.movie_id_fwd_dict, batch_size=batch_size)
         exact_negatives_dict: Dict[
             int, Set[int]] = read_user_exact_negatives(
             self.exact_hard_negatives_uri,
+            self.user_id_fwd_dict, self.movie_id_fwd_dict,
             batch_size)
         unseen_recommendations: Dict[
             int, Set[int]] = read_user_unseen_recommendations(
-            self.unseen_recommendations_uri, batch_size=batch_size)
+            self.unseen_recommendations_uri,
+            self.user_id_fwd_dict, self.movie_id_fwd_dict,
+            batch_size=batch_size)
         
         batch = [(1875, 1101, 4, 975768800), (635, 2068, 4, 975768823),
             (635, 2357, 4, 975768823)]
         
-        transform1 = RatingsHistoryLookupTransform(history_lookup=history_dict,
+        transform1 = RatingsHistoryLookupTransform(
+            history_dict,
+            self.user_id_fwd_dict, self.movie_id_fwd_dict,
             max_history=max_history)
             
         result1:List[Dict[str, Union[int, List]]] = transform1.map(batch)

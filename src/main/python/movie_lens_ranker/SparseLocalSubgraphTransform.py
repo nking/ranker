@@ -66,14 +66,14 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
             
             node_ids = jnp.concatenate([
                 jnp.array([record["user_id"]]),
-                record["history_movie_ids"][:n_real_history],
-                record["candidate_ids"]
+                jnp.array(record["history_movie_ids"][:n_real_history]),
+                jnp.array(record["candidate_ids"])
             ])
             
             node_labels = jnp.concatenate([
                 jnp.array([0.0]),  # User (Type 0)
                 jnp.zeros(n_real_history),  # History (Type 1)
-                record["labels"]
+                record["labels"]#numpy array
                 # Candidates (Type 2) - should be size n_candidates
             ])
             
