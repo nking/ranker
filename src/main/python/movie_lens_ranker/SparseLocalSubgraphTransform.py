@@ -82,13 +82,20 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
             # Edge attributes must match the number of connections
             assert len(senders) == len(receivers) == len(edge_features)
             
+            # Create a mask for the nodes
+            # User (False), History (False), Candidates (True)
+            # This identifies which nodes are candidates in the local graph
+            node_is_candidate = jnp.array(
+                [False] + [False] * n_real_history + [True] * n_candidates)
+            
             #  Construct the GraphsTuple
             results.append(jraph.GraphsTuple(
                 nodes={
                     "ids": node_ids,
                     "label": node_labels,
                     "type": jnp.array(
-                        [0] + [1] * n_real_history + [2] * n_candidates)
+                        [0] + [1] * n_real_history + [2] * n_candidates),
+                    "candidate_mask": node_is_candidate
                 },
                 edges={"rating": jnp.array(edge_features)},
                 senders=jnp.array(senders),

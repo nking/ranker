@@ -30,7 +30,7 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
         self.all_movie_ids = all_movie_ids #to o use in approx hard negatives
         self.unseen_recommendations = unseen_recommendations # to use in approx hard negatives
         self.num_candidates = num_candidates
-        self.rng = np.random.default_rng(seed)
+        self.seed = seed
 
     def map(self, batch:List[Dict[str, Union[int, List[int]]]]) -> List[Dict[str, Union[int, List[int], np.ndarray]]]:
         """
@@ -59,6 +59,8 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
             user_id = record["user_id"]
             pos_id = record["movie_id"]
             
+            per_record_rng = np.random.default_rng(self.seed + user_id)
+            
             # Get Hard Negatives (from Retrieval model)
             hard_negs = self.exact_negatives_dict.get(user_id, [])
             hard_negs = [m for m in hard_negs if m != pos_id]
@@ -69,17 +71,17 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
                 n_hard = len(hard_negs)
                 n_approx = self.num_candidates - 1 - n_hard
             elif len(hard_negs) > n_hard:
-                hard_negs = self.rng.choice(hard_negs, size=n_hard, replace=False).tolist()
+                hard_negs = per_record_rng.choice(hard_negs, size=n_hard, replace=False).tolist()
     
             #choose approx negatives from "all movies - pos_id - has_seen - was recommended"
-            subtr = set([pos_id])
+            subtr = {pos_id}
             if self.history_lookup.get(user_id):
                 #tuple (timestamps, movie_ids, ratings)
                 subtr.update(self.history_lookup.get(user_id)[1])
             if self.unseen_recommendations.get(user_id):
                 subtr.update(self.unseen_recommendations.get(user_id))
             
-            approx_negs = self.rng.choice(self.all_movie_ids, size=n_approx + len(subtr), replace=False)
+            approx_negs = per_record_rng.choice(self.all_movie_ids, size=n_approx + len(subtr), replace=False)
             approx_negs = [int(x) for x in approx_negs if x not in subtr]
             
             candidate_ids = np.array([pos_id] + hard_negs + approx_negs[:n_approx], dtype=np.int32)

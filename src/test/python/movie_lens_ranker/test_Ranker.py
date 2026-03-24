@@ -15,6 +15,8 @@ from array_record.python import array_record_module
 import jraph
 import jax
 import jax.numpy as jnp
+from flax import nnx
+
 from helper import *
 from movie_lens_ranker.BatchSampler import BatchSampler
 from movie_lens_ranker.RandomAccessArrayRecordDataSource import *
@@ -23,6 +25,8 @@ from movie_lens_ranker.HardNegativeSamplingTransform import *
 from movie_lens_ranker.SparseLocalSubgraphTransform import \
     SparseLocalSubgraphTransform
 from movie_lens_ranker.data_loading import *
+from movie_lens_ranker.model import GraphRanker
+
 
 class TestRanker(unittest.TestCase):
     def setUp(self):
@@ -52,9 +56,6 @@ class TestRanker(unittest.TestCase):
         
     def test_load_ratings(self):
         
-       
-        # ====   how to use all of that ======
-        
         max_history = 20
         num_candidates = 20
         batch_size = 1024
@@ -68,12 +69,12 @@ class TestRanker(unittest.TestCase):
         
         batch_size = 2
         datasource = RandomAccessArrayRecordDataSource(self.ratings_train_uri)
-        shard_opts = grain.python.ShardOptions(shard_index=0,shard_count=1)
+        shard_opts = grain.sharding.ShardOptions(shard_index=0,shard_count=1)
         ra_sampler = BatchSampler(num_records=datasource.__len__(),
             batch_size=batch_size, shuffle=True, shard_options=shard_opts)
         
         #NOTE that history_dict, etc are passed by reference to the MapTransforms
-        train_dataloader = grain.python.DataLoader(
+        train_dataloader = grain.DataLoader(
             data_source=datasource,
             sampler=ra_sampler,
             operations=[
@@ -87,43 +88,29 @@ class TestRanker(unittest.TestCase):
             #worker_count=worker_count,
             shard_options=shard_opts
         )
-        
         train_batch : List[jraph.GraphsTuple] = next(iter(train_dataloader))
+        train_batch : List[jraph.GraphsTuple] = next(iter(train_dataloader))
+
+        '''
+        in_dim = ?
+        out_dim = ?
+        hidden_dim = 128?
+        num_layers = 2
+        num_heads=4
+        dropout_rate=0.1
+        rngs = nnx.Rngs(0)
+        
+        model = GraphRanker(user_embeds=read_embeddings(self.user_embeddings_uri),
+            movie_embeds=read_embeddings(self.movie_embeddings_uri),
+            in_features=in_dim, hidden_features=hidden_dim, num_layers = num_layers,
+            out_features=out_dim, heads=num_heads, dropout_rate=dropout_rate, rngs=rngs):
+        
+        optimizer = nnx.Optimizer(model, optax.adam(1e-3),
+            wrt=nnx.Param)
+        
        
         '''
-        def train_step(model: nnx.Module, optimizer: nnx.Optimizer,
-                batch: jax.tree_util.tree_map[jnp.array, gn_graph.GraphsTuple]
-        ):
-            # Convert numpy arrays to jax.Array on GPU
-            batch_tokens = jnp.array(batch["text"])
-            labels = jnp.array(batch["label"], dtype=jnp.int32)
-            
-            grad_fn = nnx.value_and_grad(compute_losses_and_logits,
-                has_aux=True)
-            (loss, logits), grads = grad_fn(model, batch_tokens, labels)
-            
-            optimizer.update(grads)  # In-place updates.
-            
-            return loss
-        
-        @nnx.jit
-        def eval_step(
-                model: nnx.Module, batch: dict[str, jax.Array],
-                eval_metrics: nnx.MultiMetric
-        ):
-            # Convert numpy arrays to jax.Array on GPU
-            batch_tokens = jnp.array(batch["text"])
-            labels = jnp.array(batch["label"], dtype=jnp.int32)
-            loss, logits = compute_losses_and_logits(model,
-                batch_tokens, labels)
-            
-            eval_metrics.update(
-                loss=loss,
-                logits=logits,
-                labels=labels,
-            )
-        '''
-
+    
         
     if __name__ == '__main__':
         unittest.main()

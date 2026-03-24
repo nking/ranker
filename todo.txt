@@ -1,0 +1,2 @@
+- install podman for container images
+- install minikube for a local mini kubernetes cluster

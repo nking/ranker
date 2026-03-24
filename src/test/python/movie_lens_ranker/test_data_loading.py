@@ -21,6 +21,9 @@ class TestRanker(unittest.TestCase):
         self.ratings_train_uri = os.path.join(get_project_dir(),
             "src/test/resources/ratings_part_1.array_record")
         
+        self.ratings_train_uri_tiny = os.path.join(get_project_dir(),
+            "src/test/resources/ratings_part_1_tiny.array_record")
+        
         self.ratings_test_uri = os.path.join(get_project_dir(),
             "src/test/resources/ratings_part_2.array_record")
         
@@ -119,7 +122,7 @@ class TestRanker(unittest.TestCase):
             count += 1
             break
         stop_time = time.perf_counter()
-        print(f'avg time to read {batch_size} source item (batched) = {(stop_time - start_time) / batch_size:.6f} sec')
+        print(f'avg time to read {batch_size} grain.MapDataset.source item (batched) = {(stop_time - start_time) / batch_size:.6f} sec')
         dataset = grain.MapDataset.source(ratings_train_data_source)
         dataset = dataset.map(lambda record: msgpack.unpackb(record, raw=False, use_list=False))
         count = 0
@@ -129,7 +132,7 @@ class TestRanker(unittest.TestCase):
             if count == batch_size:
                 break
         stop_time = time.perf_counter()
-        print(f'avg time to read {batch_size} source item (sequentially) = {(stop_time - start_time)/batch_size:.6f} sec')
+        print(f'avg time to read {batch_size} grain.MapDataset.source item (sequentially) = {(stop_time - start_time)/batch_size:.6f} sec')
         
         # ----------------
         datasource = RandomAccessArrayRecordDataSource[MovieRating](self.ratings_train_uri)
@@ -147,16 +150,21 @@ class TestRanker(unittest.TestCase):
         batch = datasource.__getitems__([x for x in range(100, 100 + batch_size)]) # is a list of tuples
         stop_time = time.perf_counter()
         print(f'avg time to read a RandomAccessArrayRecordDataSource item (batched) = {(stop_time - start_time) / batch_size:.6f} sec')
-        
         # -------------------------------------------
         
+        #batch_size=2
+        num_epochs = 1
+        #8 records
+        #datasource = RandomAccessArrayRecordDataSource(self.ratings_train_uri_tiny)
+        
         datasource = RandomAccessArrayRecordDataSource(self.ratings_train_uri)
-        shard_opts = grain.python.ShardOptions(shard_index=0,shard_count=1)
+
+        shard_opts = grain.sharding.ShardOptions(shard_index=0,shard_count=1)
         
         ra_sampler = BatchSampler(num_records=datasource.__len__(),
-            batch_size=batch_size, shuffle=True, shard_options=shard_opts)
+            batch_size=batch_size, shuffle=True, seed=0, num_epochs=num_epochs, shard_options=shard_opts)
        
-        dataloader0 = grain.python.DataLoader(
+        dataloader0 = grain.DataLoader(
             data_source=datasource,
             sampler=ra_sampler,
             operations=[
@@ -164,7 +172,7 @@ class TestRanker(unittest.TestCase):
                 #grain.python.BatchShuffle(seed=42, buffer_size=10000),
             ],
             #worker_count=1,
-            #worker_buffer_size=batch_size,
+            worker_buffer_size=0,
             shard_options=shard_opts,
             #read_options=grain.ReadOptions(num_threads=1, prefetch_buffer_size=0)
         )
@@ -177,7 +185,8 @@ class TestRanker(unittest.TestCase):
             if count == c:
                 break
         stop_time = time.perf_counter()
-        print(f'avg time to read a dataloader item (batched) = {(stop_time - start_time)/(c*batch_size):.6f} sec')
+        print(f'avg time to read a dataloader item (batched) = {(stop_time - start_time)/(count*batch_size):.6f} sec')
+        
     
     def test_build_history_lookup(self):
         batch_size = 1024

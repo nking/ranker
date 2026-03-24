@@ -3,21 +3,14 @@ from typing import Optional
 import grain
 import numpy as np
 
-class BatchSampler(grain.samplers.SequentialSampler):
-    """
-    a sequential BatchSampler which facilitates batch sequential reads of
-    the random access array_record for use with DataLoader.
-    """
-    def __init__(self, num_records: int, batch_size: int, shuffle:bool=False, seed:Optional[int]=None,
+class BatchSampler(grain.samplers.IndexSampler):
+    def __init__(self, num_records: int, num_epochs:int, batch_size: int, shuffle:bool=False, seed:int=0,
             shard_options: grain.sharding.ShardOptions = grain.sharding.NoSharding()):
-        super().__init__(num_records, shard_options, seed)
+        super().__init__(num_records=num_records, shard_options=shard_options,
+            shuffle=shuffle, seed=seed, num_epochs=num_epochs)
         self.batch_size = batch_size
-        self.shuffle = shuffle
-        if self.shuffle:
-            if seed is None:
-                seed = 0
-            self.rng = np.random.default_rng(seed)
-    
+        self.num_batches = self._num_records // batch_size
+        
     # override
     def __repr__(self) -> str:
         return (
@@ -28,17 +21,24 @@ class BatchSampler(grain.samplers.SequentialSampler):
     
     # override
     def __getitem__(self, index: int) -> grain.RecordMetadata:
-        if index < 0 or index >= self._max_index:
-            raise IndexError(
-                f"RecordMetadata object index is out of bounds; Got index {index},"
-                f" allowed indices should be in [0, {self._max_index}]"
-            )
-        end = min(index + self.batch_size, self._max_index)
-        indices = [x for x in range(index, end)]
-        if self.shuffle:
-            for i in range(len(indices)-1, 0, -1):
-                j = self.rng.integers(0, i) #inclusive so is [0,i]
-                if i != j:
-                    indices[i], indices[j] = indices[j], indices[i]
-        return grain.RecordMetadata(index=[index, end],
-            record_key=indices, rng=None)
+        epoch = index // self.num_batches
+        batch_in_epoch = index % self.num_batches
+        #ensure check-pointing succeeds:
+        pair_rng = np.random.default_rng(self._seed + epoch + batch_in_epoch)
+        
+        epoch_rng = np.random.default_rng(self._seed + epoch)
+        permutation = epoch_rng.permutation(self.num_batches)
+        shuffled_block_idx = permutation[batch_in_epoch]
+        
+        start = shuffled_block_idx * self.batch_size
+        stop = min(start + self.batch_size, self._num_records)
+        indices = np.arange(start, stop)
+        
+        if self._shuffle:
+            pair_rng.shuffle(indices)
+            
+        return grain.RecordMetadata(
+            index=index,
+            record_key=indices.tolist(),
+            rng=None # We handle RNG manually for reproducibility
+        )

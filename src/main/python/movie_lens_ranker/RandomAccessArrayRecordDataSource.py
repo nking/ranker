@@ -88,7 +88,8 @@ class RandomAccessArrayRecordDataSource(
         """
         #TODO: replace with vectorized read if one becomes available
         batch_bytes = self._ensure_reader().read(indices)
-        return [msgpack.unpackb(b, use_list=False) for b in batch_bytes] # list of dictionaries
+        b = [msgpack.unpackb(b, use_list=False) for b in batch_bytes] # list of dictionaries
+        return b
     
     def __len__(self) -> int:
         return self._ensure_reader().num_records()
