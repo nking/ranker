@@ -1,6 +1,9 @@
 goal is to make a ranker for the recommender systems
 and MLOps pipelines for it.
 
+In choosing data loading framework:
+(1) Google's grain is the tool of choice for the Jax AI Stack.
+
 In choosing the LTR model, there are 3 basic approaches:
 (1) gradient boosting
     - good for tabular data, very fast, very accurate
@@ -18,10 +21,9 @@ In choosing the LTR model, there are 3 basic approaches:
     Graph Transformer (GAT) as graph contextualized listwise ranker:
   - Jraphx + Flax NNX + Rax
     - first:
-      GNN Encoder (JraphX): 
+      GAT2 GNN Encoder (JraphX): 
       Processes the local graph (user + candidates) to capture 
       structural relationships (e.g., "This movie is similar to 3 others you liked").
-      has support for GAT 
     - then:
       Listwise Interaction (Flax NNX): 
       A small Transformer block that "compares" all candidates 
@@ -29,6 +31,57 @@ In choosing the LTR model, there are 3 basic approaches:
     - then Ranking Loss (Rax): 
       Optimizes the entire list order using a listwise objective 
       like rax.softmax_loss.
+    - handles OOV, is fully inductive
+
+Test, model evaluation Metrics:
+- listwise ranking metrics
+  NDCG@k, precision@k, recall@k, f1sore@k, MRR@k
+
+hyper-parameter tuning:
+- OSS Vizier
+- Optuna
+- Ray Tune
+
+In choosing an MLOps pipeline:
+- needs to be compatible with Jax AI Stack, cloud compatible
+  and agnostic where possible.
+  - will implement a kubeflow pipeline
+
+In choosing the model serialization and serving:
+- Orbax for jax checkpointing and serialization
+- Neptune Serving Engine compatibility
+
+Monitoring:
+- system performance monitoring:
+  - Xprof tensorboard profiler
+    - visibilitiy into XLA computation graphs
+    - high level optimizer operations
+    - memory usage on TPUs and GPUs
+  - Perfetto
+  - prometheus and Grafana
+- ML observability and Drift:
+  - Arize Phoenix 
+    clusters the embeddings using UMAP or HDBScan 
+    to look for drift
+    - jax compatible
+  - DeepEval or Confident AI
+    - runs online evaluations to make sure that a common
+      failure like recommending the same 5 movies to all
+      users does not occur
+  - Alibi Detect
+    - online drift detection of attention weights
+
+GAT metrics to monitor outside of the listwise ranking metrics:
+- attention entropy
+  uniform distribution is not informative, but a dirac delta
+  function is too focused
+- edge density drift
+  - monitoring sudden changes in user to movie interactions
+- in-degree distributions
+  - monitoring for GAT unable to recommend tail features due
+    to a few movies dominating the mode
+- node homophily
+  - whether similar users are still connecting to similar movies
 
 Note: Gemini was used in searching for ranking architectures
 and getting to the graph solution, but a few manual efforts 
@@ -42,4 +95,15 @@ and cpu compatibility along with
 - capable of handling all AI lifecycles
 - support for management, security, role-based access
 
+-------
+in training model:
+- if have memory problems:
+  - node count is high:  consider neighbor sampling or cluster-GCN
+  - edge count is high: consider edge dropout or subgraph sampling
+  - feature count is obtrusively high: consider dim reduction in
+                                       pre-processing stage or
+                                       bottleneck layers
+  - multihead attention taking up large amount of memory:
+    consider reducing the number of heads or using checkpointing
+    with jax.checkpoint
 

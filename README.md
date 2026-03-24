@@ -1,13 +1,13 @@
 # ranker
 
 project to create a ranker model for the mid-tier
-in a 3 part recommendation system.  part 1 is
-the Two-tower bin-encoder + Scann for retrieval.
-part 2 is the ranker in this project.
-part 3 is the re-ranker.
+in a 3 part recommendation system.  Part 1 is
+the Two-tower bi-encoder + Scann for retrieval.
+part 2 is the ranker (list-wise cross-encoder) in this project.
+part 3 is the re-ranker (fine-tuned pretrained list-wise cross-encoder).
 
 this project will create a ranker from
-Jraph + Rax
+the Jax AI Stack + Rax.
 It will use a kubeflow pipeline for an MlOps pipeline
 
 part 1 can be found at:
@@ -52,3 +52,16 @@ Local testing:
     python and pytest can be used from the project's base
     directory
 
+--------------------------------------------------
+some details about the model
+
+- base layer an instance of jraphx.nn.GATv2Conv
+  which is the raphx implementation of the
+  Brody, Alon, Yahav "How Attentive are Graph Attention Netowrokd"
+  model called "Universal Graph Attention".
+  - has dynamic attention that is dependent upon the query.
+  - complexity is O(V*F + E*F) where
+    V is number of nodes, E is number of edges and F is number of
+    features.
+  - e(h_i, h_j) = a^T * leaky_relu(W * (h_i concat h_j))
+    where a is the attention vector.
