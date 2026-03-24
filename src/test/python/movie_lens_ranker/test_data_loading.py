@@ -179,7 +179,7 @@ class TestDataLoading(unittest.TestCase):
         
         datasource = RandomAccessArrayRecordDataSource(self.ratings_train_uri)
 
-        shard_opts = grain.sharding.ShardOptions(shard_index=0,shard_count=1)
+        shard_opts = grain.ShardOptions(shard_index=0,shard_count=1)
         
         ra_sampler = BatchSampler(num_records=datasource.__len__(),
             batch_size=batch_size, shuffle=True, seed=0, num_epochs=num_epochs, shard_options=shard_opts)
