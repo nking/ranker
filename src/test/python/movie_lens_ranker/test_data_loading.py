@@ -8,9 +8,10 @@ from movie_lens_ranker.BatchSampler import BatchSampler
 from movie_lens_ranker.RandomAccessArrayRecordDataSource import *
 from movie_lens_ranker.data_loading import *
 import grain
-import grain.python as pgrain
 
-class TestRanker(unittest.TestCase):
+from movie_lens_ranker.data_loading import _read_embeddings
+
+class TestDataLoading(unittest.TestCase):
     def setUp(self):
         # each item is {'user_id':int, 'retrieved_ids':List[int]}
         self.exact_hard_negatives_uri = os.path.join(get_project_dir(),
@@ -41,17 +42,36 @@ class TestRanker(unittest.TestCase):
         
     def test_read_embeddings(self):
         
-        emb = read_embeddings(self.movie_embeddings_uri)
+        user_id_fwd_dict, emb = _read_embeddings(
+            self.user_embeddings_uri, batch_size=1024, offset=0)
         self.assertTrue(emb is not None)
-        min_key = min(emb.keys())
+        self.assertTrue(user_id_fwd_dict is not None)
+        self.assertEqual(6040, len(user_id_fwd_dict))
+        self.assertEqual(6040, len(emb))
+        min_key = min(user_id_fwd_dict.keys())
         self.assertTrue(isinstance(min_key, int))
-        self.assertTrue(isinstance(emb[min_key], list))
+        self.assertTrue(isinstance(emb, jnp.ndarray))
         
-        emb = read_embeddings(self.user_embeddings_uri)
+        movie_id_fwd_dict, emb = _read_embeddings(self.movie_embeddings_uri,
+            batch_size=1024, offset=len(user_id_fwd_dict))
         self.assertTrue(emb is not None)
-        min_key = min(emb.keys())
+        self.assertTrue(movie_id_fwd_dict is not None)
+        self.assertEqual(3883, len(movie_id_fwd_dict))
+        self.assertEqual(3883, len(emb))
+        min_key = min(movie_id_fwd_dict.keys())
         self.assertTrue(isinstance(min_key, int))
-        self.assertTrue(isinstance(emb[min_key], list))
+        self.assertTrue(isinstance(emb, jnp.ndarray))
+        
+        user_id_fwd_dict, movie_id_fwd_dict, embeddings = read_embeddings(
+            user_embeddings_uri=self.user_embeddings_uri,
+            movie_embeddings_uri=self.movie_embeddings_uri,
+            batch_size=1024)
+        self.assertTrue(isinstance(user_id_fwd_dict, dict))
+        self.assertTrue(isinstance(movie_id_fwd_dict, dict))
+        self.assertTrue(isinstance(embeddings, jnp.ndarray))
+        self.assertEqual(len(embeddings), 6040 + 3883)
+        self.assertEqual(3883, len(movie_id_fwd_dict))
+        self.assertEqual(6040, len(user_id_fwd_dict))
        
     def test_read_ratings_array_records(self):
         """
@@ -189,11 +209,15 @@ class TestRanker(unittest.TestCase):
         
     
     def test_build_history_lookup(self):
+        
+        user_id_fwd_dict, movie_id_fwd_dict, embeddings = read_embeddings(
+            user_embeddings_uri = self.user_embeddings_uri,
+            movie_embeddings_uri = self.movie_embeddings_uri, batch_size = 1024)
+        
         batch_size = 1024
         # expecting Dict[int, Tuple[list, list, list]]
-        history_dict: Dict[
-            int, Tuple[list, list, list]] = build_history_lookup(
-            self.ratings_train_uri,
+        history_dict, max_history = build_history_lookup(
+            self.ratings_train_uri, user_id_fwd_dict, movie_id_fwd_dict,
             batch_size=batch_size)
         self.assertTrue(isinstance(history_dict, dict))
         n_hist = len(
@@ -210,8 +234,13 @@ class TestRanker(unittest.TestCase):
     def test_read_array_records2(self):
         batch_size = 1024
         
+        user_id_fwd_dict, movie_id_fwd_dict, embeddings = read_embeddings(
+            user_embeddings_uri=self.user_embeddings_uri,
+            movie_embeddings_uri=self.movie_embeddings_uri,
+            batch_size=1024)
+        
         all_movie_ids: List[int] = read_movies_array_record(
-            self.movie_ids_uri, batch_size=batch_size)
+            self.movie_ids_uri, movie_id_fwd_dict, batch_size=batch_size)
         self.assertEqual(len(all_movie_ids), 3883)
         self.assertTrue(isinstance(all_movie_ids, list))
         self.assertTrue(isinstance(all_movie_ids[0], int))
@@ -219,6 +248,7 @@ class TestRanker(unittest.TestCase):
         exact_negatives_dict: Dict[
             int, Set[int]] = read_user_exact_negatives(
             self.exact_hard_negatives_uri,
+            user_id_fwd_dict, movie_id_fwd_dict,
             batch_size)
         self.assertTrue(isinstance(exact_negatives_dict, dict))
         min_user_id = min(exact_negatives_dict.keys())
@@ -228,7 +258,7 @@ class TestRanker(unittest.TestCase):
         
         unseen_recommendations: Dict[
             int, Set[int]] = read_user_unseen_recommendations(
-            self.unseen_recommendations_uri, batch_size=batch_size)
+            self.unseen_recommendations_uri, user_id_fwd_dict, movie_id_fwd_dict, batch_size=batch_size)
         self.assertTrue(isinstance(unseen_recommendations, dict))
         min_user_id = min(unseen_recommendations.keys())
         entry = unseen_recommendations[min_user_id]
