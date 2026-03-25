@@ -1,8 +1,5 @@
 from collections import defaultdict
 from typing import Tuple, Dict, List, Set
-
-import array_record
-import grain.python as grain
 import jax.numpy as jnp
 from array_record.python import array_record_module
 import msgpack
@@ -199,12 +196,12 @@ def build_history_lookup(ratings_uri: str, user_id_fwd_dict:Dict[int,int],
     for u in lookup:
         # sort all lists by timestamp
         ts = lookup[u]["ts"]
-        idx = sorted(range(len(ts)), key=lambda i: ts[i])
+        idx = sorted(range(len(ts)), key=lambda ii: ts[ii])
         m = lookup[u]["movie_id"]
         r = lookup[u]["rating"]
         max_history = max(max_history, len(m))
         lookup2[user_id_fwd_dict[u]] = (
-            [ts[i] for i in idx], [movie_id_fwd_dict[m[i]] for i in idx],
-            [r[i] for i in idx])
+            [ts[ii] for ii in idx], [movie_id_fwd_dict[m[ii]] for ii in idx],
+            [r[ii] for ii in idx])
     
     return lookup2, max_history

@@ -15,7 +15,7 @@ from movie_lens_ranker.SparseLocalSubgraphTransform import \
     SparseLocalSubgraphTransform
 from movie_lens_ranker.data_loading import *
 from movie_lens_ranker.model import GraphRanker
-
+from movie_lens_ranker.train import *
 
 class TestRanker(unittest.TestCase):
     def setUp(self):
@@ -27,6 +27,8 @@ class TestRanker(unittest.TestCase):
         
         self.ratings_train_uri = os.path.join(get_project_dir(),
             "src/test/resources/ratings_part_1.array_record")
+        self.ratings_train_uri_tiny = os.path.join(get_project_dir(),
+            "src/test/resources/ratings_part_1_tiny.array_record")
         
         self.ratings_test_uri = os.path.join(get_project_dir(),
             "src/test/resources/ratings_part_2.array_record")
@@ -43,14 +45,18 @@ class TestRanker(unittest.TestCase):
         self.unseen_recommendations_uri = os.path.join(
             get_project_dir(),
             "src/test/resources/user_recommendations_without_train_val.array_record")
-    
+            
     def test_load_ratings(self):
         max_history = 20
         num_candidates = 20
         batch_size = 1024
+        batch_size = 2
         num_epochs = 1
         seed = 1234
         worker_count = max(1, os.cpu_count() - 1)
+        
+        #ratings_uri = self.ratings_train_uri
+        ratings_uri = self.ratings_train_uri_tiny
         
         user_id_fwd_dict, movie_id_fwd_dict, embeddings = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
@@ -59,7 +65,7 @@ class TestRanker(unittest.TestCase):
         
         # each worker will have its own copy of these:
         history_dict, max_history__ = build_history_lookup(
-            self.ratings_train_uri, user_id_fwd_dict,
+            ratings_uri, user_id_fwd_dict,
             movie_id_fwd_dict, batch_size=batch_size)
         user_exact_negatives = read_user_exact_negatives(
             self.exact_hard_negatives_uri,
@@ -70,15 +76,14 @@ class TestRanker(unittest.TestCase):
             self.unseen_recommendations_uri,
             user_id_fwd_dict, movie_id_fwd_dict, batch_size=batch_size)
         
-        batch_size = 2
-        datasource = RandomAccessArrayRecordDataSource(
-            self.ratings_train_uri)
-        shard_opts = grain.ShardOptions(shard_index=0,
-            shard_count=1)
+        datasource = RandomAccessArrayRecordDataSource(ratings_uri)
+        shard_opts = grain.sharding.ShardOptions(shard_index=0, shard_count=1)
         ra_sampler = BatchSampler(num_records=datasource.__len__(),
             num_epochs=num_epochs,
             batch_size=batch_size, shuffle=True, seed=seed,
             shard_options=shard_opts)
+        
+        #TODO: split train into train and val
         
         # NOTE that history_dict, etc are passed by reference to the MapTransforms
         train_dataloader = grain.DataLoader(
@@ -102,6 +107,7 @@ class TestRanker(unittest.TestCase):
             # worker_count=worker_count,
             shard_options=shard_opts
         )
+        '''
         train_batch : List[jraph.GraphsTuple] = next(iter(train_dataloader))
         node_ids = train_batch[0].nodes["ids"]
         is_movie = (train_batch[0].nodes["type"] > 0)
@@ -110,7 +116,9 @@ class TestRanker(unittest.TestCase):
             self.fail(f"🚨 Error: Found a movie with ID {min_movie_id}. "
                   f"It's colliding with User IDs!")
         # train_batch : List[jraph.GraphsTuple] = next(iter(train_dataloader))
+        '''
         
+        learning_rate = 1e-3
         out_dim = 64
         hidden_dim = 64  # 2 * embed_in_dim is probably good
         num_layers = 2  # captures the 2-hop neighborhood.  3 tends to oversmooth
@@ -123,8 +131,21 @@ class TestRanker(unittest.TestCase):
             out_features=out_dim, heads=num_heads,
             dropout_rate=dropout_rate, rngs=rngs)
         
-        optimizer = nnx.Optimizer(model, optax.adam(1e-3),
+        optimizer = nnx.Optimizer(model, optax.adam(learning_rate),
             wrt=nnx.Param)
+        
+        #split the test into val and test
+        
+        train_metrics = train_fn(model=model, num_epochs=num_epochs, train_dataloader=train_dataloader,
+            optimizer=optimizer, batch_size=batch_size, max_history=max_history,
+            num_candidates=num_candidates)
+        print(f'train_metrics: {train_metrics}')
+        
+        #run the eval method temporarily on train data
+        eval_metrics = test_fn(model=model, num_epochs=num_epochs, dataloader=train_dataloader,
+            optimizer=optimizer, batch_size=batch_size, max_history=max_history,
+            num_candidates=num_candidates)
+        
     
     if __name__ == '__main__':
         unittest.main()
