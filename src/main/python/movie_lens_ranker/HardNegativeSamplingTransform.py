@@ -1,11 +1,7 @@
 from typing import Dict, Tuple, Union, List, Set
 import numpy as np
 import grain.python as pgrain
-import msgpack
 from array_record.python import array_record_module
-
-#TODO: refactor to use np.memmap if needed
-
 
 class HardNegativeSamplingTransform(pgrain.MapTransform):
     """

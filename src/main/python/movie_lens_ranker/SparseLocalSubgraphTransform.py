@@ -1,4 +1,4 @@
-from typing import Dict, Tuple, Union, List, Set
+from typing import Dict, Union, List
 
 import jraph
 import jax.numpy as jnp
@@ -64,18 +64,21 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
                 receivers.append(1 + n_real_history + i)  # Candidate nodes
                 edge_features.append(0)  # No rating for candidates
             
+            #TODO: if have pre-processed ratings to be scaled to 0 to 1,
+            # then here in the n_candidates loop, edge_features.append(-1) instead of 0
+            
             node_ids = jnp.concatenate([
-                jnp.array([record["user_id"]]),
-                jnp.array(record["history_movie_ids"][:n_real_history]),
-                jnp.array(record["candidate_ids"])
-            ])
+                jnp.array([record["user_id"]], dtype=int),
+                jnp.array(record["history_movie_ids"][:n_real_history], dtype=int),
+                jnp.array(record["candidate_ids"], dtype=int)
+            ], dtype=int)
             
             node_labels = jnp.concatenate([
                 jnp.array([0.0]),  # User (Type 0)
                 jnp.zeros(n_real_history),  # History (Type 1)
-                record["labels"]#numpy array
+                record["labels"],#numpy array
                 # Candidates (Type 2) - should be size n_candidates
-            ])
+            ], dtype=float)
             
             # Node attributes must match total_nodes
             assert len(node_ids) == len(node_labels) == total_nodes
