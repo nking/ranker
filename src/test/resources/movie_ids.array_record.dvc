@@ -1,5 +1,0 @@
-outs:
-- md5: cddd303ddb85382c88682a0ea43d51b0
-  size: 393216
-  hash: md5
-  path: movie_ids.array_record

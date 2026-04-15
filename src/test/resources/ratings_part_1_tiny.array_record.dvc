@@ -1,5 +1,0 @@
-outs:
-- md5: c8d18f25f566dbe3f7f1b67d935b5c2d
-  size: 131072
-  hash: md5
-  path: ratings_part_1_tiny.array_record

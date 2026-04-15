@@ -1,5 +1,0 @@
-outs:
-- md5: 2f750d2767cc0574ff796fc0b65fd218
-  size: 1835008
-  hash: md5
-  path: user_embeddings.array_record
