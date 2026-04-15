@@ -1,0 +1,67 @@
+The 3 stage recommender system:
+1) retrieval
+   uses fast bi-encoder to quickly pull 100-1000 candidates
+2) mid-stage ranking
+   uses a cross-encoder to rank the inputs to return the top 10 or so.
+   - goal is to maximize precision to re-order 
+     the most relevant candidates.
+3) final refinement
+   uses an LLM reranker w/ listwise comparison
+
+The ranker model is this project.
+
+Graph Transformer (GAT) as graph contextualized listwise ranker:
+    GNN Cross Encoder (JraphX):
+        Processes the local graph (user + candidates) to capture
+        structural relationships (e.g., "movie_a is similar to movies user liked").
+        jraphx has support for GAT
+    Listwise Interaction (Flax NNX):
+        A small Transformer block that "compares" all candidates
+        in the list simultaneously.
+    Ranking Loss with (Rax)
+
+The data I have:
+  - user and movie embeddings made from the trained Two-Tower bi-encoder
+    run on all users and run on all movies
+  - the exact hard negatives if any, for each user.
+    these are the movies the user didn't like 
+    (train data with rating < 3) intersected with the retrieval 
+    recommended movies.
+  - the approximate hard negatives as the retrieval recommended
+    movies with all train data removed from them.
+    that they weren't chosen by the user above what they did watch
+    makes them potential negatives.
+  - the positive ratings for train, val, and test
+  - ...
+
+The model data inputs and creation of data:
+  - construction:
+    nodes are created for user embeddings, movie embeddings.
+    loaded once into memory as jnp.arrays or a LookupTable
+  - training:
+    has grain MapTransform, context, candidates and transformation:
+    - grain MapTransform
+      - input source: grain reads a record from train data
+        (user_id, movie_id, rating, ts)
+      - context:
+        performs lookup of user_id in ratings history for
+        times < ts.
+        these become the edges of the graph
+      - candidates:
+        - positive: the movie_id from train data.  get label 1.0
+        - hard negatives: pulled from the exact hard negatives dataset
+        - approx negatives:  if list isn't full, pull these
+          from user recommendations
+          They are the recommendations that the user did not interact with, 
+          that is, they are the recommendations - train dataset.
+      - transformation:
+        - create_local_subgraph: packages the ids,senders, and
+          receivers into jgraph.GraphsTuple
+  - inference:
+    - input: user_id and list of candidate movie_ids
+    - live lookup: fetch's the user's latest ratings (recent history)
+      to build the graph context.
+    - embeddings:  use the static user/movie embeddings of the model
+    - prediction:  the model updates the user's state via
+      the GNN and ranks the candidates
+

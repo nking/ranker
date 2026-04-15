@@ -1,15 +1,47 @@
-goal is to make a ranker for the recommender systems
-and MLOps pipelines for it.
+goal is to improve personalization in movie recommendations 
+for the user.
 
-Already exists:
-- Data:
-  - movie lens ratings, user and movie data
-  - results from retrieval component of the system
-    in the form of user query and resulting top_k recommended movies.
+this will be measured by NDCG@20 metric.
+
+This is often accomplished by following the bi-encoder
++ Retrieval with a cross-encoder.
+
+The cross-encoder (Ranker) in this project will use
+a graph attention network with efficient, query-dependent
+attention, a.k.a. GATv2, as the first layer in a
+neural network, followed by a linear layer for scoring. 
+
+GraphRanker as graph contextualized listwise ranker:
+    GNN Cross Encoder (JraphX):
+        Processes the local graph (user + candidates) to capture
+        structural relationships (e.g., "movie_a is similar to movies user liked").
+        jraphx has support for GATv2
+    Listwise Interaction (Flax NNX):
+        A small Transformer block that "compares" all candidates
+        in the list simultaneously.
+    Ranking Loss with (Rax)
+
+
+The data needed by the model are a little complex so are
+listed in detail here.
+Data needed:
+- train, val, test splits of the ratings:
+  - 'liked' 
+  - 'disliked' 
+  - smaller sets of the above for use in development
+- Retriever recommended unwatched movies for each user
+- all movies
+- files and runtime creation of negatives:
+  - the natural hard negatives are the movies which the user rated 1 or 2
+    see 'disliked' above
+  - the "elite" hard negatives are the intersection of the natural hard 
+    negatives with the recommended unwatched movies
+  - the approximate hard negatives are the samples drawn from unwatched 
+    movies during runtime
 
 To be implemented in this project:
-- trained Model 
-- MLOps pipelines
+- the GraphRanker model
+- MLOps pipelines for all stages (details are below)
 
 Items not yet decided for MLOps:
   - the equivalent of MLMD for artifacts and models
@@ -17,7 +49,7 @@ Items not yet decided for MLOps:
     design.
 
 Model requirements:
-  Graph Transformer (GAT) as graph contextualized listwise ranker
+  GraphRanker
   - must be trainable on tpu, gpu, and cpu
   - must be highly scalable
   - must be highly distributable
@@ -32,7 +64,8 @@ Model requirements:
   - trained model eval metrics ndcg@k should be an
     improvement over the un-ranked retrieval results
     and should be at least <TBD>.
-  For this will use Jraphx + Flax NNX + Rax for creating the model
+
+I will use Jraphx + Flax NNX + Rax for creating the model
     and will save it to a JAX serving format
 
 MLOps details:
@@ -40,6 +73,10 @@ MLOps details:
   the stars are highest priority
   - training and deployment pipeline:
     - * ingest data
+        - pre-processing to create input array_reord format
+          files has been done with apache beam in the 
+          retrieval project
+        - grain is used in this project to create data loader
     - calc statistics of data
     - generate data schema and perist it
     - validate data statistics
@@ -54,7 +91,7 @@ MLOps details:
   - deployment pipeline
     - BLESSED and approved model can be deployed to serving
   - test pipeline:
-    - <TBD>
+    - <TBD> aside from metrics
   - monitoring pipeline:
     - <TBD>
 
