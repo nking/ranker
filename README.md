@@ -56,7 +56,7 @@ Local testing:
 some details about the model
 
 - base layer an instance of jraphx.nn.GATv2Conv
-  which is the raphx implementation of the
+  which is the jraphx implementation of the
   Brody, Alon, Yahav "How Attentive are Graph Attention Networks"
   model called "Universal Graph Attention".
   - has dynamic attention that is dependent upon the query.
