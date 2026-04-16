@@ -29,12 +29,12 @@ def get_train_val_test_liked_uris(use_small:bool=True) -> Tuple[str, str, str]:
     base_dir = os.path.join(get_project_dir(), "src/test/resources/data/")
     if use_small:
         base_dir = os.path.join(base_dir, "small")
-    return (os.path.join(base_dir, "ratings_train_liked"),
-        os.path.join(base_dir, "ratings_val_liked"), os.path.join(base_dir, "ratings_test_liked"))
+    return (os.path.join(base_dir, "ratings_train_liked.array_record"),
+        os.path.join(base_dir, "ratings_val_liked.array_record"), os.path.join(base_dir, "ratings_test_liked.array_record"))
     
 def get_train_val_test_disliked_uris(use_small:bool=True) -> Tuple[str, str, str]:
     base_dir = os.path.join(get_project_dir(), "src/test/resources/data/")
     if use_small:
         base_dir = os.path.join(base_dir, "small")
-    return (os.path.join(base_dir, "ratings_train_disliked"),
-        os.path.join(base_dir, "ratings_val_disliked"), os.path.join(base_dir, "ratings_test_disliked"))
+    return (os.path.join(base_dir, "ratings_train_disliked.array_record"),
+        os.path.join(base_dir, "ratings_val_disliked.array_record"), os.path.join(base_dir, "ratings_test_disliked.array_record"))

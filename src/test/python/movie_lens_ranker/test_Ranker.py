@@ -5,7 +5,6 @@ import jraph
 import optax
 from array_record.python import array_record_module
 from flax import nnx
-from scipy.stats import triang_gen
 
 from helper import *
 from movie_lens_ranker.BatchSampler import BatchSampler
@@ -57,7 +56,7 @@ class TestRanker(unittest.TestCase):
         #    the natural hard negatives are the ones which user rated 1 or 2
         #  (user_id, tuple of negative movie_ids)
         self.negatives_uri = os.path.join(get_project_dir(),
-            "src/test/resources/user_recommendations_disliked_in_train.array_record")
+            "src/test/resources/data/recommended_movies.array_record")
        
     def test_load_ratings(self):
         max_history = 20
@@ -146,6 +145,7 @@ class TestRanker(unittest.TestCase):
             wrt=nnx.Param)
             
         train_metrics = train_fn(model=model, num_epochs=num_epochs, train_dataloader=train_dataloader,
+            val_dataloader=val_dataloader,
             optimizer=optimizer, batch_size=batch_size, max_history=max_history,
             num_candidates=num_candidates)
         print(f'train_metrics: {train_metrics}')
@@ -154,7 +154,6 @@ class TestRanker(unittest.TestCase):
         eval_metrics = test_fn(model=model, num_epochs=num_epochs, dataloader=val_dataloader,
             optimizer=optimizer, batch_size=batch_size, max_history=max_history,
             num_candidates=num_candidates)
-        
     
     if __name__ == '__main__':
         unittest.main()

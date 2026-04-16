@@ -10,37 +10,36 @@ from movie_lens_ranker.data_loading import *
 class TestRanker(unittest.TestCase):
     def setUp(self):
         
-        self.ratings_train_uri = os.path.join(get_project_dir(),
-            "src/test/resources/ratings_part_1.array_record")
+        self.ratings_train_uri, self.ratings_val_uri, self.ratings_test_uri \
+            = get_train_val_test_liked_uris(use_small=True)
         
-        self.ratings_test_uri = os.path.join(get_project_dir(),
-            "src/test/resources/ratings_part_2.array_record")
-        
-        self.exact_hard_negatives_uri = os.path.join(get_project_dir(),
-            "src/test/resources/user_recommendations_disliked_in_train.array_record")
+        # user recommendations with each user history subtacted already:
+        # (user id, (movie_ids))
         self.recommendations_uri = os.path.join(get_project_dir(),
-            "src/test/resources/user_recommendations_without_train_val.array_record")
+            "src/test/resources/recommended_movies.array_record")
         
-        self.ratings_train_uri = os.path.join(get_project_dir(),
-            "src/test/resources/ratings_part_1.array_record")
-        
-        self.ratings_test_uri = os.path.join(get_project_dir(),
-            "src/test/resources/ratings_part_2.array_record")
+        # the approximate hard negatives are the samples drawn from unwatched movies
+        # the negatives uri has for each user, the list of negatives prioritized by:
+        #    the "elite" hard negatives are the intersection of the natural hard negatives with the recommended movies,
+        #    the natural hard negatives are the ones which user rated 1 or 2
+        #  (user_id, tuple of negative movie_ids)
+        self.negatives_uri = os.path.join(get_project_dir(),
+            "src/test/resources/data/recommended_movies.array_record")
         
         self.movie_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/movie_embeddings.array_record")
+            "src/test/resources/data/movie_emb-00000-of-00001.array_record")
         
         self.user_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/user_embeddings.array_record")
+            "src/test/resources/data/user_emb-00000-of-00001.array_record")
         
         self.movie_ids_uri = os.path.join(get_project_dir(),
-            "src/test/resources/movie_ids.array_record")
+            "src/test/resources/data/movies-00000-of-00001.array_record")
         
         self.unseen_recommendations_uri = os.path.join(
             get_project_dir(),
-            "src/test/resources/user_recommendations_without_train_val.array_record")
+            "src/test/resources/data/recommended_movies.array_record")
         
-        self.user_id_fwd_dict, self.movie_id_fwd_dict, self.embeddings = read_embeddings(
+        self.embeddings = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)
@@ -51,19 +50,16 @@ class TestRanker(unittest.TestCase):
         num_candidates = 20
         
         history_dict, max_history__ = build_history_lookup(self.ratings_train_uri,
-            self.user_id_fwd_dict, self.movie_id_fwd_dict,
             batch_size=batch_size)
         all_movie_ids: List[int] = read_movies_array_record(
-            self.movie_ids_uri, self.movie_id_fwd_dict, batch_size=batch_size)
+            self.movie_ids_uri, batch_size=batch_size)
         exact_negatives_dict: Dict[
             int, Set[int]] = read_user_exact_negatives(
-            self.exact_hard_negatives_uri,
-            self.user_id_fwd_dict, self.movie_id_fwd_dict,
+            self.negatives_uri,
             batch_size)
         unseen_recommendations: Dict[
             int, Set[int]] = read_user_unseen_recommendations(
             self.unseen_recommendations_uri,
-            self.user_id_fwd_dict, self.movie_id_fwd_dict,
             batch_size=batch_size)
         
         batch = [(1875, 1101, 4, 975768800), (635, 2068, 4, 975768823),
@@ -71,7 +67,6 @@ class TestRanker(unittest.TestCase):
         
         transform1 = RatingsHistoryLookupTransform(
             history_dict,
-            self.user_id_fwd_dict, self.movie_id_fwd_dict,
             max_history=max_history)
             
         result1:List[Dict[str, Union[int, List]]] = transform1.map(batch)
