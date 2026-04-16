@@ -9,19 +9,36 @@ from movie_lens_ranker.data_loading import *
 class TestRanker(unittest.TestCase):
     def setUp(self):
         
-        self.ratings_train_uri = os.path.join(get_project_dir(),
-            "src/test/resources/ratings_part_1.array_record")
+        self.ratings_train_uri, self.ratings_val_uri, self.ratings_test_uri \
+            = get_train_val_test_liked_uris(use_small=True)
         
-        self.ratings_test_uri = os.path.join(get_project_dir(),
-            "src/test/resources/ratings_part_2.array_record")
+        # user recommendations with each user history subtacted already:
+        # (user id, (movie_ids))
+        self.recommendations_uri = os.path.join(get_project_dir(),
+            "src/test/resources/recommended_movies.array_record")
+        
+        # the approximate hard negatives are the samples drawn from unwatched movies
+        # the negatives uri has for each user, the list of negatives prioritized by:
+        #    the "elite" hard negatives are the intersection of the natural hard negatives with the recommended movies,
+        #    the natural hard negatives are the ones which user rated 1 or 2
+        #  (user_id, tuple of negative movie_ids)
+        self.negatives_uri = os.path.join(get_project_dir(),
+            "src/test/resources/data/recommended_movies.array_record")
         
         self.movie_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/movie_embeddings.array_record")
+            "src/test/resources/data/movie_emb-00000-of-00001.array_record")
         
         self.user_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/user_embeddings.array_record")
+            "src/test/resources/data/user_emb-00000-of-00001.array_record")
         
-        self.user_id_fwd_dict, self.movie_id_fwd_dict, self.embeddings = read_embeddings(
+        self.movie_ids_uri = os.path.join(get_project_dir(),
+            "src/test/resources/data/movies-00000-of-00001.array_record")
+        
+        self.unseen_recommendations_uri = os.path.join(
+            get_project_dir(),
+            "src/test/resources/data/recommended_movies.array_record")
+        
+        self.embeddings = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)
@@ -30,11 +47,9 @@ class TestRanker(unittest.TestCase):
         batch_size = 1024
         max_history = 2000 #a number large enough to test that padding works
         history_dict, max_history__ = build_history_lookup(self.ratings_train_uri,
-            self.user_id_fwd_dict, self.movie_id_fwd_dict,
             batch_size=batch_size)
         
         transform = RatingsHistoryLookupTransform(history_lookup=history_dict,
-            user_id_fwd_dict=self.user_id_fwd_dict, movie_id_fwd_dict=self.movie_id_fwd_dict,
             max_history=max_history)
             
         '''
