@@ -4,7 +4,6 @@ import jraph
 from array_record.python import array_record_module
 from movie_lens_ranker.data_loading import *
 
-
 def get_batch_indices(n_node: jnp.ndarray) -> jnp.ndarray:
     """
     Computes indices [0, 0, 1, 1, 1, 2, ...] from n_node [2, 3, 1, ...].

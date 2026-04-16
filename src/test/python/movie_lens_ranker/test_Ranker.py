@@ -5,6 +5,7 @@ import jraph
 import optax
 from array_record.python import array_record_module
 from flax import nnx
+from scipy.stats import triang_gen
 
 from helper import *
 from movie_lens_ranker.BatchSampler import BatchSampler
@@ -19,33 +20,45 @@ from movie_lens_ranker.train import *
 
 class TestRanker(unittest.TestCase):
     def setUp(self):
-        # each item is {'user_id':int, 'retrieved_ids':List[int]}
-        self.exact_hard_negatives_uri = os.path.join(get_project_dir(),
-            "src/test/resources/user_recommendations_disliked_in_train.array_record")
+        
+        # user recommendations with each user history subtacted already:
+        # (user id, (movie_ids))
         self.recommendations_uri = os.path.join(get_project_dir(),
-            "src/test/resources/user_recommendations_without_train_val.array_record")
+            "src/test/resources/recommended_movies.array_record")
         
-        self.ratings_train_uri = os.path.join(get_project_dir(),
-            "src/test/resources/ratings_part_1.array_record")
-        self.ratings_train_uri_tiny = os.path.join(get_project_dir(),
-            "src/test/resources/ratings_part_1_tiny.array_record")
+        #(user_id, movie_id, rating, timestamp)
+        self.ratings_train_uri, self.ratings_val_uri, self.ratings_test_uri \
+            = get_train_val_test_liked_uris(use_small=True)
         
-        self.ratings_test_uri = os.path.join(get_project_dir(),
-            "src/test/resources/ratings_part_2.array_record")
+        # (user_id, movie_id, rating, timestamp)
+        self.ratings_train_disliked_uri, self.ratings_val_disliked_uri, self.ratings_test_disliked_uri \
+            = get_train_val_test_disliked_uris(use_small=True)
         
+        # (movie_id, float array of embed_dim as a tuple)
         self.movie_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/movie_embeddings.array_record")
+            "src/test/resources/data/movie_emb-00000-of-00001.array_record")
         
+        # (user_id, float array of embed_dim as a tuple)
         self.user_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/user_embeddings.array_record")
+            "src/test/resources/data/user_emb-00000-of-00001.array_record")
         
-        self.movie_ids_uri = os.path.join(get_project_dir(),
-            "src/test/resources/movie_ids.array_record")
-        
+        # (user_id, int array of movie_ids as a tuple)
         self.unseen_recommendations_uri = os.path.join(
             get_project_dir(),
-            "src/test/resources/user_recommendations_without_train_val.array_record")
-            
+            "src/test/resources/data/recommended_movies.array_record")
+        
+        # (movie_id, title, genres)
+        self.movies_uri = os.path.join(get_project_dir(),
+            "src/test/resources/data/movies-00000-of-00001.array_record")
+        
+        #the approximate hard negatives are the samples drawn from unwatched movies
+        # the negatives uri has for each user, the list of negatives prioritized by:
+        #    the "elite" hard negatives are the intersection of the natural hard negatives with the recommended movies,
+        #    the natural hard negatives are the ones which user rated 1 or 2
+        #  (user_id, tuple of negative movie_ids)
+        self.negatives_uri = os.path.join(get_project_dir(),
+            "src/test/resources/user_recommendations_disliked_in_train.array_record")
+       
     def test_load_ratings(self):
         max_history = 20
         num_candidates = 20
@@ -55,49 +68,47 @@ class TestRanker(unittest.TestCase):
         seed = 1234
         worker_count = max(1, os.cpu_count() - 1)
         
-        #ratings_uri = self.ratings_train_uri
-        ratings_uri = self.ratings_train_uri_tiny
+        train_ratings_uri = self.ratings_train_uri
         
-        user_id_fwd_dict, movie_id_fwd_dict, embeddings = read_embeddings(
+        embeddings = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)
         
         # each worker will have its own copy of these:
-        history_dict, max_history__ = build_history_lookup(
-            ratings_uri, user_id_fwd_dict,
-            movie_id_fwd_dict, batch_size=batch_size)
-        user_exact_negatives = read_user_exact_negatives(
-            self.exact_hard_negatives_uri,
-            user_id_fwd_dict, movie_id_fwd_dict, batch_size=batch_size)
-        all_movie_ids = read_movies_array_record(self.movie_ids_uri,
-            movie_id_fwd_dict, batch_size=batch_size)
-        unseen_recommendations = read_user_unseen_recommendations(
-            self.unseen_recommendations_uri,
-            user_id_fwd_dict, movie_id_fwd_dict, batch_size=batch_size)
+        train_history_dict, max_history__ = build_history_lookup(
+            train_ratings_uri, batch_size=batch_size)
         
-        datasource = RandomAccessArrayRecordDataSource(ratings_uri)
+        user_exact_negatives = read_user_exact_negatives(
+            self.negatives_uri, batch_size=batch_size)
+        
+        all_movie_ids = read_movies_array_record(self.movies_uri,
+            batch_size=batch_size)
+        
+        unseen_recommendations = read_user_unseen_recommendations(
+            self.unseen_recommendations_uri, batch_size=batch_size)
+        
+        train_datasource = RandomAccessArrayRecordDataSource(train_ratings_uri)
         shard_opts = grain.sharding.ShardOptions(shard_index=0, shard_count=1)
-        ra_sampler = BatchSampler(num_records=datasource.__len__(),
+        
+        train_ra_sampler = BatchSampler(num_records=train_datasource.__len__(),
             num_epochs=num_epochs,
             batch_size=batch_size, shuffle=True, seed=seed,
             shard_options=shard_opts)
         
         #TODO: split train into train and val
         
-        # NOTE that history_dict, etc are passed by reference to the MapTransforms
+        # NOTE that train_history_dict, etc are passed by reference to the MapTransforms
         train_dataloader = grain.DataLoader(
-            data_source=datasource,
-            sampler=ra_sampler,
+            data_source=train_datasource,
+            sampler=train_ra_sampler,
             operations=[
                 # enrich the train records with local subgraphs:
                 RatingsHistoryLookupTransform(
-                    history_lookup=history_dict,
-                    user_id_fwd_dict=user_id_fwd_dict,
-                    movie_id_fwd_dict=movie_id_fwd_dict,
+                    history_lookup=train_history_dict,
                     max_history=max_history),
                 HardNegativeSamplingTransform(
-                    history_lookup=history_dict,
+                    history_lookup=train_history_dict,
                     all_movie_ids=all_movie_ids,
                     exact_negatives_dict=user_exact_negatives,
                     unseen_recommendations=unseen_recommendations,
@@ -133,16 +144,14 @@ class TestRanker(unittest.TestCase):
         
         optimizer = nnx.Optimizer(model, optax.adam(learning_rate),
             wrt=nnx.Param)
-        
-        #split the test into val and test
-        
+            
         train_metrics = train_fn(model=model, num_epochs=num_epochs, train_dataloader=train_dataloader,
             optimizer=optimizer, batch_size=batch_size, max_history=max_history,
             num_candidates=num_candidates)
         print(f'train_metrics: {train_metrics}')
         
         #run the eval method temporarily on train data
-        eval_metrics = test_fn(model=model, num_epochs=num_epochs, dataloader=train_dataloader,
+        eval_metrics = test_fn(model=model, num_epochs=num_epochs, dataloader=val_dataloader,
             optimizer=optimizer, batch_size=batch_size, max_history=max_history,
             num_candidates=num_candidates)
         
