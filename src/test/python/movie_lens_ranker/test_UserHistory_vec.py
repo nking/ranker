@@ -19,7 +19,7 @@ class TestUserHistory_vec(unittest.TestCase):
     def setUp(self):
         pass
     
-    def test_User_history(self):
+    def test_user_history(self):
         
         ratings_train_uri, ratings_val_uri, ratings_test_uri \
             = get_train_val_test_liked_uris(use_small=True)
@@ -42,6 +42,7 @@ class TestUserHistory_vec(unittest.TestCase):
         
         user_ids = np.array([6040, 6039])
         
+        # ==== test scalar timestamps ========
         ts = 956705600
         fixed_length = 200
         pad_value = -1
@@ -79,6 +80,22 @@ class TestUserHistory_vec(unittest.TestCase):
         np.testing.assert_array_equal(count, count2)
         count3 = np.sum(ratings_hist2 != -1, axis=1)
         np.testing.assert_array_equal(count, count3)
+        
+        import operator
+        #======= test array timestamps ======
+        inp_timestamps = np.array([956704000, 956705600])
+        movie_hist10 = uh.get_movieids_before_timestamp(user_ids, timestamp=inp_timestamps, max_hist=fixed_length, pad_value=pad_value)
+        count10 = np.sum(movie_hist10 != -1, axis=1)
+        np.testing.assert_array_compare(operator.le, count10, count,
+            err_msg="count10 has values greater than count!")
+        for i, c in enumerate(count10):
+            np.testing.assert_array_equal(movie_hist[i][:c], movie_hist10[i][:c])
+        
+        movie_hist11, ratings_hist11 = uh.get_history_before_timestamp(user_ids,
+            timestamp=inp_timestamps, max_hist=fixed_length, pad_value=pad_value)
+        np.testing.assert_array_equal(movie_hist10, movie_hist11)
+        count11 = np.sum(ratings_hist11 != -1, axis=1)
+        np.testing.assert_array_equal(count10, count11)
 
 if __name__ == '__main__':
     unittest.main()
