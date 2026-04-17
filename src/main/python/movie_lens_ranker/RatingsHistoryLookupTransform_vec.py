@@ -3,9 +3,11 @@ import grain.python as pgrain
 import numpy as np
 from array_record.python import array_record_module
 
+from movie_lens_ranker.UserHistory_vec import UserHistory
+
+
 class RatingsHistoryLookupTransform(pgrain.MapTransform):
-    def __init__(self, history_lookup: Dict[int, Tuple[list, list, list]],
-            max_history: int = 20):
+    def __init__(self, history_lookup: UserHistory, max_history: int = 20):
         """
         history_lookup: the results of method build_history_lookup
         max_history: Fixed size for the history window (crucial for JAX).
@@ -31,51 +33,33 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
         movie_ids = []
         ratings = []
         timestamps = []
-        history_movies = []
-        history_ratings = []
-        history_lengths = []
-        
         for record in batch:
             u_id, m_id, r, ts = record[0], record[1], record[2], record[3]
-            
-            u_ts, u_movies, u_ratings = self.history_lookup.get(u_id,
-                ([], [], []))
-            
-            # best done per-record due to different array sizes
-            idx = np.searchsorted(u_ts, ts, side='left')
-            
-            # Slice and Pad
-            # We slice first to avoid copying the whole history
-            h_movies = u_movies[max(0, idx - self.max_history):idx]
-            h_ratings = u_ratings[max(0, idx - self.max_history):idx]
-            n_hist = len(h_movies)
-            
-            # Fixed-width padding for JAX stability
-            padded_movies = np.full((self.max_history,), -1,
-                dtype=np.int32)
-            padded_ratings = np.full((self.max_history,), -1,
-                dtype=np.float32)
-            
-            padded_movies[:n_hist] = h_movies
-            padded_ratings[:n_hist] = h_ratings
-            
             user_ids.append(u_id)
             movie_ids.append(m_id)
             ratings.append(r)
             timestamps.append(ts)
-            history_movies.append(padded_movies)
-            history_ratings.append(padded_ratings)
-            history_lengths.append(n_hist)
+            
+        user_ids = np.array(user_ids, dtype=np.int32)
+        movie_ids = np.array(movie_ids, dtype=np.int32)
+        ratings = np.array(ratings, dtype=np.float32)
+        timestamps = np.array(timestamps, dtype=np.int64)
+        
+        history_movies, history_ratings = self.history_lookup.get_history_before_timestamp(
+            user_ids, timestamps, self.max_history, -1)
+        
+        history_lengths = np.sum(history_movies != -1, axis=1)
         
         # Convert everything to a single dictionary of NumPy arrays
         return {
-            'user_id': np.array(user_ids, dtype=np.int32),
-            'movie_id': np.array(movie_ids, dtype=np.int32),
-            'rating': np.array(ratings, dtype=np.float32),
-            'timestamp': np.array(timestamps, dtype=np.int32),
-            'history_movie_ids': np.array(history_movies),
+            'user_id': user_ids,
+            'movie_id': movie_ids,
+            'rating': ratings,
+            'timestamp': timestamps,
             # (Batch, Max_History)
-            'history_ratings': np.array(history_ratings),
+            'history_movie_ids': history_movies,
             # (Batch, Max_History)
-            'history_length': np.array(history_lengths, dtype=np.int32)
+            'history_ratings': history_ratings,
+            # (Batch, Max_History)
+            'history_length': history_lengths
         }

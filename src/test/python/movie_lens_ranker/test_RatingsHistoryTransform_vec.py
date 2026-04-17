@@ -37,11 +37,11 @@ class TestRanker(unittest.TestCase):
     def test_RatingsHistoryTransform(self):
         batch_size = 1024
         max_history = 2000 #a number large enough to test that padding works
-        history_dict, max_history__ = build_history_lookup(self.ratings_train_uri,
-            batch_size=batch_size)
         
-        transform = RatingsHistoryLookupTransform(history_lookup=history_dict,
-            max_history=max_history)
+        ratings_uri_list = [self.ratings_train_uri, self.ratings_val_uri]
+        uh = UserHistory(ratings_uri_list=ratings_uri_list, fixed_size=2048, pad_value=-1)
+        
+        transform = RatingsHistoryLookupTransform(history_lookup=uh, max_history=max_history)
             
         '''
         some ratings in partition 1
