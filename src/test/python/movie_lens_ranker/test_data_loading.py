@@ -2,6 +2,7 @@ import os.path
 import unittest
 import time
 
+import numpy as np
 from array_record.python import array_record_module
 from helper import *
 from movie_lens_ranker.BatchSampler import BatchSampler
@@ -17,7 +18,7 @@ class TestDataLoading(unittest.TestCase):
         self.negatives_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/train_negatives.array_record")
         
-        self.unseen_recommendations_uri = os.path.join(get_project_dir(),
+        self.recommendations_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/recommended_movies.array_record")
         
         self.ratings_train_uri = os.path.join(get_project_dir(),
@@ -176,7 +177,7 @@ class TestDataLoading(unittest.TestCase):
         
         datasource = RandomAccessArrayRecordDataSource(self.ratings_train_uri)
         
-        shard_opts = grain.ShardOptions(shard_index=0, shard_count=1)
+        shard_opts = grain.sharding.ShardOptions(shard_index=0, shard_count=1)
         
         ra_sampler = BatchSampler(num_records=datasource.__len__(),
             batch_size=batch_size, shuffle=True, seed=0, num_epochs=num_epochs,
@@ -208,7 +209,7 @@ class TestDataLoading(unittest.TestCase):
     
     def test_build_history_lookup(self):
         
-        user_id_fwd_dict, movie_id_fwd_dict, embeddings = read_embeddings(
+        embeddings = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri, batch_size=1024)
         
@@ -242,23 +243,20 @@ class TestDataLoading(unittest.TestCase):
         self.assertTrue(isinstance(all_movie_ids, list))
         self.assertTrue(isinstance(all_movie_ids[0], int))
         
-        exact_negatives_dict: Dict[
-            int, Set[int]] = read_user_exact_negatives(
+        negatives: Dict[int, Set[int]] = read_user_negatives(
             self.negatives_uri, batch_size)
-        self.assertTrue(isinstance(exact_negatives_dict, dict))
-        min_user_id = min(exact_negatives_dict.keys())
-        entry = exact_negatives_dict[min_user_id]
+        self.assertTrue(isinstance(negatives, dict))
+        min_user_id = min(negatives.keys())
+        entry = negatives.get(min_user_id)
         self.assertTrue(isinstance(entry, set))
         self.assertTrue(isinstance(next(iter(entry)), int))
         
-        unseen_recommendations: Dict[
-            int, Set[int]] = read_user_unseen_recommendations(
-            self.unseen_recommendations_uri, batch_size=batch_size)
-        self.assertTrue(isinstance(unseen_recommendations, dict))
-        min_user_id = min(unseen_recommendations.keys())
-        entry = unseen_recommendations[min_user_id]
-        self.assertTrue(isinstance(entry, set))
-        self.assertTrue(isinstance(next(iter(entry)), int))
+        recommendations: np.ndarray = read_recommendations(self.recommendations_uri, batch_size=batch_size)
+        self.assertTrue(isinstance(recommendations, np.ndarray))
+        min_user_id = 1
+        entry = recommendations[min_user_id - 1]
+        self.assertTrue(isinstance(entry, np.ndarray))
+        self.assertTrue(isinstance(entry[0], np.int64))
 
 if __name__ == '__main__':
     unittest.main()

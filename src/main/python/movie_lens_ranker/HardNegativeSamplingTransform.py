@@ -2,6 +2,9 @@ from typing import Dict, Tuple, Union, List, Set
 import numpy as np
 import grain.python as pgrain
 from array_record.python import array_record_module
+from movie_lens_ranker.RecommendedMovies import RecommendedMovies
+from tqdm.contrib.concurrent import thread_map
+
 
 class HardNegativeSamplingTransform(pgrain.MapTransform):
     """
@@ -10,22 +13,23 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
     """
     def __init__(self, history_lookup: Dict[int, Tuple[list, list, list]],
         all_movie_ids:List[int], exact_negatives_dict:Dict[int, Set[int]],
-        unseen_recommendations:Dict[int, Set[int]], num_candidates=20,
+        recommendations:RecommendedMovies, num_candidates=20, top_k:int=200,
         seed:int = 0):
         """
         initialize a CandidateSamplingTransform object
         :param history_lookup:  Dict[user_id:int, Tuple(arrays of ts, movie_id, rating)]
         :param all_movie_ids: list of all movie_ids
         :param exact_negatives_dict: dictionary with key=user_id, value = set of exact negative movie ids
-        :param unseen_recommendations: dictionary with key=user_id, value = set of unseen recommended movie ids
+        :param recommendations: class to retrieve unseen move recommendations for batch of users
         :param num_candidates: total number of candidates to create from 1 postive and mulitple negatives
         :param seed: seed for random number generator
         """
         self.history_lookup = history_lookup
         self.exact_negatives_dict = exact_negatives_dict
         self.all_movie_ids = all_movie_ids #to o use in approx hard negatives
-        self.unseen_recommendations = unseen_recommendations # to use in approx hard negatives
         self.num_candidates = num_candidates
+        self.top_k = top_k
+        self.recommendations = recommendations
         self.seed = seed
 
     def map(self, batch:List[Dict[str, Union[int, List[int]]]]) -> List[Dict[str, Union[int, List[int], np.ndarray]]]:
@@ -50,6 +54,12 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
             "candidate_ids": np.ndarray,
             "labels": np.ndarray
         """
+        
+        #TODO: consider how to verctorize the overall handling of data in grain dataloader
+        #
+        
+        #print(f'HNST batch:{batch}')
+        
         results = []
         for record in batch:
             user_id = record["user_id"]
@@ -74,8 +84,10 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
             if self.history_lookup.get(user_id):
                 #tuple (timestamps, movie_ids, ratings)
                 subtr.update(self.history_lookup.get(user_id)[1])
-            if self.unseen_recommendations.get(user_id):
-                subtr.update(self.unseen_recommendations.get(user_id))
+                
+            #NOTE: if change to vectorized ops, use get_unseen_movies(..)
+            recommended_unseen = self.recommendations.get_unseen_movies_scalar(user_id, timestamp=record["timestamp"], top_k=self.top_k)
+            subtr.update(recommended_unseen)
             
             approx_negs = per_record_rng.choice(self.all_movie_ids, size=n_approx + len(subtr), replace=False)
             approx_negs = [int(x) for x in approx_negs if x not in subtr]

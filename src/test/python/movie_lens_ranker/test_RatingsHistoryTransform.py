@@ -12,11 +12,6 @@ class TestRanker(unittest.TestCase):
         self.ratings_train_uri, self.ratings_val_uri, self.ratings_test_uri \
             = get_train_val_test_liked_uris(use_small=True)
         
-        # user recommendations with each user history subtacted already:
-        # (user id, (movie_ids))
-        self.recommendations_uri = os.path.join(get_project_dir(),
-            "src/test/resources/recommended_movies.array_record")
-        
         # the approximate hard negatives are the samples drawn from unwatched movies
         # the negatives uri has for each user, the list of negatives prioritized by:
         #    the "elite" hard negatives are the intersection of the natural hard negatives with the recommended movies,
@@ -33,10 +28,6 @@ class TestRanker(unittest.TestCase):
         
         self.movie_ids_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")
-        
-        self.unseen_recommendations_uri = os.path.join(
-            get_project_dir(),
-            "src/test/resources/data/recommended_movies.array_record")
         
         self.embeddings = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,

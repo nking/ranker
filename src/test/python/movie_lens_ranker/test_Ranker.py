@@ -41,61 +41,63 @@ class TestRanker(unittest.TestCase):
         self.user_embeddings_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/user_emb-00000-of-00001.array_record")
         
-        # (user_id, int array of movie_ids as a tuple)
-        self.unseen_recommendations_uri = os.path.join(
+        # (user_id, int array of movie_ids as a tuple) is full catalog for each user, no history subtracted
+        self.recommendations_uri = os.path.join(
             get_project_dir(),
             "src/test/resources/data/recommended_movies.array_record")
+        self.recommendations_ts_uri = os.path.join(
+            get_project_dir(),
+            "src/test/resources/data/recommended_movies_timestamps.array_record")
         
         # (movie_id, title, genres)
         self.movies_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")
         
-        #the approximate hard negatives are the samples drawn from unwatched movies
-        # the negatives uri has for each user, the list of negatives prioritized by:
-        #    the "elite" hard negatives are the intersection of the natural hard negatives with the recommended movies,
-        #    the natural hard negatives are the ones which user rated 1 or 2
-        #  (user_id, tuple of negative movie_ids)
-        self.negatives_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/recommended_movies.array_record")
+        #these are the "elite" hard negatives (=intersection between train_disliked and recommended movies)
+        # + train disliked.
+        self.train_negatives_uri = os.path.join(get_project_dir(),
+            "src/test/resources/data/train_negatives.array_record")
+        self.val_negatives_uri = os.path.join(get_project_dir(),
+            "src/test/resources/data/val_negatives.array_record")
        
-    def test_load_ratings(self):
+    def test_grain_dataloader(self):
         max_history = 20
         num_candidates = 20
         batch_size = 1024
         batch_size = 2
         num_epochs = 1
         seed = 1234
+        top_k = 100
         worker_count = max(1, os.cpu_count() - 1)
-        
-        train_ratings_uri = self.ratings_train_uri
-        
-        embeddings = read_embeddings(
-            user_embeddings_uri=self.user_embeddings_uri,
-            movie_embeddings_uri=self.movie_embeddings_uri,
-            batch_size=1024)
-        
-        # each worker will have its own copy of these:
-        train_history_dict, max_history__ = build_history_lookup(
-            train_ratings_uri, batch_size=batch_size)
-        
-        user_exact_negatives = read_user_exact_negatives(
-            self.negatives_uri, batch_size=batch_size)
-        
-        all_movie_ids = read_movies_array_record(self.movies_uri,
-            batch_size=batch_size)
-        
-        unseen_recommendations = read_user_unseen_recommendations(
-            self.unseen_recommendations_uri, batch_size=batch_size)
-        
-        train_datasource = RandomAccessArrayRecordDataSource(train_ratings_uri)
         shard_opts = grain.sharding.ShardOptions(shard_index=0, shard_count=1)
         
+        # each worker will have its own copy of these:
+        train_history_dict, max_history__ = build_history_lookup(self.ratings_train_uri, batch_size=batch_size)
+        
+        all_movie_ids = read_movies_array_record(self.movies_uri, batch_size=batch_size)
+        
+        recommendations = RecommendedMovies(movie_rec_file_path=self.recommendations_uri,
+            movie_rec_ts_file_path=self.recommendations_ts_uri)
+        
+        val_history_dict, max_history__ = build_history_lookup(self.ratings_val_uri, batch_size=batch_size)
+
+        train_negatives : Dict[int, Set[int]] = read_user_negatives(self.train_negatives_uri, batch_size=batch_size)
+        
+        train_val_negatives : Dict[int, Set[int]] = read_user_negatives([self.train_negatives_uri, self.val_negatives_uri], batch_size=batch_size)
+
+        train_datasource = RandomAccessArrayRecordDataSource(self.ratings_train_uri)
+        
+        val_datasource = RandomAccessArrayRecordDataSource(self.ratings_val_uri)
+
         train_ra_sampler = BatchSampler(num_records=train_datasource.__len__(),
             num_epochs=num_epochs,
             batch_size=batch_size, shuffle=True, seed=seed,
             shard_options=shard_opts)
         
-        #TODO: split train into train and val
+        val_ra_sampler = BatchSampler(num_records=val_datasource.__len__(),
+            num_epochs=num_epochs,
+            batch_size=batch_size, shuffle=True, seed=seed,
+            shard_options=shard_opts)
         
         # NOTE that train_history_dict, etc are passed by reference to the MapTransforms
         train_dataloader = grain.DataLoader(
@@ -109,24 +111,45 @@ class TestRanker(unittest.TestCase):
                 HardNegativeSamplingTransform(
                     history_lookup=train_history_dict,
                     all_movie_ids=all_movie_ids,
-                    exact_negatives_dict=user_exact_negatives,
-                    unseen_recommendations=unseen_recommendations,
-                    num_candidates=num_candidates, seed=seed),
+                    exact_negatives_dict=train_negatives,
+                    recommendations=recommendations,
+                    num_candidates=num_candidates, top_k=top_k, seed=seed),
                 SparseLocalSubgraphTransform(),
             ],
             # worker_count=worker_count,
             shard_options=shard_opts
         )
-        '''
-        train_batch : List[jraph.GraphsTuple] = next(iter(train_dataloader))
-        node_ids = train_batch[0].nodes["ids"]
-        is_movie = (train_batch[0].nodes["type"] > 0)
-        min_movie_id = jnp.min(node_ids[is_movie])
-        if min_movie_id < len(user_id_fwd_dict):
-            self.fail(f"🚨 Error: Found a movie with ID {min_movie_id}. "
-                  f"It's colliding with User IDs!")
-        # train_batch : List[jraph.GraphsTuple] = next(iter(train_dataloader))
-        '''
+        
+        val_dataloader = grain.DataLoader(
+            data_source=val_datasource,
+            sampler=val_ra_sampler,
+            operations=[
+                # enrich the train records with local subgraphs:
+                RatingsHistoryLookupTransform(
+                    history_lookup=val_history_dict,
+                    max_history=max_history),
+                HardNegativeSamplingTransform(
+                    history_lookup=val_history_dict,
+                    all_movie_ids=all_movie_ids,
+                    exact_negatives_dict=train_val_negatives,
+                    recommendations=recommendations,
+                    num_candidates=num_candidates, top_k=top_k, seed=seed),
+                SparseLocalSubgraphTransform(),
+            ],
+            # worker_count=worker_count,
+            shard_options=shard_opts
+        )
+        
+        if True:
+            train_batch : List[jraph.GraphsTuple] = next(iter(train_dataloader))
+            node_ids = train_batch[0].nodes["ids"]
+            is_movie = (train_batch[0].nodes["type"] > 0)
+            min_movie_id = jnp.min(node_ids[is_movie])
+            print(f'train_batch={train_batch}')
+
+            val_batch: List[jraph.GraphsTuple] = next(iter(train_dataloader))
+            print(f'val_batch={val_batch}')
+            return
         
         learning_rate = 1e-3
         out_dim = 64
@@ -135,6 +158,11 @@ class TestRanker(unittest.TestCase):
         num_heads = 4  # each head sees 64 hidden / 4 heads = 16 dimensional subspace
         dropout_rate = 0.1
         rngs = nnx.Rngs(0)
+        
+        embeddings = read_embeddings(
+            user_embeddings_uri=self.user_embeddings_uri,
+            movie_embeddings_uri=self.movie_embeddings_uri,
+            batch_size=1024)
         
         model = GraphRanker(user_movie_embeds=embeddings, num_candidates=num_candidates,
             hidden_features=hidden_dim, num_layers=num_layers,

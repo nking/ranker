@@ -36,9 +36,13 @@ class TestSparseLocalSubgraphTransform(unittest.TestCase):
         self.movie_ids_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")
         
-        self.unseen_recommendations_uri = os.path.join(
-            get_project_dir(),
-            "src/test/resources/data/recommended_movies.array_record")
+        test_res_dir = os.path.join(get_project_dir(),
+            "src/test/resources/data")
+        self.recommended_movies_getter = RecommendedMovies(movie_rec_file_path=
+        os.path.join(test_res_dir, "recommended_movies.array_record"),
+            movie_rec_ts_file_path=
+            os.path.join(test_res_dir,
+                "recommended_movies_timestamps.array_record"))
         
         self.embeddings = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
@@ -56,14 +60,10 @@ class TestSparseLocalSubgraphTransform(unittest.TestCase):
         all_movie_ids: List[int] = read_movies_array_record(
             self.movie_ids_uri, batch_size=batch_size)
         exact_negatives_dict: Dict[
-            int, Set[int]] = read_user_exact_negatives(
+            int, Set[int]] = read_user_negatives(
             self.negatives_uri,
             batch_size)
-        unseen_recommendations: Dict[
-            int, Set[int]] = read_user_unseen_recommendations(
-            self.unseen_recommendations_uri,
-            batch_size=batch_size)
-        
+      
         batch = [(1875, 1101, 4, 975768800), (635, 2068, 4, 975768823),
             (635, 2357, 4, 975768823)]
         
@@ -76,7 +76,7 @@ class TestSparseLocalSubgraphTransform(unittest.TestCase):
             history_lookup=history_dict,
             all_movie_ids= all_movie_ids,
             exact_negatives_dict = exact_negatives_dict,
-            unseen_recommendations = unseen_recommendations, num_candidates = num_candidates,
+            recommendations= self.recommended_movies_getter, num_candidates = num_candidates,
             seed= 0)
         
         result2:List[Dict[str, Union[int, List[int], np.ndarray]]] = transform2.map(result1)
