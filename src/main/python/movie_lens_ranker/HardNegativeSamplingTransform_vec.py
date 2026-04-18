@@ -57,6 +57,18 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
             "candidate_ids",
             "labels"
         """
+        
+        # we want to form the list of positive and negatives for ranking and their labels as 1 and 0 respectively.
+        # for each row in the batch:
+        #   candidate_ids = the positive movie rated + self.num_candidates - 1 negatives.
+        #       half of the negatives are from the hard negatives if possible, and the other
+        #       half or more if needed, are randomly sampled from the full movie catalog excluding
+        #       the user's history and recommendations for them.
+        #       note that timestamps are used in forming these lists.
+        #   labels = an array of length self.num_candidates where the first is a 1 and the rest are 0s.
+        # the candidate_ids and labels are similarly shuffled to prevent the model from memorizing
+        # that the first candidate is correct.
+        
         #print(f'HNST batch:{batch}')
         n_approx = self.num_candidates // 2
         n_hard = self.num_candidates - 1 - n_approx
