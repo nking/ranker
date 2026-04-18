@@ -11,33 +11,6 @@ from flax.typing import Array
 from movie_lens_ranker.model import GraphRanker
 
 
-def calc_number_jax_graph_components(batch_size: int, max_history: int,
-        num_candidates: int) -> Dict[str, int]:
-    # 40->50, #123->200, #1234->2000, #12345->20000
-    def next_64(x) -> int:
-        return 64*(1+int(x//64))
-    
-    max_nodes = next_64(
-        batch_size * (1 + max_history + num_candidates))
-    max_edges = next_64(batch_size * (max_history + num_candidates))
-    max_graphs = batch_size + 1
-    return {'max_nodes': max_nodes, 'max_edges': max_edges,
-        'max_graphs': max_graphs}
-
-def pad_batch_for_jax(batch: list[jraph.GraphsTuple],
-        max_nodes: int, max_edges: int,
-        max_graphs: int) -> jraph.GraphsTuple:
-    super_graph = jraph.batch(batch)
-    # n_graph is usually batch_size + 1 (the padding graph)
-    padded_graph = jraph.pad_with_graphs(
-        super_graph,
-        n_node=max_nodes,
-        n_edge=max_edges,
-        n_graph=max_graphs
-    )
-    return padded_graph
-
-
 def get_node_graph_index(graph: jraph.GraphsTuple):
     """
     Recreates the mapping of nodes to graph indices.
@@ -153,9 +126,6 @@ def train_fn(model, num_epochs: int, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer, batch_size: int, max_history: int, num_candidates: int):
     
-    jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
-        max_history, num_candidates)
-    
     history = {"train_loss": [], "val_loss":[], "val_mrr": [], "val_ndcg": [], "val_f1":[]}
     
     #configure for early stopping when ndcg stops changing
@@ -167,25 +137,15 @@ def train_fn(model, num_epochs: int, train_dataloader: grain.DataLoader,
     
     for epoch in range(num_epochs):
         epoch_train_loss = []
-        for batch_list in train_dataloader:
-            padded_super_graph = pad_batch_for_jax(
-                batch_list,
-                max_nodes=jax_graph_comp_dict['max_nodes'],
-                max_edges=jax_graph_comp_dict['max_edges'],
-                max_graphs=jax_graph_comp_dict['max_graphs'],
-            )
+        for padded_super_graph in train_dataloader:
+            #jraph.GraphsTuple
             loss = train_step(model, padded_super_graph, optimizer)
             epoch_train_loss.append(loss)
             
         avg_train_loss = jnp.mean(jnp.array(epoch_train_loss))
         epoch_val_loss = [], epoch_val_mrr = [], epoch_val_ndcg = [], epoch_val_f1 = []
-        for val_batch_list in val_dataloader:
-            padded_super_graph = pad_batch_for_jax(
-                val_batch_list,
-                max_nodes=jax_graph_comp_dict['max_nodes'],
-                max_edges=jax_graph_comp_dict['max_edges'],
-                max_graphs=jax_graph_comp_dict['max_graphs'],
-            )
+        for padded_super_graph in  val_dataloader:
+            
             metrics = eval_step(model, padded_super_graph, optimizer)
             epoch_val_mrr.append(metrics["mrr"])
             epoch_val_ndcg.append(metrics["ndcg"])
@@ -224,19 +184,11 @@ def train_fn(model, num_epochs: int, train_dataloader: grain.DataLoader,
 def test_fn(model, num_epochs: int, test_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer, batch_size: int, max_history: int,
         num_candidates: int):
-    jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
-        max_history, num_candidates)
     
     history = {"test_loss": [], "test_mrr": [], "test_ndcg": [], "test_f1": []}
     epoch_test_loss = [], epoch_test_mrr = [], epoch_test_ndcg = [], epoch_test_f1 = []
     for epoch in range(num_epochs):
-        for test_batch_list in test_dataloader:
-            padded_super_graph = pad_batch_for_jax(
-                test_batch_list,
-                max_nodes=jax_graph_comp_dict['max_nodes'],
-                max_edges=jax_graph_comp_dict['max_edges'],
-                max_graphs=jax_graph_comp_dict['max_graphs'],
-            )
+        for padded_super_graph in test_dataloader:
             metrics = eval_step(model, padded_super_graph, optimizer)
             epoch_test_mrr.append(metrics["mrr"])
             epoch_test_ndcg.append(metrics["ndcg"])

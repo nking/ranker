@@ -13,6 +13,7 @@ from movie_lens_ranker.RatingsHistoryLookupTransform import *
 from movie_lens_ranker.HardNegativeSamplingTransform import *
 from movie_lens_ranker.SparseLocalSubgraphTransform import \
     SparseLocalSubgraphTransform
+from movie_lens_ranker.JraphPaddedGraphTupleTransform import JraphPaddedGraphTupleTransform
 from movie_lens_ranker.data_loading import *
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.train import *
@@ -61,6 +62,11 @@ class TestRanker(unittest.TestCase):
             "src/test/resources/data/val_negatives.array_record")
        
     def test_grain_dataloader(self):
+        
+        #for dataloading, which is always on CPU, use this flag to prevent jax from trying to
+        # put jax arrays on GPU before training (which happens in another component)
+        os.environ["JAX_PLATFORMS"] = "cpu"
+        
         max_history = 20
         num_candidates = 20
         batch_size = 1024
@@ -115,6 +121,7 @@ class TestRanker(unittest.TestCase):
                     recommendations=recommendations,
                     num_candidates=num_candidates, top_k=top_k, seed=seed),
                 SparseLocalSubgraphTransform(),
+                JraphPaddedGraphTupleTransform(batch_size=batch_size, max_history=max_history, num_candidates=num_candidates),
             ],
             # worker_count=worker_count,
             shard_options=shard_opts
@@ -135,6 +142,7 @@ class TestRanker(unittest.TestCase):
                     recommendations=recommendations,
                     num_candidates=num_candidates, top_k=top_k, seed=seed),
                 SparseLocalSubgraphTransform(),
+                JraphPaddedGraphTupleTransform(batch_size=batch_size, max_history=max_history, num_candidates=num_candidates),
             ],
             # worker_count=worker_count,
             shard_options=shard_opts
