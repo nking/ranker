@@ -55,31 +55,28 @@ class TestSparseLocalSubgraphTransform(unittest.TestCase):
         num_candidates = 20
         
         #max_history__ is 1849
-        history_dict, max_history__ = build_history_lookup(self.ratings_train_uri,
+        uh = UserHistory(ratings_uri_list=self.ratings_train_uri, fixed_size=2048,pad_value=-1)
+        
+        all_movie_ids: List[int] = read_movies_array_record(self.movie_ids_uri,
             batch_size=batch_size)
-        all_movie_ids: List[int] = read_movies_array_record(
-            self.movie_ids_uri, batch_size=batch_size)
-        exact_negatives_dict: Dict[
-            int, Set[int]] = read_user_negatives(
-            self.negatives_uri,
-            batch_size)
+        
+        negatives = Negatives(self.negatives_uri, fixed_size=256, pad_value=-1)
       
         batch = [(1875, 1101, 4, 975768800), (635, 2068, 4, 975768823),
             (635, 2357, 4, 975768823)]
         
-        transform1 = RatingsHistoryLookupTransform(history_lookup=history_dict,
-            max_history=max_history)
+        transform1 = RatingsHistoryLookupTransform(history_lookup=uh, max_history=max_history)
             
-        result1:List[Dict[str, Union[int, List]]] = transform1.map(batch)
+        result1:Dict[str, np.ndarray] = transform1.map(batch)
         
         transform2 = HardNegativeSamplingTransform(
-            history_lookup=history_dict,
+            history_lookup=uh,
             all_movie_ids= all_movie_ids,
-            exact_negatives_dict = exact_negatives_dict,
-            recommendations= self.recommended_movies_getter, num_candidates = num_candidates,
+            negatives = negatives,
+            recommendations = self.recommended_movies_getter, num_candidates = num_candidates,
             seed= 0)
         
-        result2:List[Dict[str, Union[int, List[int], np.ndarray]]] = transform2.map(result1)
+        result2:Dict[str, np.ndarray] = transform2.map(result1)
         
         transform3 = SparseLocalSubgraphTransform()
         
@@ -94,6 +91,21 @@ class TestSparseLocalSubgraphTransform(unittest.TestCase):
             n_node = graph.n_node
             n_edge = graph.n_edge
             globals = graph.globals #None
+            
+            len1 = len(nodes["ids"])
+            self.assertTrue(len1 > num_candidates)
+            self.assertEqual(len1, len(nodes["label"]))
+            self.assertEqual(len1, len(nodes["type"]))
+            self.assertEqual(len1, len(nodes["candidate_mask"]))
+            
+            len2 = len(edges["rating"])
+            self.assertTrue(len2 > num_candidates)
+            self.assertEqual(len2, len(senders))
+            self.assertEqual(len2, len(receivers))
+            
+            self.assertIsNotNone(n_node)
+            self.assertIsNotNone(n_edge)
+
         #editing assert contents
         '''
         jraph.GraphsTuple(

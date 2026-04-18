@@ -5,6 +5,8 @@ from helper import *
 from movie_lens_ranker.HardNegativeSamplingTransform import *
 
 from movie_lens_ranker.RatingsHistoryLookupTransform import *
+from movie_lens_ranker.UserHistory import UserHistory
+from movie_lens_ranker.Negatives_vec import Negatives
 from movie_lens_ranker.data_loading import *
 
 class TestRanker(unittest.TestCase):
@@ -51,50 +53,41 @@ class TestRanker(unittest.TestCase):
         max_history = 20
         num_candidates = 20
         
-        history_dict, max_history__ = build_history_lookup(self.ratings_train_uri,
-            batch_size=batch_size)
-        all_movie_ids: List[int] = read_movies_array_record(
-            self.movie_ids_uri, batch_size=batch_size)
-        exact_negatives_dict: Dict[
-            int, Set[int]] = read_user_negatives(
-            self.negatives_uri,
-            batch_size)
+        ratings_uri_list = [self.ratings_train_uri, self.ratings_val_uri]
         
+        uh = UserHistory(ratings_uri_list=ratings_uri_list, fixed_size=2048,pad_value=-1)
+        
+        all_movie_ids: List[int] = read_movies_array_record(self.movie_ids_uri, batch_size=batch_size)
+        
+        negatives = Negatives(self.negatives_uri, fixed_size=256,pad_value=-1)
+       
+       
         batch = [(1875, 1101, 4, 975768800), (635, 2068, 4, 975768823),
             (635, 2357, 4, 975768823)]
         
-        transform1 = RatingsHistoryLookupTransform(
-            history_dict,
-            max_history=max_history)
-            
-        result1:List[Dict[str, Union[int, List]]] = transform1.map(batch)
+        transform1 = RatingsHistoryLookupTransform(history_lookup=uh, max_history=max_history)
         
+        result1:Dict[str, np.ndarray] = transform1.map(batch)
         
         transform2 = HardNegativeSamplingTransform(
-            history_lookup=history_dict,
+            history_lookup=uh,
             all_movie_ids= all_movie_ids,
-            exact_negatives_dict = exact_negatives_dict,
+            negatives = negatives,
             recommendations=self.recommended_movies_getter, num_candidates = num_candidates,
             seed= 0)
         
-        result2:List[Dict[str, Union[int, List[int], np.ndarray]]] = transform2.map(result1)
-        self.assertTrue(isinstance(result2, list))
+        result2:Dict[str, np.ndarray] = transform2.map(result1)
+        self.assertTrue(isinstance(result2, dict))
+        
         expected_keys = {"user_id", "movie_id", "rating", "timestamp",
             "history_movie_ids", "history_ratings", "history_length",
             "candidate_ids", "labels"}
-        for entry in result2:
-            self.assertTrue(isinstance(entry, dict))
-            keys = entry.keys()
-            self.assertTrue(keys == expected_keys)
-            self.assertTrue(isinstance(entry["user_id"], int))
-            self.assertTrue(isinstance(entry["movie_id"], int))
-            self.assertTrue(isinstance(entry["rating"], int))
-            self.assertTrue(isinstance(entry["timestamp"], int))
-            self.assertTrue(isinstance(entry["history_movie_ids"], list))
-            self.assertTrue(isinstance(entry["history_ratings"], list))
-            self.assertTrue(isinstance(entry["history_length"], int))
-            self.assertTrue(isinstance(entry["candidate_ids"], np.ndarray))
-            self.assertTrue(isinstance(entry["labels"], np.ndarray))
-
+        for expected_key in expected_keys:
+            self.assertTrue(expected_key in result2.keys())
+            self.assertTrue(isinstance(result2[expected_key], np.ndarray))
+        
+        for i, user_id in enumerate(result2["user_id"]):
+            self.assertEqual(batch[i][0], user_id)
+            
     if __name__ == '__main__':
         unittest.main()

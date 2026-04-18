@@ -2,14 +2,15 @@ import os.path
 import unittest
 from array_record.python import array_record_module
 from helper import *
-from movie_lens_ranker.HardNegativeSamplingTransform_vec import *
+from movie_lens_ranker.HardNegativeSamplingTransform import *
+from movie_lens_ranker.JraphPaddedGraphTupleTransform import \
+    JraphPaddedGraphTupleTransform
 
-from movie_lens_ranker.RatingsHistoryLookupTransform_vec import *
-from movie_lens_ranker.UserHistory_vec import UserHistory
-from movie_lens_ranker.Negatives_vec import Negatives
+from movie_lens_ranker.RatingsHistoryLookupTransform import *
+from movie_lens_ranker.SparseLocalSubgraphTransform import *
 from movie_lens_ranker.data_loading import *
 
-class TestRanker(unittest.TestCase):
+class TestJraphPaddedGraphTupleTransform(unittest.TestCase):
     def setUp(self):
         
         self.ratings_train_uri, self.ratings_val_uri, self.ratings_test_uri \
@@ -37,57 +38,66 @@ class TestRanker(unittest.TestCase):
         self.movie_ids_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")
         
-        test_res_dir = os.path.join(get_project_dir(), "src/test/resources/data")
+        test_res_dir = os.path.join(get_project_dir(),
+            "src/test/resources/data")
         self.recommended_movies_getter = RecommendedMovies(movie_rec_file_path=
-            os.path.join(test_res_dir, "recommended_movies.array_record"),
+        os.path.join(test_res_dir, "recommended_movies.array_record"),
             movie_rec_ts_file_path=
-            os.path.join(test_res_dir, "recommended_movies_timestamps.array_record"))
+            os.path.join(test_res_dir,
+                "recommended_movies_timestamps.array_record"))
         
         self.embeddings = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)
-    
-    def test_HardNegativesTransform(self):
+        
+    def test_transform(self):
         batch_size = 1024
         max_history = 20
         num_candidates = 20
         
-        ratings_uri_list = [self.ratings_train_uri, self.ratings_val_uri]
+        #max_history__ is 1849
+        uh = UserHistory(ratings_uri_list=self.ratings_train_uri, fixed_size=2048,pad_value=-1)
         
-        uh = UserHistory(ratings_uri_list=ratings_uri_list, fixed_size=2048,pad_value=-1)
+        all_movie_ids: List[int] = read_movies_array_record(self.movie_ids_uri,
+            batch_size=batch_size)
         
-        all_movie_ids: List[int] = read_movies_array_record(self.movie_ids_uri, batch_size=batch_size)
-        
-        negatives = Negatives(self.negatives_uri, fixed_size=256,pad_value=-1)
-       
-       
+        negatives = Negatives(self.negatives_uri, fixed_size=256, pad_value=-1)
+      
         batch = [(1875, 1101, 4, 975768800), (635, 2068, 4, 975768823),
             (635, 2357, 4, 975768823)]
         
         transform1 = RatingsHistoryLookupTransform(history_lookup=uh, max_history=max_history)
-        
+            
         result1:Dict[str, np.ndarray] = transform1.map(batch)
         
         transform2 = HardNegativeSamplingTransform(
             history_lookup=uh,
             all_movie_ids= all_movie_ids,
             negatives = negatives,
-            recommendations=self.recommended_movies_getter, num_candidates = num_candidates,
+            recommendations = self.recommended_movies_getter, num_candidates = num_candidates,
             seed= 0)
         
         result2:Dict[str, np.ndarray] = transform2.map(result1)
-        self.assertTrue(isinstance(result2, dict))
         
-        expected_keys = {"user_id", "movie_id", "rating", "timestamp",
-            "history_movie_ids", "history_ratings", "history_length",
-            "candidate_ids", "labels"}
-        for expected_key in expected_keys:
-            self.assertTrue(expected_key in result2.keys())
-            self.assertTrue(isinstance(result2[expected_key], np.ndarray))
+        transform3 = SparseLocalSubgraphTransform()
         
-        for i, user_id in enumerate(result2["user_id"]):
-            self.assertEqual(batch[i][0], user_id)
-            
+        result3: List[jraph.GraphsTuple] = transform3.map(result2)
+        
+        transform4 = JraphPaddedGraphTupleTransform(batch_size=batch_size, max_history=max_history, num_candidates=num_candidates)
+
+        graph : jraph.GraphsTuple = transform4.map(result3)
+        
+        #NOTE, these are np.ndarrays not jax.Arrays
+        self.assertTrue(isinstance(graph, jraph.GraphsTuple))
+        self.assertIsNotNone(graph)
+        self.assertIsNotNone(graph.nodes)
+        self.assertIsNotNone(graph.edges)
+        self.assertIsNotNone(graph.senders)
+        self.assertIsNotNone(graph.receivers)
+        self.assertIsNotNone(graph.n_node)
+        self.assertIsNotNone(graph.n_edge)
+        globals = graph.globals  # None
+
     if __name__ == '__main__':
         unittest.main()

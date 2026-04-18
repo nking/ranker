@@ -19,6 +19,7 @@ class UserHistory (object):
         
         #buildnumpy vectors, making padded lists of length fixed_history_length for movies, ratings, and timestamps
         lookup, max_history = build_history_lookup(ratings_uri_list)
+        self.max_history = max_history
         print(f'max_history found = {max_history}.  fixed_size={fixed_size}')
         
         n_users = len(lookup)

@@ -3,9 +3,11 @@ import grain.python as pgrain
 import numpy as np
 from array_record.python import array_record_module
 
+from movie_lens_ranker.UserHistory import UserHistory
+
+
 class RatingsHistoryLookupTransform(pgrain.MapTransform):
-    def __init__(self, history_lookup: Dict[int, Tuple[list, list, list]],
-            max_history: int = 20):
+    def __init__(self, history_lookup: UserHistory, max_history: int = 20):
         """
         history_lookup: the results of method build_history_lookup
         max_history: Fixed size for the history window (crucial for JAX).
@@ -13,55 +15,51 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
         self.history_lookup = history_lookup
         self.max_history = max_history
     
-    def map(self, batch: List[Tuple[int, int, int, int]]) -> List[Dict[str, Union[int, List]]]:
+    def map(self, batch: List[Tuple[int, int, int, int]]) -> Dict[
+        str, np.ndarray]:
         """
         map the input train record dictionary to a dictionary containing it and padded history entries
         :param batch: a list, that is batch, of tuples containing the user_id, movie_id, rating, and timestamp
-        :return: a list of dictionaries containing
-             'user_id':int
-            'movie_id':int,
-            'rating': int,
-            'timestamp': int,
-            "history_movie_ids": list,
-            "history_ratings": list,
-            "history_length": int
+        :return: a dictionary containing numpy arrays
+             'user_id'.
+            'movie_id',
+            'rating',
+            'timestamp',
+            "history_movie_ids",
+            "history_ratings",
+            "history_length"
         """
-        results = []
+        user_ids = []
+        movie_ids = []
+        ratings = []
+        timestamps = []
         for record in batch:
+            u_id, m_id, r, ts = record[0], record[1], record[2], record[3]
+            user_ids.append(u_id)
+            movie_ids.append(m_id)
+            ratings.append(r)
+            timestamps.append(ts)
+            
+        user_ids = np.array(user_ids, dtype=np.int32)
+        movie_ids = np.array(movie_ids, dtype=np.int32)
+        ratings = np.array(ratings, dtype=np.float32)
+        timestamps = np.array(timestamps, dtype=np.int64)
         
-            user_id = record[0]
-            current_ts = record[3]
-            
-            # O(1) Lookup: Get this user's full history arrays
-            # If user not found, we use empty arrays
-            user_ts, user_movies, user_ratings = self.history_lookup.get( user_id, ([], [], []))
-            
-            # Temporal Safety: Find index where time < current_ts
-            # np.searchsorted finds the insertion point to maintain order
-            idx = int(np.searchsorted(user_ts, current_ts, side='left'))
-            
-            valid_movies_history = user_movies[:idx]
-            valid_ratings_history = user_ratings[:idx]
-            
-            # 'max_history' most recent movies
-            recent_movies_history = valid_movies_history[-self.max_history:]
-            recent_ratings_history = valid_ratings_history[-self.max_history:]
-            
-            n_hist = len(recent_movies_history)
-            # JAX-Required Padding.  return a fixed shape (e.g., 20) or JAX will crash/recompile
-            if n_hist < self.max_history:
-                n_padding = self.max_history - n_hist
-                recent_movies_history.extend([-1] * n_padding)
-                recent_ratings_history.extend([-1] * n_padding)
-            
-            # Return updated record with the "Context" attached
-            results.append({
-                'user_id': user_id,
-                'movie_id': record[1],
-                'rating': record[2],
-                'timestamp': record[3],
-                "history_movie_ids": recent_movies_history,
-                "history_ratings": recent_ratings_history,
-                "history_length": n_hist
-            })
-        return results
+        history_movies, history_ratings = self.history_lookup.get_history_before_timestamp(
+            user_ids, timestamps, self.max_history, -1)
+        
+        history_lengths = np.sum(history_movies != -1, axis=1)
+        
+        # Convert everything to a single dictionary of NumPy arrays
+        return {
+            'user_id': user_ids,
+            'movie_id': movie_ids,
+            'rating': ratings,
+            'timestamp': timestamps,
+            # (Batch, Max_History)
+            'history_movie_ids': history_movies,
+            # (Batch, Max_History)
+            'history_ratings': history_ratings,
+            # (Batch, Max_History)
+            'history_length': history_lengths
+        }

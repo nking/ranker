@@ -9,7 +9,7 @@ from movie_lens_ranker.RecommendedMovies import RecommendedMovies
 from helper import *
 from movie_lens_ranker.BatchSampler import BatchSampler
 from movie_lens_ranker.RandomAccessArrayRecordDataSource import *
-from movie_lens_ranker.UserHistory_vec import UserHistory
+from movie_lens_ranker.UserHistory import UserHistory
 from movie_lens_ranker.data_loading import *
 import grain
 

@@ -4,13 +4,12 @@ from typing import List, Dict
 # is handed off to the GPU.
 # *** the file loading the dataloader should use:
 #    os.environ["JAX_PLATFORMS"] = "cpu"
-# to prevent jax from tryin to use the GPU
+# to prevent jax from trying to use the GPU
 
 import grain.python as pgrain
 import jraph
 
 class JraphPaddedGraphTupleTransform(pgrain.MapTransform):
-    
     def __init__(self,  batch_size: int, max_history: int, num_candidates: int):
         
         self.jax_graph_comp_dict = self.calc_number_jax_graph_components(batch_size,
