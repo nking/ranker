@@ -35,7 +35,12 @@ class Negatives (object):
             if reader is not None:
                 reader.close()
                 
-        return np.array(user_ids, dtype=np.int32), movie_ids
+        user_ids = np.array(user_ids, dtype=np.int32)
+        
+        #sort by user_ids so can use searchsorted
+        sort_indices = np.argsort(user_ids)
+        
+        return user_ids[sort_indices], movie_ids[sort_indices]
     
     def get_negatives(self, user_id: np.ndarray, length:int, seed:int=0) -> np.ndarray:
         """

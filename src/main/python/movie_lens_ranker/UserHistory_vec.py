@@ -42,7 +42,9 @@ class UserHistory (object):
         
         #sort by user_ids to enable np.searchsorted later
         user_ids = np.array(user_ids, dtype=np.int32)
+        
         sort_indices = np.argsort(user_ids)
+        
         user_ids = user_ids[sort_indices]
         movie_ids = movie_ids[sort_indices]
         ratings = ratings[sort_indices]

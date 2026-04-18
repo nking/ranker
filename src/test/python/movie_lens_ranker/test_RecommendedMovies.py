@@ -35,14 +35,15 @@ class TestRecommendedMovies(unittest.TestCase):
         self.assertEqual(np.shape(movies), (top_k,))
         
         user_id = np.array([2, 4])
-        movies = recommended_movies_getter.get_unseen_movies(user_id, timestamp=ts, top_k=top_k)
+        timestamps = np.array([978133414, 978133414])
+        movies = recommended_movies_getter.get_unseen_movies(user_id, timestamp=timestamps, top_k=top_k)
         self.assertEqual(np.shape(movies), (len(user_id), top_k))
         
         #demonstrating what to do if have inputs of this form:
         user_id = np.array([[2], [4]])
         if user_id.ndim > 1:
             user_id = user_id.squeeze()
-        movies = recommended_movies_getter.get_unseen_movies(user_id, timestamp=ts, top_k=top_k)
+        movies = recommended_movies_getter.get_unseen_movies(user_id, timestamp=timestamps, top_k=top_k)
         self.assertEqual(np.shape(movies), (len(user_id), top_k))
         
 if __name__ == '__main__':

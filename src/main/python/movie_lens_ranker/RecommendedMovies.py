@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Tuple
 
 import numpy as np
 from array_record.python import array_record_module
@@ -6,12 +6,16 @@ import msgpack
 
 class RecommendedMovies (object):
     def __init__(self, movie_rec_file_path:str, movie_rec_ts_file_path:str):
-        self.movies :np.ndarray = self._read(movie_rec_file_path)
-        self.timestamps : np.ndarray = self._read(movie_rec_ts_file_path)
+        self.user_ids, self.movies = self._read(movie_rec_file_path)
+        _ , self.timestamps = self._read(movie_rec_ts_file_path, dtype2=np.int64)
+        sort_indices = np.argsort(self.user_ids)
+        self.user_ids = self.user_ids[sort_indices]
+        self.movies = self.movies[sort_indices]
+        self.timestamps = self.timestamps[sort_indices]
         
-    def _read(self, file_path:str):
+    def _read(self, file_path:str, dtype2:type=np.int32) -> Tuple[np.ndarray, np.ndarray]:
         ids = []
-        results = []
+        items = []
         reader = None
         try:
             reader = array_record_module.ArrayRecordReader(file_path)
@@ -20,11 +24,13 @@ class RecommendedMovies (object):
             records = [msgpack.unpackb(b, use_list=False) for b in batch_bytes]
             for record in records:
                 ids.append(record[0])
-                results.append(record[1])
+                items.append(record[1])
         finally:
             if reader is not None:
                 reader.close()
-        return np.array([val for _, val in sorted(zip(ids, results))], dtype=np.int64)
+        user_ids = np.array(ids, dtype=np.int32)
+        items = np.array(items, dtype=dtype2)
+        return user_ids, items
     
     def get_unseen_movies(self, user_id: np.ndarray, timestamp: np.ndarray, top_k:int=200) -> np.ndarray:
         """
@@ -34,7 +40,7 @@ class RecommendedMovies (object):
         :param top_k: number of top unseen recommendations to return
         :return: top k of movie recommendations unseen by user_id.  shape returned is (len(user_id_, top_k)
         """
-        user_idx = user_id - 1
+        user_idx = np.searchsorted(self.user_ids, user_id)
         
         mask = self.timestamps[user_idx] > timestamp[:, np.newaxis]
         sort_indices = np.argsort(~mask, axis=1, kind='stable')
@@ -51,7 +57,7 @@ class RecommendedMovies (object):
         :param top_k: number of top unseen recommendations to return
         :return: top k of movie recommendations unseen by user_id.  shape returned is (top_k,)
         """
-        user_idx = user_id - 1
+        user_idx = np.searchsorted(self.user_ids, user_id)
         mask = self.timestamps[user_idx] > timestamp
         sort_indices = np.argsort(~mask, axis=0, kind='stable')
         # equiv of row-wise tf.gather:
