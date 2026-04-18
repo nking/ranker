@@ -69,7 +69,7 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
             
             # Get Hard Negatives (from Retrieval model)
             hard_negs = self.exact_negatives_dict.get(user_id, [])
-            hard_negs = [m for m in hard_negs if m != pos_id]
+            hard_negs = [m for m in hard_negs if m != pos_id]  #hard negatives is not going to contain pos_id because the training set are positives
             
             n_approx = self.num_candidates//2
             n_hard = self.num_candidates - 1 - n_approx

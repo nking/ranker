@@ -26,7 +26,7 @@ class RecommendedMovies (object):
                 reader.close()
         return np.array([val for _, val in sorted(zip(ids, results))], dtype=np.int64)
     
-    def get_unseen_movies(self, user_id: np.ndarray, timestamp: int, top_k:int=200) -> np.ndarray:
+    def get_unseen_movies(self, user_id: np.ndarray, timestamp: np.ndarray, top_k:int=200) -> np.ndarray:
         """
         given array of user_ids, return top_k recommended movies for user that they haven't seen before time=timestamp
         :param user_id: input array of shape (None,), e.g. np.array([2,4])
@@ -35,7 +35,8 @@ class RecommendedMovies (object):
         :return: top k of movie recommendations unseen by user_id.  shape returned is (len(user_id_, top_k)
         """
         user_idx = user_id - 1
-        mask = self.timestamps[user_idx] > timestamp
+        
+        mask = self.timestamps[user_idx] > timestamp[:, np.newaxis]
         sort_indices = np.argsort(~mask, axis=1, kind='stable')
         #equiv of row-wise tf.gather:
         sel_movies = np.take_along_axis(self.movies[user_idx], sort_indices, axis=1)
