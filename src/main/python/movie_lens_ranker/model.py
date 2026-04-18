@@ -4,15 +4,6 @@ import jraph
 from array_record.python import array_record_module
 from movie_lens_ranker.data_loading import *
 
-def get_batch_indices(n_node: jnp.ndarray) -> jnp.ndarray:
-    """
-    Computes indices [0, 0, 1, 1, 1, 2, ...] from n_node [2, 3, 1, ...].
-    """
-    # This creates an array of graph IDs [0, 1, 2, ...]
-    graph_ids = jnp.arange(len(n_node))
-    # This repeats each ID by the number of nodes in that graph
-    return jnp.repeat(a=graph_ids, repeats=n_node, total_repeat_length=jnp.sum(n_node))
-
 class GraphRanker(nnx.Module):
     def __init__(self, user_movie_embeds: jnp.ndarray,
             num_candidates: int,

@@ -60,22 +60,25 @@ class TestRanker(unittest.TestCase):
             "src/test/resources/data/train_negatives.array_record")
         self.val_negatives_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/val_negatives.array_record")
+        self.test_negatives_uri = os.path.join(get_project_dir(),
+            "src/test/resources/data/test_negatives.array_record")
         self.train_val_negatives_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/train_val_negatives.array_record")
-       
+        self.train_val_test_negatives_uri = os.path.join(get_project_dir(),
+            "src/test/resources/data/train_val_test_negatives.array_record")
+    
     def test_grain_dataloader(self):
         
         #for dataloading, which is always on CPU, use this flag to prevent jax from trying to
         # put jax arrays on GPU before training (which happens in another component)
         os.environ["JAX_PLATFORMS"] = "cpu"
         
-        max_history = 20
-        num_candidates = 20
-        batch_size = 1024
-        batch_size = 2
-        num_epochs = 1
+        max_history = 40
+        num_candidates = 40
+        batch_size = 8
+        num_epochs = 2
         seed = 1234
-        top_k = 100
+        top_k = 20
         worker_count = max(1, os.cpu_count() - 1)
         shard_opts = grain.sharding.ShardOptions(shard_index=0, shard_count=1)
         
@@ -93,10 +96,10 @@ class TestRanker(unittest.TestCase):
         train_negatives = Negatives(self.train_negatives_uri, fixed_size=256,pad_value=-1)
         train_val_negatives = Negatives(self.train_val_negatives_uri, fixed_size=256,pad_value=-1)
         val_negatives = Negatives(self.val_negatives_uri, fixed_size=256, pad_value=-1)
-
+       
         train_datasource = RandomAccessArrayRecordDataSource(self.ratings_train_uri)
         val_datasource = RandomAccessArrayRecordDataSource(self.ratings_val_uri)
-
+       
         train_ra_sampler = BatchSampler(num_records=train_datasource.__len__(),
             num_epochs=num_epochs,
             batch_size=batch_size, shuffle=True, seed=seed,
@@ -149,8 +152,8 @@ class TestRanker(unittest.TestCase):
             # worker_count=worker_count,
             shard_options=shard_opts
         )
-        
-        if True:
+       
+        if False:
             train_batch : jraph.GraphsTuple = next(iter(train_dataloader))
             print(f'train_batch={train_batch}')
 
@@ -159,12 +162,12 @@ class TestRanker(unittest.TestCase):
             return
         
         learning_rate = 1e-3
-        out_dim = 64
-        hidden_dim = 64  # 2 * embed_in_dim is probably good
+        out_dim = 16
+        hidden_dim = 32  # 2 * embed_in_dim is probably good
         num_layers = 2  # captures the 2-hop neighborhood.  3 tends to oversmooth
         num_heads = 4  # each head sees 64 hidden / 4 heads = 16 dimensional subspace
         dropout_rate = 0.1
-        rngs = nnx.Rngs(0)
+        rngs = nnx.Rngs(seed)
         
         embeddings = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
@@ -176,8 +179,7 @@ class TestRanker(unittest.TestCase):
             out_features=out_dim, heads=num_heads,
             dropout_rate=dropout_rate, rngs=rngs)
         
-        optimizer = nnx.Optimizer(model, optax.adam(learning_rate),
-            wrt=nnx.Param)
+        optimizer = nnx.Optimizer(model, optax.adam(learning_rate), wrt=nnx.Param)
             
         train_metrics = train_fn(model=model, num_epochs=num_epochs, train_dataloader=train_dataloader,
             val_dataloader=val_dataloader,
@@ -185,10 +187,47 @@ class TestRanker(unittest.TestCase):
             num_candidates=num_candidates)
         print(f'train_metrics: {train_metrics}')
         
-        #run the eval method temporarily on train data
-        eval_metrics = test_fn(model=model, num_epochs=num_epochs, dataloader=val_dataloader,
-            optimizer=optimizer, batch_size=batch_size, max_history=max_history,
-            num_candidates=num_candidates)
-    
+        if False:
+            test_history = UserHistory(ratings_uri_list=self.ratings_val_uri,
+                fixed_size=2048, pad_value=-1)
+            test_negatives = Negatives(self.test_negatives_uri, fixed_size=256,
+                pad_value=-1)
+            
+            test_datasource = RandomAccessArrayRecordDataSource(
+                self.ratings_test_uri)
+            test_ra_sampler = BatchSampler(
+                num_records=test_datasource.__len__(),
+                num_epochs=num_epochs,
+                batch_size=batch_size, shuffle=True, seed=seed,
+                shard_options=shard_opts)
+            
+            test_dataloader = grain.DataLoader(
+                data_source=test_datasource,
+                sampler=test_ra_sampler,
+                operations=[
+                    # enrich the train records with local subgraphs:
+                    RatingsHistoryLookupTransform(
+                        history_lookup=test_history,
+                        max_history=max_history),
+                    HardNegativeSamplingTransform(
+                        history_lookup=test_history,
+                        all_movie_ids=all_movie_ids,
+                        negatives=test_negatives,
+                        # negatives=train_val_negatives,
+                        recommendations=recommendations,
+                        num_candidates=num_candidates, top_k=top_k, seed=seed),
+                    SparseLocalSubgraphTransform(),
+                    JraphPaddedGraphTupleTransform(batch_size=batch_size,
+                        max_history=max_history,
+                        num_candidates=num_candidates),
+                ],
+                # worker_count=worker_count,
+                shard_options=shard_opts
+            )
+            
+            eval_metrics = test_fn(model=model, num_epochs=num_epochs, test_dataloader=test_dataloader,
+                optimizer=optimizer, batch_size=batch_size, max_history=max_history,
+                num_candidates=num_candidates)
+        
     if __name__ == '__main__':
         unittest.main()

@@ -1,5 +1,6 @@
 from typing import Dict, Tuple
 
+import jax
 import jraph
 import jax.numpy as jnp
 from flax import nnx
@@ -23,7 +24,7 @@ def get_node_graph_index(graph: jraph.GraphsTuple):
 def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple):
     
     # Forward Pass: returns ONLY candidate scores [num_total_graphs * K]
-    all_scores = model(padded_graph)
+    all_scores = model(padded_graph) #LinearizeTracer<float32[60]>
     
     num_total_graphs = padded_graph.n_node.shape[0]  # batch_size + 1
     K = model.K  # num_candidates from data loading
@@ -80,7 +81,8 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
             where=master_mask,
             reduce_fn=jnp.mean
         )
-        return loss
+        jax.debug.print("loss={loss}", loss=loss)
+        return loss #LinearizeTracer<float32[]>
     loss, grads = nnx.value_and_grad(loss_fn)(model, padded_graph)
     optimizer.update(model, grads)
     return loss
@@ -144,9 +146,9 @@ def train_fn(model, num_epochs: int, train_dataloader: grain.DataLoader,
             
         avg_train_loss = jnp.mean(jnp.array(epoch_train_loss))
         epoch_val_loss = [], epoch_val_mrr = [], epoch_val_ndcg = [], epoch_val_f1 = []
-        for padded_super_graph in  val_dataloader:
-            
-            metrics = eval_step(model, padded_super_graph, optimizer)
+        
+        for padded_super_graph_val in  val_dataloader:
+            metrics = eval_step(model, padded_super_graph_val, optimizer)
             epoch_val_mrr.append(metrics["mrr"])
             epoch_val_ndcg.append(metrics["ndcg"])
             epoch_val_loss.append(metrics["val_loss"])
