@@ -1,3 +1,4 @@
+import jax
 import jraphx
 from flax import nnx
 import jraph
@@ -8,7 +9,7 @@ class GraphRanker(nnx.Module):
     def __init__(self, user_movie_embeds: jnp.ndarray,
             num_candidates: int,
             hidden_features: int = 128, num_layers: int = 2,
-            out_features: int = 64, heads: int = 4,
+            out_features: int = 64, heads: int = 4, edge_embed_dim:int=8,
             dropout_rate: float = 0.1, rngs: nnx.Rngs = nnx.Rngs(0)):
         """
         :param user_movie_embeds: concat of [user embeddings and movie_embeddings]
@@ -17,17 +18,23 @@ class GraphRanker(nnx.Module):
         :param num_layers:
         :param out_features:
         :param heads:
+        :param edge_embed_dim: typically a value in range 4 to 16
         :param dropout_rate:
         :param rngs:
         """
+        self.edge_embed_dim = edge_embed_dim
         self.embed_in_dim = user_movie_embeds.shape[1]
         self.user_movie_embeddings = nnx.Variable(user_movie_embeds)
         
         self.K = num_candidates
         
+        # 6 embeddings: 0 (No Rating/Candidate), 1, 2, 3, 4, 5 (Ratings)
+        self.rating_embed = nnx.Embed(num_embeddings=6, features=edge_embed_dim, rngs=rngs)
+        
         self.gatv2 = jraphx.nn.GAT(
             in_features=self.embed_in_dim,
             hidden_features=hidden_features,
+            edge_dim=edge_embed_dim,
             # 2 * embed_in_dim is probably good
             num_layers=num_layers,
             out_features=out_features,
@@ -37,7 +44,6 @@ class GraphRanker(nnx.Module):
             dropout_rate=dropout_rate,
             norm="layer_norm",
             jk="max",  # JumpingKnowledge aggregation
-            edge_dim=None,
             rngs=rngs
         )
         self.score_head = nnx.Linear(out_features * 2, 1, rngs=rngs)
@@ -51,9 +57,11 @@ class GraphRanker(nnx.Module):
         #[ len(graph.nodes["ids"]) X embed_in_dim ]
         x = jnp.take(a=self.user_movie_embeddings.value, indices=graph.nodes["ids"], axis=0)
         
-        edge_attr = graph.edges["rating"]
-        if edge_attr.ndim == 1:
-            edge_attr = edge_attr[:, None]
+        # Convert edge ratings to integers (0-5)
+        # Ensure they are int32 so the embedding layer can use them as indices
+        edge_indices = graph.edges["rating"].astype(jnp.int32)
+        
+        edge_attr = self.rating_embed(edge_indices)
         
         num_total_nodes = x.shape[0]
         batch_indices = jnp.repeat(
