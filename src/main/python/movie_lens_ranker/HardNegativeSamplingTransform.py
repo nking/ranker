@@ -58,6 +58,7 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
             "history_length",
             "candidate_ids",
             "labels"
+        Note that candidate_ids is guaranteed to not have padding values, they're all real movie_ids
         """
         
         # we want to form the list of positive and negatives for ranking and their labels as 1 and 0 respectively.
@@ -74,81 +75,69 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
         #print(f'HNST batch:{batch}')
     
         n_users = batch['user_id'].shape[0]
-        
+        n_negs = self.num_candidates - 1  # Total negatives needed per user
         rng = np.random.default_rng(self.seed)
         
-        # (1): n_hard number of hard negatives and natural negatives
-        hard_negative_movie_ids = self.negatives.get_negatives(user_id=batch['user_id'],
-            length=self.n_hard, seed=self.seed)
-        # where there are not enough hard negatives, supplement them
-        # with the unseen recommended.
-        counts = np.sum(hard_negative_movie_ids != -1, axis=1, keepdims=True)
-        indices = np.arange(self.n_hard)  # (n_hard,)
-        is_padding = indices >= counts
-        fetch_indices = np.maximum(0, indices - counts)
-        #Calculate the 'Fetch Indices' for the recommendations
-        # For a row with 3 valid negs, we want to fetch rec indices 0, 1, 2...
-        # for columns 3, 4, 5...
-        # fetch_indices = [0, 0, 0, 0, 1, 2, 3...] (clamped to 0 for non-padding)
-        movies_recommended_unseen = self.recommendations.get_unseen_movies(
-            user_id=batch['user_id'], timestamp=batch['timestamp'], top_k=self.n_hard)
-        filler_values = np.take_along_axis(movies_recommended_unseen, fetch_indices, axis=1)
-        hard_negatives_pool = np.where(is_padding, filler_values, hard_negative_movie_ids)
-        
-        # (2) n_approx negatives are chosen randomly from the full movie catalog minus the exclude list:
-        
-        #these are to be excluded from a random selection of self.all_movie_ids to choose approx_negatives
-        movie_histories_long = self.history_lookup.get_movieids_before_timestamp(
+        # PREPARE EXCLUSIONS
+        # Get history to ensure approx negatives are actually "unseen"
+        movie_histories = self.history_lookup.get_movieids_before_timestamp(
             user_id=batch['user_id'], timestamp=batch['timestamp'],
             max_hist=self.history_lookup.fixed_size)
+        exclude = np.hstack([movie_histories, batch['movie_id'][:, np.newaxis]])
         
-        #if user has watched and rated the entire catalog, and if UserData limits are same as
-        # entire catalog length, then there is a possibility that exclude is the entire catalog.
-        #  in the movie-lens 1m dataset, the largest user history is 2000 something, which is
-        #  roughly half the movies.dat catalog.
-        #  the result below is that noise is all -1, so the shuffle of indexes is ineffective
-        #  and a set of n_draw from approx_candidates gets used for this special case.
-        exclude = np.hstack([movie_histories_long, batch['movie_id'][:,np.newaxis]])
-        
-        #final candidate_ids are [pos_id] + hard_negs[:n_hard] + approx_negs[:n_approx]
-        # shape (n_users, self.num_candidates)
-        # but there will be missing hard_negs for some users
-        # so we generate a base layer of shape (n_users, self.num_candidates) filled with approx_negatives,
-        # then fill in the smallest indices with hard_negatives where they exist.
-        
-        n_draw = self.n_approx * 3
+        # CREATE THE "BASE" APPROXIMATE POOL
+        # We draw a surplus to ensure we can fill all n_negs slots after filtering
+        n_draw = n_negs * 3
         approx_indices = rng.integers(0, len(self.all_movie_ids), size=(n_users, n_draw))
         approx_candidates = self.all_movie_ids[approx_indices]
-        is_forbidden = np.any(approx_candidates[:, :, np.newaxis] == exclude[:, np.newaxis, :], axis=2)
         
-        # Use a high-noise sort to push forbidden items (noise -1) to the back
+        # Collision Check: (n_users, n_draw, 1) == (n_users, 1, n_forbidden)
+        is_forbidden = np.any(
+            approx_candidates[:, :, np.newaxis] == exclude[:, np.newaxis, :], axis=2)
+        
+        # Sort by noise, pushing forbidden items (noise = -1) to the back
         noise = rng.random(approx_candidates.shape)
         noise[is_forbidden] = -1.0
         shuffled_idx = np.argsort(noise, axis=1)[:, ::-1]
         
-        # Take ONLY the first n_approx valid ones
+        # Initialize the negatives_pool with ONLY valid approximate negatives
         row_grid = np.arange(n_users)[:, np.newaxis]
-        approx_negatives_pool = approx_candidates[row_grid, shuffled_idx[:, :self.n_approx]]
+        negatives_pool = approx_candidates[row_grid, shuffled_idx[:, :n_negs]]
         
-        #no pad_value in these, so no need to look for later:
+        # OVERWRITE WITH HARD NEGATIVES
+        # Fetch hard negatives
+        hard_negs = self.negatives.get_negatives(user_id=batch['user_id'], length=self.n_hard, seed=self.seed)
+        
+        # Vectorized overwrite: Only replace the approx negative if the hard negative is valid (!= -1)
+        # We only look at the first self.n_hard slots of our pool
+        is_valid_hard = (hard_negs != -1)
+        negatives_pool[:, :self.n_hard] = np.where(is_valid_hard, hard_negs, negatives_pool[:, :self.n_hard])
+        
+        # 4. FINAL ASSEMBLY
+        # Stack: [Positive] + [Negatives Pool (Hard + Approx)]
         candidate_ids = np.hstack([
             batch['movie_id'][:, np.newaxis],
-            hard_negatives_pool,
-            approx_negatives_pool
+            negatives_pool
         ])
         
-        # In the extreme case a user has seen everything, fill -1 with a random movie
+        # ULTIMATE SAFETY VALVE
+        # In the nearly impossible case a user saw the entire catalog,
+        # replace any remaining -1s with a truly random draw
         if (candidate_ids == -1).any():
             mask = (candidate_ids == -1)
             candidate_ids[mask] = rng.choice(self.all_movie_ids, size=np.sum(mask))
-
-        # 5. LABELS AND SHUFFLE
-        labels = np.zeros((n_users, self.num_candidates), dtype=np.float32)
-        labels[:, 0] = 1.0 # The positive is at index 0 before shuffle
         
+        # LABELS AND SHUFFLE
+        labels = np.zeros((n_users, self.num_candidates), dtype=np.float32)
+        labels[:, 0] = 1.0  # Positive is at index 0
+        
+        # Shuffle labels and candidates together
         perm_idx = np.argsort(rng.random((n_users, self.num_candidates)), axis=1)
         final_candidates = candidate_ids[row_grid, perm_idx]
         final_labels = labels[row_grid, perm_idx]
         
-        return {**batch, "candidate_ids": final_candidates,
-            "labels": final_labels}
+        return {
+            **batch,
+            "candidate_ids": final_candidates,
+            "labels": final_labels
+        }
