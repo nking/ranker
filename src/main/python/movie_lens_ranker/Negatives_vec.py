@@ -8,21 +8,21 @@ class Negatives (object):
     """
     class to read files of user hard and natural negatives and supply vectorized get methods
     """
-    def __init__(self, negatives_uri: str, fixed_size:int = 2048, pad_value:int=-1):
+    def __init__(self, negatives_uri: str, fixed_size:int = 2048):
+        self.pad_value = -1
         #each user's the movie_ids, ratings and timestamps is already sorted by timestamp
-        self.user_ids, self.movie_ids = self._load_negatives(negatives_uri, pad_value, fixed_size)
+        self.user_ids, self.movie_ids = self._load_negatives(negatives_uri, fixed_size)
         self.fixed_size = fixed_size
-        self.pad_value = pad_value
         
     def _load_negatives(self, negatives_uri:str,
-            pad_value:int, fixed_size:int = 2048) -> Tuple[np.ndarray, np.ndarray]:
+            fixed_size:int = 2048) -> Tuple[np.ndarray, np.ndarray]:
         
         reader = None
         try:
             reader = array_record_module.ArrayRecordReader(negatives_uri)
             n_records = reader.num_records()
             user_ids = []
-            movie_ids = np.full((n_records, fixed_size), pad_value, dtype=np.int32)
+            movie_ids = np.full((n_records, fixed_size), self.pad_value, dtype=np.int32)
             batch_bytes = reader.read([x for x in range(n_records)])
             batch = [msgpack.unpackb(b, use_list=False) for b in batch_bytes]  # list of tuples user_id, movie_ids
             for i, record in enumerate(batch):

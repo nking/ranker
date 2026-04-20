@@ -12,7 +12,7 @@ class TestNegatives(unittest.TestCase):
     
     def test_Negatives(self):
         
-        negatives = Negatives(self.negatives_uri, fixed_size=256, pad_value=-1)
+        negatives = Negatives(self.negatives_uri, fixed_size=256)
         
         '''
         some test data:

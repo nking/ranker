@@ -10,8 +10,8 @@ import numpy as np
 
 def read_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
     """
-    read the user and movie embeddings and return dictionaries for the new user_ids and movie_ids to use with the
-    concatenated embeddings.
+    read the user and movie embeddings and concatentate them: [row of zeros, user embeddings, movie embeddings].  the
+    row of zeros is needed because user_ids start with 1.
     :param user_embeddings_uri:
     :param movie_embeddings_uri:
     :param batch_size:
@@ -20,7 +20,8 @@ def read_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_siz
     """
     user_emb = _read_embeddings(user_embeddings_uri, batch_size=batch_size)
     movie_emb = _read_embeddings(movie_embeddings_uri, batch_size=batch_size)
-    emb = jnp.concatenate([user_emb, movie_emb])
+    zero_row = jnp.zeros((1, user_emb.shape[1]))
+    emb = jnp.concatenate([zero_row, user_emb, movie_emb])
     return emb
 
 def _read_embeddings(embeddings_uri:str, batch_size:int=1024) ->  jnp.ndarray:

@@ -38,16 +38,15 @@ class TestUserHistory_vec(unittest.TestCase):
         
         choose  timestamps < 956705600
         '''
-        uh = UserHistory(ratings_uri_list = ratings_uri_list, fixed_size=2048, pad_value=-1)
+        uh = UserHistory(ratings_uri_list = ratings_uri_list, fixed_size=2048)
         
         user_ids = np.array([6040, 6039])
         
         # ==== test scalar timestamps ========
         ts = 956705600
         fixed_length = 200
-        pad_value = -1
         
-        movie_hist = uh.get_movieids_before_timestamp(user_ids, timestamp=ts, max_hist=fixed_length, pad_value=pad_value)
+        movie_hist = uh.get_movieids_before_timestamp(user_ids, timestamp=ts, max_hist=fixed_length)
         
         self.assertTrue((len(user_ids), fixed_length) == movie_hist.shape)
         
@@ -72,7 +71,7 @@ class TestUserHistory_vec(unittest.TestCase):
             self.assertEqual(len(user_movies), count)
         
         movie_hist2, ratings_hist2 = uh.get_history_before_timestamp(user_ids, timestamp=ts,
-            max_hist=fixed_length, pad_value=pad_value)
+            max_hist=fixed_length)
         
         np.testing.assert_array_equal(movie_hist2, movie_hist)
         count = np.sum(movie_hist != -1, axis=1)
@@ -84,7 +83,7 @@ class TestUserHistory_vec(unittest.TestCase):
         import operator
         #======= test array timestamps ======
         inp_timestamps = np.array([956704000, 956705600])
-        movie_hist10 = uh.get_movieids_before_timestamp(user_ids, timestamp=inp_timestamps, max_hist=fixed_length, pad_value=pad_value)
+        movie_hist10 = uh.get_movieids_before_timestamp(user_ids, timestamp=inp_timestamps, max_hist=fixed_length)
         count10 = np.sum(movie_hist10 != -1, axis=1)
         np.testing.assert_array_compare(operator.le, count10, count,
             err_msg="count10 has values greater than count!")
@@ -92,7 +91,7 @@ class TestUserHistory_vec(unittest.TestCase):
             np.testing.assert_array_equal(movie_hist[i][:c], movie_hist10[i][:c])
         
         movie_hist11, ratings_hist11 = uh.get_history_before_timestamp(user_ids,
-            timestamp=inp_timestamps, max_hist=fixed_length, pad_value=pad_value)
+            timestamp=inp_timestamps, max_hist=fixed_length)
         np.testing.assert_array_equal(movie_hist10, movie_hist11)
         count11 = np.sum(ratings_hist11 != -1, axis=1)
         np.testing.assert_array_equal(count10, count11)

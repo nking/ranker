@@ -8,14 +8,15 @@ from movie_lens_ranker.data_loading import build_history_lookup
 
 
 class UserHistory (object):
-    def __init__(self, ratings_uri_list: Union[str, List[str]], fixed_size:int = 2048, pad_value:int=-1):
+    def __init__(self, ratings_uri_list: Union[str, List[str]], fixed_size:int = 2048):
+        self.pad_value = -1
         #each user's the movie_ids, ratings and timestamps is already sorted by timestamp
-        self.user_ids, self.movie_ids, self.ratings, self.timestamps = self._load_history(ratings_uri_list, fixed_size, pad_value)
+        self.user_ids, self.movie_ids, self.ratings, self.timestamps = self._load_history(ratings_uri_list, fixed_size)
         self.fixed_size = fixed_size
-        self.pad_value = pad_value
+        
         
     def _load_history(self, ratings_uri_list: Union[str, List[str]],
-            fixed_size:int = 2048, pad_value:int=-1) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+            fixed_size:int = 2048) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         
         #buildnumpy vectors, making padded lists of length fixed_history_length for movies, ratings, and timestamps
         lookup, max_history = build_history_lookup(ratings_uri_list)
@@ -26,9 +27,9 @@ class UserHistory (object):
         
         #NOTE: results are sorted by timestamp
         user_ids = []
-        movie_ids = np.full((n_users, fixed_size), pad_value)
-        ratings = np.full((n_users, fixed_size), pad_value)
-        timestamps = np.full((n_users, fixed_size), pad_value)
+        movie_ids = np.full((n_users, fixed_size), self.pad_value)
+        ratings = np.full((n_users, fixed_size), self.pad_value)
+        timestamps = np.full((n_users, fixed_size), self.pad_value)
         
         for i, user_id in enumerate(lookup.keys()):
             user_ids.append(user_id)
@@ -53,14 +54,13 @@ class UserHistory (object):
         
         return user_ids, movie_ids, ratings, timestamps
     
-    def get_movieids_before_timestamp(self, user_id: np.ndarray, timestamp: Union[int, np.ndarray], max_hist:int, pad_value:int=-1) -> np.ndarray:
+    def get_movieids_before_timestamp(self, user_id: np.ndarray, timestamp: Union[int, np.ndarray], max_hist:int) -> np.ndarray:
         """
         given array of user_ids, return max_hist of movies < timestamp, padded by pad_value when not enough history
         :param user_id: input array of shape (None,), e.g. np.array([2,4])
         :param timestamp: timestamp: timestamp representing current time or an array of timestamps representing current time for that user.
         movies with timestamps < the current timestamp are returned.
         :param max_hist: number of user rated movies to return
-        :param pad_value: the number to use to fill a user's history when they have fewer than max_hist for the time frame.
         :return: user rated movies < timestamp, limited to max_hist number of movies.  shape of return is ( len(user_id), max_hist)
         """
         #transform user_ids into user_idxs.  can use searchsorted because already sorted by user_ids
@@ -80,13 +80,13 @@ class UserHistory (object):
         row_coords, col_coords = np.where(final_mask)
         new_col_coords = occurrence_count[final_mask] - 1
         
-        ret_movie_ids = np.full((n_user_selected, max_hist), pad_value, dtype=sub_movie_ids.dtype)
+        ret_movie_ids = np.full((n_user_selected, max_hist), self.pad_value, dtype=sub_movie_ids.dtype)
         ret_movie_ids[row_coords, new_col_coords] = sub_movie_ids[final_mask]
         
         return ret_movie_ids
     
     def get_history_before_timestamp(self, user_id: np.ndarray,
-            timestamp: Union[int, np.ndarray], max_hist: int, pad_value: int = -1) -> Tuple[np.ndarray, np.ndarray]:
+            timestamp: Union[int, np.ndarray], max_hist: int) -> Tuple[np.ndarray, np.ndarray]:
         """
         given array of user_ids, return max_hist of movies < timestamp, padded by pad_value when not enough history.  also returns
         the ratings for those movies, also padded by -1 for missing values.
@@ -95,7 +95,6 @@ class UserHistory (object):
           any user rated movies with timestamps < timestamp are returned
            up to max_hist in length.
         :param max_hist: number of user rated movies to return
-        :param pad_value: the number to use to fill a user's history when they have fewer than max_hist for the time frame.
         :return: user rated movies < timestamp, limited to max_hist number of movies, ratings for those movies, and timestamps
         shape of each of the returned np.ndarrays is ( len(user_id), max_hist)
         """
@@ -116,11 +115,11 @@ class UserHistory (object):
         row_coords, col_coords = np.where(final_mask)
         new_col_coords = occurrence_count[final_mask] - 1
         
-        ret_movie_ids = np.full((n_user_selected, max_hist), pad_value,
+        ret_movie_ids = np.full((n_user_selected, max_hist), self.pad_value,
             dtype=sub_movie_ids.dtype)
         ret_movie_ids[row_coords, new_col_coords] = sub_movie_ids[final_mask]
         
-        ret_ratings = np.full((n_user_selected, max_hist), pad_value,
+        ret_ratings = np.full((n_user_selected, max_hist), self.pad_value,
             dtype=sub_ratings.dtype)
         ret_ratings[row_coords, new_col_coords] = sub_ratings[final_mask]
         

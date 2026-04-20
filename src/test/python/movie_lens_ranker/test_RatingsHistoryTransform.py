@@ -39,7 +39,7 @@ class TestRanker(unittest.TestCase):
         max_history = 2000 #a number large enough to test that padding works
         
         ratings_uri_list = [self.ratings_train_uri, self.ratings_val_uri]
-        uh = UserHistory(ratings_uri_list=ratings_uri_list, fixed_size=2048, pad_value=-1)
+        uh = UserHistory(ratings_uri_list=ratings_uri_list, fixed_size=2048)
         
         transform = RatingsHistoryLookupTransform(history_lookup=uh, max_history=max_history)
             

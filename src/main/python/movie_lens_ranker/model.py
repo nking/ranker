@@ -49,8 +49,7 @@ class GraphRanker(nnx.Module):
         :return:
         """
         #[ len(graph.nodes["ids"]) X embed_in_dim ]
-        x = jnp.take(a=self.user_movie_embeddings.value,
-            indices=graph.nodes["ids"], axis=0)
+        x = jnp.take(a=self.user_movie_embeddings.value, indices=graph.nodes["ids"], axis=0)
         
         edge_attr = graph.edges["rating"]
         if edge_attr.ndim == 1:

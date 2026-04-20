@@ -28,7 +28,7 @@ class TestRanker(unittest.TestCase):
         
         #(user_id, movie_id, rating, timestamp)
         self.ratings_train_uri, self.ratings_val_uri, self.ratings_test_uri \
-            = get_train_val_test_liked_uris(use_small=True)
+            = get_train_val_test_liked_uris(use_small=False)
         
         # (user_id, movie_id, rating, timestamp)
         self.ratings_train_disliked_uri, self.ratings_val_disliked_uri, self.ratings_test_disliked_uri \
@@ -73,29 +73,34 @@ class TestRanker(unittest.TestCase):
         # put jax arrays on GPU before training (which happens in another component)
         os.environ["JAX_PLATFORMS"] = "cpu"
         
-        max_history = 40
+        import jax
+        jax.config.update("jax_debug_nans", True)
+        #np.set_printoptions(threshold=np.inf)
+        
+        max_history = 200
         num_candidates = 40
-        batch_size = 8
+        batch_size = 64
         num_epochs = 2
         seed = 1234
-        top_k = 20
+        top_k = 100
         worker_count = max(1, os.cpu_count() - 1)
         shard_opts = grain.sharding.ShardOptions(shard_index=0, shard_count=1)
         
         all_movie_ids: List[int] = read_movies_array_record(self.movies_uri,
             batch_size=batch_size)
         
+        #the number per user must be >= half of num_candidates
         recommendations = RecommendedMovies(
             movie_rec_file_path=self.recommendations_uri,
             movie_rec_ts_file_path=self.recommendations_ts_uri)
         
         # each worker will have its own copy of these:
-        train_history = UserHistory(ratings_uri_list=self.ratings_train_uri, fixed_size=2048,pad_value=-1)
-        val_history = UserHistory(ratings_uri_list=self.ratings_val_uri, fixed_size=2048,pad_value=-1)
+        train_history = UserHistory(ratings_uri_list=self.ratings_train_uri, fixed_size=2048)
+        val_history = UserHistory(ratings_uri_list=self.ratings_val_uri, fixed_size=2048)
 
-        train_negatives = Negatives(self.train_negatives_uri, fixed_size=256,pad_value=-1)
-        train_val_negatives = Negatives(self.train_val_negatives_uri, fixed_size=256,pad_value=-1)
-        val_negatives = Negatives(self.val_negatives_uri, fixed_size=256, pad_value=-1)
+        train_negatives = Negatives(self.train_negatives_uri, fixed_size=256)
+        train_val_negatives = Negatives(self.train_val_negatives_uri, fixed_size=256)
+        val_negatives = Negatives(self.val_negatives_uri, fixed_size=256)
        
         train_datasource = RandomAccessArrayRecordDataSource(self.ratings_train_uri)
         val_datasource = RandomAccessArrayRecordDataSource(self.ratings_val_uri)
@@ -161,9 +166,10 @@ class TestRanker(unittest.TestCase):
             print(f'val_batch={val_batch}')
             return
         
-        learning_rate = 1e-3
-        out_dim = 16
-        hidden_dim = 32  # 2 * embed_in_dim is probably good
+        learning_rate = 5-4#1e-3
+        weight_decay = 1e-4
+        out_dim = 32
+        hidden_dim = 64  # 2 * embed_in_dim is probably good
         num_layers = 2  # captures the 2-hop neighborhood.  3 tends to oversmooth
         num_heads = 4  # each head sees 64 hidden / 4 heads = 16 dimensional subspace
         dropout_rate = 0.1
@@ -179,8 +185,8 @@ class TestRanker(unittest.TestCase):
             out_features=out_dim, heads=num_heads,
             dropout_rate=dropout_rate, rngs=rngs)
         
-        optimizer = nnx.Optimizer(model, optax.adam(learning_rate), wrt=nnx.Param)
-            
+        optimizer = nnx.Optimizer(model, optax.adamw(learning_rate, weight_decay=weight_decay), wrt=nnx.Param)
+        
         train_metrics = train_fn(model=model, num_epochs=num_epochs, train_dataloader=train_dataloader,
             val_dataloader=val_dataloader,
             optimizer=optimizer, batch_size=batch_size, max_history=max_history,
@@ -190,8 +196,7 @@ class TestRanker(unittest.TestCase):
         if False:
             test_history = UserHistory(ratings_uri_list=self.ratings_val_uri,
                 fixed_size=2048, pad_value=-1)
-            test_negatives = Negatives(self.test_negatives_uri, fixed_size=256,
-                pad_value=-1)
+            test_negatives = Negatives(self.test_negatives_uri, fixed_size=256)
             
             test_datasource = RandomAccessArrayRecordDataSource(
                 self.ratings_test_uri)

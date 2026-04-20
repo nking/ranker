@@ -14,6 +14,7 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
         """
         self.history_lookup = history_lookup
         self.max_history = max_history
+        self.pad_value = -1
     
     def map(self, batch: List[Tuple[int, int, int, int]]) -> Dict[
         str, np.ndarray]:
@@ -46,7 +47,7 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
         timestamps = np.array(timestamps, dtype=np.int64)
         
         history_movies, history_ratings = self.history_lookup.get_history_before_timestamp(
-            user_ids, timestamps, self.max_history, -1)
+            user_ids, timestamps, self.max_history)
         
         history_lengths = np.sum(history_movies != -1, axis=1)
         

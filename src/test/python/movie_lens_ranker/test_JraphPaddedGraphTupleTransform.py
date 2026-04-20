@@ -57,12 +57,12 @@ class TestJraphPaddedGraphTupleTransform(unittest.TestCase):
         num_candidates = 20
         
         #max_history__ is 1849
-        uh = UserHistory(ratings_uri_list=self.ratings_train_uri, fixed_size=2048,pad_value=-1)
+        uh = UserHistory(ratings_uri_list=self.ratings_train_uri, fixed_size=2048)
         
         all_movie_ids: List[int] = read_movies_array_record(self.movie_ids_uri,
             batch_size=batch_size)
         
-        negatives = Negatives(self.negatives_uri, fixed_size=256, pad_value=-1)
+        negatives = Negatives(self.negatives_uri, fixed_size=256)
       
         batch = [(1875, 1101, 4, 975768800), (635, 2068, 4, 975768823),
             (635, 2357, 4, 975768823)]
