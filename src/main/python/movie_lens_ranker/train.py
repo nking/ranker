@@ -98,7 +98,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     :param optimizer:
     :return:
     """
-    #debug_weight_before = jnp.linalg.norm(model.score_head.kernel.value)
+    debug_weight_before = jnp.linalg.norm(model.score_head.kernel.value)
     
     def loss_fn(model, padded_graph) -> float:
         
@@ -120,14 +120,13 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     loss, grads = nnx.value_and_grad(loss_fn)(model, padded_graph)
     optimizer.update(model, grads)
     
-    '''
     debug_weight_after = jnp.linalg.norm(model.score_head.kernel.value)
     diff = jnp.abs(debug_weight_before - debug_weight_after)
-    #if > 1E-4, is a significant change
+    # if > 1E-4, is a significant change
     # if > 1, exploding gradient or learning rate issue
     jax.debug.print("Weight Norm: Before={b:.6f}, After={a:.6f}, Delta={d:.8f}",
         b=debug_weight_before, a=debug_weight_after, d=diff)
-    '''
+    
     return loss
 
 @nnx.jit
