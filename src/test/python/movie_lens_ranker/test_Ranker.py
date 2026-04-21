@@ -74,13 +74,13 @@ class TestRanker(unittest.TestCase):
         os.environ["JAX_PLATFORMS"] = "cpu"
         
         import jax
-        jax.config.update("jax_debug_nans", True)
+        #jax.config.update("jax_debug_nans", True)
         #np.set_printoptions(threshold=np.inf)
         
         max_history = 200
         num_candidates = 40
         batch_size = 64
-        num_epochs = 2
+        num_epochs = 120
         seed = 1234
         top_k = 100
         worker_count = max(1, os.cpu_count() - 1)
@@ -166,7 +166,7 @@ class TestRanker(unittest.TestCase):
             print(f'val_batch={val_batch}')
             return
         
-        learning_rate = 5-4#1e-3
+        learning_rate = 5e-4#1e-3
         weight_decay = 1e-4
         out_dim = 32
         hidden_dim = 64  # 2 * embed_in_dim is probably good
@@ -195,7 +195,7 @@ class TestRanker(unittest.TestCase):
         
         if False:
             test_history = UserHistory(ratings_uri_list=self.ratings_val_uri,
-                fixed_size=2048, pad_value=-1)
+                fixed_size=2048)
             test_negatives = Negatives(self.test_negatives_uri, fixed_size=256)
             
             test_datasource = RandomAccessArrayRecordDataSource(
