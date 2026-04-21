@@ -7,10 +7,11 @@ class BatchSampler(grain.samplers.IndexSampler):
     def __init__(self, num_records: int, num_epochs:int, batch_size: int,
             shuffle:bool=False, seed:int=0,
             shard_options: grain.sharding.ShardOptions = grain.sharding.NoSharding()):
-        super().__init__(num_records=num_records, shard_options=shard_options,
-            shuffle=shuffle, seed=seed, num_epochs=num_epochs)
+        self.num_batches = max(1, num_records // batch_size)
+        self.total_records = num_records
         self.batch_size = batch_size
-        self.num_batches = max(1, self._num_records // batch_size)
+        super().__init__(num_records=self.num_batches, shard_options=shard_options,
+            shuffle=shuffle, seed=seed, num_epochs=num_epochs)
         
     # override
     def __repr__(self) -> str:
@@ -32,10 +33,11 @@ class BatchSampler(grain.samplers.IndexSampler):
         shuffled_block_idx = permutation[batch_in_epoch]
         
         start = shuffled_block_idx * self.batch_size
-        stop = min(start + self.batch_size, self._num_records)
+        stop = min(start + self.batch_size, self.total_records)
         indices = np.arange(start, stop)
         
         if self._shuffle:
+            pair_rng = np.random.default_rng(self._seed + index)  # unique per batch
             pair_rng.shuffle(indices)
             
         return grain.RecordMetadata(
