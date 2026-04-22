@@ -192,8 +192,7 @@ class TestRanker(unittest.TestCase):
         
         optimizer = nnx.Optimizer(model, optax.adamw(learning_rate, weight_decay=weight_decay), wrt=nnx.Param)
         
-        jax.debug.print("expect the model training to start w/ loss = {}",
-            -np.log(1. / num_candidates))
+        print(f"expect the model training to start w/ loss = {-np.log(1. / num_candidates)}")
         
         train_metrics = train_fn(model=model, train_dataloader=train_dataloader,
             val_dataloader=val_dataloader,
