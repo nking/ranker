@@ -16,8 +16,8 @@ class BatchSampler(grain.samplers.IndexSampler):
     # override
     def __repr__(self) -> str:
         return (
-            f"BatchSampler(num_records={self._num_records}, "
-            f"batch_size={self.batch_size}, shuffle={self.shuffle}, "
+            f"BatchSampler(num_records={self.total_records}, num_epochs={self._num_epochs},"
+            f"batch_size={self.batch_size}, shuffle={self._shuffle}, seed={self._seed}"
             f"shard_options={self._shard_options!r})"
         )
     
