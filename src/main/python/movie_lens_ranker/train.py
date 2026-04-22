@@ -30,25 +30,18 @@ def get_node_graph_index(graph: jraph.GraphsTuple):
     return jnp.repeat(graph_indices, graph.n_node)
 
 def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple):
-    
     # Forward Pass: returns ONLY candidate scores [num_total_graphs * K]
     all_scores = model(padded_graph) #LinearizeTracer<float32[60]>
-    
     #jax.debug.print("all_scores={all_scores}", all_scores=all_scores, ordered=True)
-    
     num_total_graphs = padded_graph.n_node.shape[0]  # batch_size + 1
     K = model.K  # num_candidates from data loading
-    
     total_candidate_slots = num_total_graphs * K
-    
     # Extract Candidate Data. length is K * num_total_graphs
     cand_indices = jnp.where(
         padded_graph.nodes["type"] == 2,
         size=total_candidate_slots
     )[0]
-    
     #jax.debug.print("cand_indices={cand_indices}", cand_indices=cand_indices, ordered=True)
-    
     # lengths are K * num_total_graphs
     labels_flat = padded_graph.nodes["label"][cand_indices]
     record_mask_flat = padded_graph.nodes["candidate_mask"][cand_indices]
@@ -105,13 +98,9 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     debug_weight_before = jnp.linalg.norm(model.score_head.kernel.value)
     
     def loss_fn(model, padded_graph) -> float:
-        
         scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
-        
         safe_scores = jnp.where(main_mask, scores_2d, -1e9)
-    
         #debug_stats(safe_scores, label="[Scores Statistics]")
-        
         loss = rax.softmax_loss(
             scores=safe_scores,
             labels=labels_2d,
@@ -143,9 +132,7 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) ->
     """
     def loss_fn(model, padded_graph) -> Tuple[Array, Dict[str, Array]]:
         scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
-        
         safe_scores = jnp.where(main_mask, scores_2d, -1e9)
-        
         # Rax Ranking Loss & Metrics
         # Rax is designed to ignore entries where master_mask is False
         loss = rax.softmax_loss(
@@ -154,17 +141,16 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) ->
             where=main_mask,
             reduce_fn=jnp.mean
         )
-        
         mrr = rax.mrr_metric(
             safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
         ndcg = rax.ndcg_metric(
             safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
         recall = rax.recall_metric(
             safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
-        return loss, {f"mrr_{top_k}": mrr, f"ndcg_{top_k}": ndcg, f"recall_{top_k}": recall}
+        return loss, {f"mrr": mrr, f"ndcg": ndcg, f"recall": recall}
     
     # has_aux is necessary when loss_fn returns more than scalar loss
-    (loss, metrics_dict), grads = loss_fn(model, padded_graph)
+    (loss, metrics_dict), grads = nnx.value_and_grad(loss_fn, has_aux=True)(model, padded_graph)
     metrics_dict['loss'] = loss
     return metrics_dict
 
@@ -172,6 +158,16 @@ def train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer,
         top_k:int, latest_checkpoint_dir: str, best_checkpoint_dir:str, rngs:nnx.Rngs):
+    
+    '''
+    model = config['model']
+    train_dataloader = config['train_dataloader']
+    val_dataloader = config['val_dataloader']
+    optimizer = config['optimizer']
+    top_k = config['top_k']
+    latest_checkpoint_dir = config['latest_checkpoint_dir']
+    best_checkpoint_dir = conig['best_checkpoint_dir']
+    '''
     
     if not isinstance(train_dataloader._sampler, BatchSampler):
         raise ValueError("train_dataloader sampler must be an instance of BatchSampler")
@@ -182,12 +178,16 @@ def train_fn(model, train_dataloader: grain.DataLoader,
     #tracked_fn_2 = chex.assert_max_traces(eval_step, n=1)
     
     TRAIN_BATCH_SIZE = train_dataloader._sampler.batch_size
-    TOTAL_RECORDS = train_dataloader._sampler.__len__()
+    TOTAL_RECORDS = train_dataloader._sampler.total_records
     STEPS_PER_EPOCH = TOTAL_RECORDS // TRAIN_BATCH_SIZE  # = 7234
     
+    print(f'TRAIN_BATCH_SIZE={TRAIN_BATCH_SIZE}, TOTAL_RECORDS={TOTAL_RECORDS}, STEPS_PER_EPOCH={STEPS_PER_EPOCH}', flush=True)
+    
     VAL_BATCH_SIZE = train_dataloader._sampler.batch_size
-    TOTAL_RECORDS_VAL = val_dataloader._sampler.__len__()
+    TOTAL_RECORDS_VAL = val_dataloader._sampler.total_records
     STEPS_PER_EPOCH_VAL = TOTAL_RECORDS_VAL // VAL_BATCH_SIZE # 903
+    
+    print(f'VAL_BATCH_SIZE={VAL_BATCH_SIZE}, TOTAL_RECORDS_VAL={TOTAL_RECORDS_VAL}, STEPS_PER_EPOCH_VAL={STEPS_PER_EPOCH_VAL}', flush=True)
     
     mngr_latest = ocp.CheckpointManager(latest_checkpoint_dir,
         item_handlers={
@@ -223,6 +223,7 @@ def train_fn(model, train_dataloader: grain.DataLoader,
     best_ndcg = -1.0
     epochs_without_improvement = 0
     best_state = None  # To store the best weights
+    best_graph_def = None
     delay = 10 # min number of epochs to learn
     
     epoch_avg_train_loss = []
@@ -243,18 +244,21 @@ def train_fn(model, train_dataloader: grain.DataLoader,
             #finished a train epoch.  calc avg train loss and val metrics
             avg_train_loss = jnp.mean(jnp.array(epoch_avg_train_loss))
             train_metrics = eval_step(model, padded_super_graph, top_k)
-            jax.debug.print("Epoch {epoch}: Train Loss {avg_train_loss:.4f}", avg_train_loss=avg_train_loss, ordered=True)
             epoch_avg_train_loss.clear()
             
-            epoch_val_loss = [], epoch_val_mrr = [], epoch_val_ndcg = [], epoch_val_recall = []
+            epoch_val_loss = []
+            epoch_val_mrr = []
+            epoch_val_ndcg = []
+            epoch_val_recall = []
             for val_global_step, val_padded_super_graph in enumerate(val_dataloader):
                 val_metrics = eval_step(model, val_padded_super_graph, top_k)
-                epoch_val_mrr.append(val_metrics[mrr_text])
-                epoch_val_ndcg.append(val_metrics[ndcg_text])
+                #jax.debug.print('val_metrics={val_metrics}', val_metrics=val_metrics, ordered=True)
+                epoch_val_mrr.append(val_metrics['mrr'])
+                epoch_val_ndcg.append(val_metrics['ndcg'])
                 epoch_val_loss.append(val_metrics["loss"])
-                epoch_val_recall.append(val_metrics[recall_text])
+                epoch_val_recall.append(val_metrics['recall'])
                 if val_global_step > 1 and val_global_step % STEPS_PER_EPOCH_VAL == 0:
-                    #finished an epoch
+                    #finished a val epoch
                     break
             avg_val_loss = jnp.mean(jnp.array(epoch_val_loss))
             avg_val_mrr = jnp.mean(jnp.array(epoch_val_mrr))
@@ -262,16 +266,16 @@ def train_fn(model, train_dataloader: grain.DataLoader,
             avg_val_recall = jnp.mean(jnp.array(epoch_val_recall))
             
             print(f"Epoch {epoch}: Train avg Loss {avg_train_loss:.4f} "
-                  f"| train NDCG@{top_k} {train_metrics[{ndcg_text}]:.4f} "
-                  f"| train MRR@{top_k} {train_metrics[{mrr_text}]:.4f} "
-                  f"| train recall_{top_k} {train_metrics[{recall_text}]:.4f}"
-                  f"avg val loss {avg_val_loss:.f} | val NDCG@{top_k} {avg_val_ndcg:.4f} "
+                  f"| train NDCG@{top_k} {train_metrics['ndcg']:.4f} "
+                  f"| train MRR@{top_k} {train_metrics['mrr']:.4f} "
+                  f"| train recall_{top_k} {train_metrics['recall']:.4f}"
+                  f"avg val loss {avg_val_loss:.4f} | val NDCG@{top_k} {avg_val_ndcg:.4f} "
                   f"| val MRR@{top_k} {avg_val_mrr:.4f} | val recall_{top_k} {avg_val_recall:.4f}")
             
             history["train_loss"].append(avg_train_loss)
-            history[f"train_{mrr_text}"].append(train_metrics[{mrr_text}])
-            history[f"train_{ndcg_text}"].append(train_metrics[{ndcg_text}])
-            history[f"train_{recall_text}"].append(train_metrics[{recall_text}])
+            history[f"train_{mrr_text}"].append(train_metrics['mrr'])
+            history[f"train_{ndcg_text}"].append(train_metrics['ndcg'])
+            history[f"train_{recall_text}"].append(train_metrics['recall'])
             history["val_loss"].append(avg_val_loss)
             history[f"val_{mrr_text}"].append(avg_val_mrr)
             history[f"val_{ndcg_text}"].append(avg_val_ndcg)
@@ -280,14 +284,14 @@ def train_fn(model, train_dataloader: grain.DataLoader,
             if avg_val_ndcg > best_ndcg:
                 best_ndcg = avg_val_ndcg
                 epochs_without_improvement = 0
-                best_state = model.split()
+                best_graph_def, best_state = nnx.split(model)
                 print(f"  New best NDCG! Saving model...")
                 mngr_best.save(
                     global_step,
                     args=ocp.args.Composite(
                         model=ocp.args.StandardSave(nnx.state(model)),
                         opt=ocp.args.StandardSave(nnx.state(optimizer)),
-                        global_step=ocp.args.StandardSave(global_step),
+                        global_step=ocp.args.StandardSave({'step': global_step}),
                         # NNX RNGs need to be converted to state (dictionary of arrays)
                         rngs=ocp.args.StandardSave(nnx.state(rngs)),
                         # Include your dataloader from before
@@ -300,11 +304,9 @@ def train_fn(model, train_dataloader: grain.DataLoader,
                 print( f"  No improvement for {epochs_without_improvement} epoch(s).")
             if epochs_without_improvement >= patience:
                 print(f"Early stopping triggered at epoch {epoch}.")
-                model.update(best_state)
+                nnx.update(model, best_state)
                 early_stop_triggered[0] = True
                 break
-            #write checkpoints
-            
             #orbax for checkpointing.  saves latest 2
             _graphdef, model_state = nnx.split(model)
             _, opt_state = nnx.split(optimizer)
@@ -313,7 +315,7 @@ def train_fn(model, train_dataloader: grain.DataLoader,
                 args=ocp.args.Composite(
                     model=ocp.args.StandardSave(model_state),
                     opt=ocp.args.StandardSave(opt_state),
-                    global_step=ocp.args.StandardSave(global_step),
+                    global_step=ocp.args.StandardSave({'step': global_step}),
                     # NNX RNGs need to be converted to state (dictionary of arrays)
                     rngs=ocp.args.StandardSave(nnx.state(rngs)),
                     # Include your dataloader from before
@@ -336,11 +338,18 @@ def test_fn(model, test_dataloader: grain.DataLoader, top_k:int):
     :param top_k:
     :return:
     """
+    
+    '''
+    model = config['model']
+    test_dataloader = config['test_dataloader']
+    top_k = config['top_k']
+    '''
+    
     if not isinstance(test_dataloader._sampler, BatchSampler):
         raise ValueError("test_dataloader sampler must be an instance of BatchSampler")
     
     TEST_BATCH_SIZE = test_dataloader._sampler.batch_size
-    TOTAL_RECORDS = test_dataloader._sampler.__len__()
+    TOTAL_RECORDS = test_dataloader._sampler.total_records
     STEPS_PER_EPOCH = TOTAL_RECORDS // TEST_BATCH_SIZE  # = 7234
     
     ndcg_text = f'ndcg_{top_k}'
@@ -350,21 +359,24 @@ def test_fn(model, test_dataloader: grain.DataLoader, top_k:int):
     history = {"test_loss": [], f"test_{mrr_text}": [], f"test_{ndcg_text}": [],
         f"test_{recall_text}": []}
     
-    epoch_test_loss = [], epoch_test_mrr = [], epoch_test_ndcg = [], epoch_test_recall = []
+    epoch_test_loss = []
+    epoch_test_mrr = []
+    epoch_test_ndcg = []
+    epoch_test_recall = []
     
     for global_step, padded_super_graph in enumerate(test_dataloader):
         epoch = global_step // STEPS_PER_EPOCH
         batch_idx = global_step % STEPS_PER_EPOCH
         #jraph.GraphsTuple
         metrics = eval_step(model, padded_super_graph)
-        epoch_test_mrr.append(metrics[mrr_text])
-        epoch_test_ndcg.append(metrics[ndcg_text])
+        epoch_test_mrr.append(metrics['mrr'])
+        epoch_test_ndcg.append(metrics['ndcg'])
         epoch_test_loss.append(metrics["loss"])
-        epoch_test_recall.append(metrics[recall_text])
+        epoch_test_recall.append(metrics['recall'])
         if global_step % 100 == 0:
-            ndcg = metrics[ndcg_text]
-            recall = metrics[recall_text]
-            mrr = metrics[mrr_text]
+            ndcg = metrics['ndcg']
+            recall = metrics['recall']
+            mrr = metrics['mrr']
             print(f"Step {global_step} (Epoch {epoch}): test loss {metrics['loss']:.4f} "
                   f"| test {ndcg_text} {ndcg:.4f} | test {mrr_text} {mrr:.4f} | test {recall_text} {recall:.4f}")
         if global_step > 1 and global_step % STEPS_PER_EPOCH == 0:
