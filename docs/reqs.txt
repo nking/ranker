@@ -45,8 +45,8 @@ To be implemented in this project:
 
 Items not yet decided for MLOps:
   - the equivalent of MLMD for artifacts and models
-    and how to incorporate that into kubeflow pipeline
-    design.
+    and how to incorporate that into the use of RayTune
+    and RayTrain or Ray Workflow
 
 Model requirements:
   GraphRanker
@@ -69,7 +69,7 @@ I will use Jraphx + Flax NNX + Rax for creating the model
     and will save it to a JAX serving format
 
 MLOps details:
-  kubeflow pipelines
+  tasks for the ray workflow or indiv tasks:
   the stars are highest priority
   - training and deployment pipeline:
     - * ingest data

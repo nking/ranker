@@ -110,7 +110,7 @@ class TestRanker(unittest.TestCase):
             batch_size=batch_size, shuffle=True, seed=seed,
             shard_options=shard_opts)
         val_ra_sampler = BatchSampler(num_records=val_datasource.__len__(),
-            num_epochs=num_epochs,
+            num_epochs=1, #validations are over 1 epoch
             batch_size=batch_size, shuffle=True, seed=seed,
             shard_options=shard_opts)
         
@@ -174,6 +174,11 @@ class TestRanker(unittest.TestCase):
         num_heads = 4  # each head sees 64 hidden / 4 heads = 16 dimensional subspace
         dropout_rate = 0.1
         rngs = nnx.Rngs(seed)
+        checkpoint_dir = os.path.join(get_bin_dir(), "checkpoints")
+        latest_checkpoint_dir = os.path.join(checkpoint_dir, "latest")
+        best_checkpoint_dir = os.path.join(checkpoint_dir, "best")
+        os.makedirs(latest_checkpoint_dir, exist_ok=True)
+        os.makedirs(best_checkpoint_dir, exist_ok=True)
         
         embeddings = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
@@ -187,13 +192,17 @@ class TestRanker(unittest.TestCase):
         
         optimizer = nnx.Optimizer(model, optax.adamw(learning_rate, weight_decay=weight_decay), wrt=nnx.Param)
         
-        train_metrics = train_fn(model=model, num_epochs=num_epochs, train_dataloader=train_dataloader,
+        jax.debug.print("expect the model training to start w/ loss = {}",
+            -np.log(1. / num_candidates))
+        
+        train_metrics = train_fn(model=model, train_dataloader=train_dataloader,
             val_dataloader=val_dataloader,
-            optimizer=optimizer, batch_size=batch_size, max_history=max_history,
-            num_candidates=num_candidates)
+            optimizer=optimizer, top_k=20,
+            latest_checkpoint_dir=latest_checkpoint_dir, best_checkpoint_dir=best_checkpoint_dir, rngs=rngs)
         print(f'train_metrics: {train_metrics}')
         
         if False:
+            num_epochs = 1
             test_history = UserHistory(ratings_uri_list=self.ratings_val_uri,
                 fixed_size=2048)
             test_negatives = Negatives(self.test_negatives_uri, fixed_size=256)
@@ -205,7 +214,7 @@ class TestRanker(unittest.TestCase):
                 num_epochs=num_epochs,
                 batch_size=batch_size, shuffle=True, seed=seed,
                 shard_options=shard_opts)
-            
+           
             test_dataloader = grain.DataLoader(
                 data_source=test_datasource,
                 sampler=test_ra_sampler,
@@ -230,9 +239,7 @@ class TestRanker(unittest.TestCase):
                 shard_options=shard_opts
             )
             
-            eval_metrics = test_fn(model=model, num_epochs=num_epochs, test_dataloader=test_dataloader,
-                optimizer=optimizer, batch_size=batch_size, max_history=max_history,
-                num_candidates=num_candidates)
+            eval_metrics = test_fn(model=model, test_dataloader=test_dataloader, top_k=top_k)
         
     if __name__ == '__main__':
         unittest.main()

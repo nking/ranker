@@ -7,11 +7,15 @@ from flax import nnx
 import rax
 import grain
 from flax.typing import Array
-from tqdm import tqdm
 
-import chex
+from movie_lens_ranker.BatchSampler import BatchSampler
 
-import numpy as np
+#import chex
+
+#expect 1 Finished compiling <function_name> statement in logs per hit method
+#jax.config.update("jax_log_compiles", True)
+
+import orbax.checkpoint as ocp
 
 from movie_lens_ranker.model import GraphRanker
 
@@ -114,7 +118,6 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
             where=main_mask,
             reduce_fn=jnp.mean  # Let it crash if NaNs happen to enable follow up
         )
-        
         return loss
     
     loss, grads = nnx.value_and_grad(loss_fn)(model, padded_graph)
@@ -130,18 +133,16 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     return loss
 
 @nnx.jit
-def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
-        optimizer: nnx.Optimizer) -> Tuple[float, Dict[str, float]]:
+def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) -> Dict[str, float]:
     """
     train step over a batch, where padded_graph contains super graph of the batch
     :param model:
     :param padded_graph:
-    :param optimizer:
+    :param top_k:
     :return:
     """
     def loss_fn(model, padded_graph) -> Tuple[Array, Dict[str, Array]]:
-        scores_2d, labels_2d, main_mask = score_and_shape_results(
-            model, padded_graph)
+        scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
         
         safe_scores = jnp.where(main_mask, scores_2d, -1e9)
         
@@ -155,61 +156,67 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         )
         
         mrr = rax.mrr_metric(
-            safe_scores, labels_2d, where=main_mask, topn=20, reduce_fn=jnp.mean)
+            safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
         ndcg = rax.ndcg_metric(
-            safe_scores, labels_2d, where=main_mask, topn=20, reduce_fn=jnp.mean)
+            safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
         recall = rax.recall_metric(
-            safe_scores, labels_2d, where=main_mask, topn=20, reduce_fn=jnp.mean)
-        return loss, {"mrr": mrr, "ndcg": ndcg, "recall": recall}
+            safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
+        return loss, {f"mrr_{top_k}": mrr, f"ndcg_{top_k}": ndcg, f"recall_{top_k}": recall}
     
     # has_aux is necessary when loss_fn returns more than scalar loss
-    (loss, metrics_dict), grads = nnx.value_and_grad(loss_fn, has_aux=True)(model, padded_graph)
-    optimizer.update(model, grads)
+    (loss, metrics_dict), grads = loss_fn(model, padded_graph)
     metrics_dict['loss'] = loss
     return metrics_dict
 
-def debug_train_fn(model, num_epochs: int, train_dataloader: grain.DataLoader,
+def train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
-        optimizer: nnx.Optimizer, batch_size: int, max_history: int, num_candidates: int):
-    """
-    attempt to get the model to overfit to make sure it can learn
-    - training 1 batch elminiates variance, so we know that the math is wrong if the loss doesn't decrease.
-    - uf loss starys flat, implies the gradients are essentially 0 and there may be a masking bug hiding the positive label.
-    """
-    single_train_batch = next(iter(train_dataloader))
+        optimizer: nnx.Optimizer,
+        top_k:int, latest_checkpoint_dir: str, best_checkpoint_dir:str, rngs:nnx.Rngs):
     
-    history = {"train_loss": [], "val_loss": [], "val_mrr": [], "val_ndcg": [],
-        "val_recall": []}
+    if not isinstance(train_dataloader._sampler, BatchSampler):
+        raise ValueError("train_dataloader sampler must be an instance of BatchSampler")
+    if not isinstance(val_dataloader._sampler, BatchSampler):
+        raise ValueError("val_dataloader sampler must be an instance of BatchSampler")
     
-    for epoch in range(num_epochs):
-        epoch_train_loss = []
-        loss = train_step(model, single_train_batch, optimizer)
-        epoch_train_loss.append(loss)
-        
-        if epoch % 5 == 0:
-            # We use block_until_ready to get accurate timing/sync for the print
-            loss_val = jax.device_get(loss)
-            print(f"Epoch {epoch}: Overfit Loss {loss_val:.6f}")
-            
-            # Optional: Exit early if we've successfully overfit
-        if loss < 1e-5:
-            print(f"✅ Successfully overfit batch at epoch {epoch}")
-            break
+    #tracked_fn_1 = chex.assert_max_traces(train_step, n=1)
+    #tracked_fn_2 = chex.assert_max_traces(eval_step, n=1)
     
-    return history
+    TRAIN_BATCH_SIZE = train_dataloader._sampler.batch_size
+    TOTAL_RECORDS = train_dataloader._sampler.__len__()
+    STEPS_PER_EPOCH = TOTAL_RECORDS // TRAIN_BATCH_SIZE  # = 7234
     
-def train_fn(model, num_epochs: int, train_dataloader: grain.DataLoader,
-        val_dataloader: grain.DataLoader,
-        optimizer: nnx.Optimizer, batch_size: int, max_history: int, num_candidates: int):
+    VAL_BATCH_SIZE = train_dataloader._sampler.batch_size
+    TOTAL_RECORDS_VAL = val_dataloader._sampler.__len__()
+    STEPS_PER_EPOCH_VAL = TOTAL_RECORDS_VAL // VAL_BATCH_SIZE # 903
     
-    jax.debug.print("expect the model training to start w/ loss = {}", -np.log(1./num_candidates))
+    mngr_latest = ocp.CheckpointManager(latest_checkpoint_dir,
+        item_handlers={
+            'model': ocp.StandardCheckpointHandler(),
+            'opt': ocp.StandardCheckpointHandler(),
+            'global_step': ocp.StandardCheckpointHandler(),
+            'rngs': ocp.StandardCheckpointHandler(),
+            'dataloader': grain.checkpoint.CheckpointHandler()
+        },
+        options=ocp.CheckpointManagerOptions(max_to_keep=2)
+    )
+    mngr_best = ocp.CheckpointManager(best_checkpoint_dir,
+        item_handlers={
+            'model': ocp.StandardCheckpointHandler(),
+            'opt': ocp.StandardCheckpointHandler(),
+            'global_step': ocp.StandardCheckpointHandler(),
+            'rngs': ocp.StandardCheckpointHandler(),
+            'dataloader': grain.checkpoint.CheckpointHandler()
+        },
+        options=ocp.CheckpointManagerOptions(max_to_keep=1)
+    )
     
-    #DEBUG:
-    if False:
-        return debug_train_fn(model, num_epochs, train_dataloader, val_dataloader,
-        optimizer, batch_size, max_history, num_candidates)
+    ndcg_text = f'ndcg_{top_k}'
+    mrr_text = f'mrr_{top_k}'
+    recall_text = f'recall_{top_k}'
     
-    history = {"train_loss": [], "val_loss":[], "val_mrr": [], "val_ndcg": [], "val_recall":[]}
+    history = {
+        "train_loss": [], f"train_{mrr_text}": [], f"train_{ndcg_text}": [], f"train_{recall_text}":[],
+        "val_loss":[], f"val_{mrr_text}": [], f"val_{ndcg_text}": [], f"val_{recall_text}":[]}
     
     #configure for early stopping when ndcg stops changing
     patience = 5
@@ -218,86 +225,163 @@ def train_fn(model, num_epochs: int, train_dataloader: grain.DataLoader,
     best_state = None  # To store the best weights
     delay = 10 # min number of epochs to learn
     
-    for epoch in range(num_epochs):
-        pbar = tqdm(train_dataloader, desc=f"Epoch {epoch}")
-        epoch_train_loss = []
-        for padded_super_graph in pbar:
-            #jraph.GraphsTuple
-            loss = train_step(model, padded_super_graph, optimizer)
-            epoch_train_loss.append(loss)
-            pbar.set_postfix({"loss": f"{loss:.4f}"})
+    epoch_avg_train_loss = []
+    early_stop_triggered = [False]
+    
+    for global_step, padded_super_graph in enumerate(train_dataloader):
+        epoch = global_step // STEPS_PER_EPOCH
+        batch_idx = global_step % STEPS_PER_EPOCH
+        #jraph.GraphsTuple
+        loss = train_step(model, padded_super_graph, optimizer)
+        epoch_avg_train_loss.append(loss)
+        
+        if global_step % 100 == 0:
+            print(f"Step {global_step} (Epoch {epoch}): Train Loss {loss:.4f}")
+            # writer.add_scalar("loss", loss, global_step)
+        
+        if global_step > 1 and global_step % STEPS_PER_EPOCH == 0:
+            #finished a train epoch.  calc avg train loss and val metrics
+            avg_train_loss = jnp.mean(jnp.array(epoch_avg_train_loss))
+            train_metrics = eval_step(model, padded_super_graph, top_k)
+            jax.debug.print("Epoch {epoch}: Train Loss {avg_train_loss:.4f}", avg_train_loss=avg_train_loss, ordered=True)
+            epoch_avg_train_loss.clear()
             
-        avg_train_loss = jnp.mean(jnp.array(epoch_train_loss))
-        jax.debug.print("Epoch {epoch}: Train Loss {avg_train_loss:.4f}", avg_train_loss=avg_train_loss, ordered=True)
-        epoch_val_loss = [], epoch_val_mrr = [], epoch_val_ndcg = [], epoch_val_recall = []
+            epoch_val_loss = [], epoch_val_mrr = [], epoch_val_ndcg = [], epoch_val_recall = []
+            for val_global_step, val_padded_super_graph in enumerate(val_dataloader):
+                val_metrics = eval_step(model, val_padded_super_graph, top_k)
+                epoch_val_mrr.append(val_metrics[mrr_text])
+                epoch_val_ndcg.append(val_metrics[ndcg_text])
+                epoch_val_loss.append(val_metrics["loss"])
+                epoch_val_recall.append(val_metrics[recall_text])
+                if val_global_step > 1 and val_global_step % STEPS_PER_EPOCH_VAL == 0:
+                    #finished an epoch
+                    break
+            avg_val_loss = jnp.mean(jnp.array(epoch_val_loss))
+            avg_val_mrr = jnp.mean(jnp.array(epoch_val_mrr))
+            avg_val_ndcg = jnp.mean(jnp.array(epoch_val_ndcg))
+            avg_val_recall = jnp.mean(jnp.array(epoch_val_recall))
+            
+            print(f"Epoch {epoch}: Train avg Loss {avg_train_loss:.4f} "
+                  f"| train NDCG@{top_k} {train_metrics[{ndcg_text}]:.4f} "
+                  f"| train MRR@{top_k} {train_metrics[{mrr_text}]:.4f} "
+                  f"| train recall_{top_k} {train_metrics[{recall_text}]:.4f}"
+                  f"avg val loss {avg_val_loss:.f} | val NDCG@{top_k} {avg_val_ndcg:.4f} "
+                  f"| val MRR@{top_k} {avg_val_mrr:.4f} | val recall_{top_k} {avg_val_recall:.4f}")
+            
+            history["train_loss"].append(avg_train_loss)
+            history[f"train_{mrr_text}"].append(train_metrics[{mrr_text}])
+            history[f"train_{ndcg_text}"].append(train_metrics[{ndcg_text}])
+            history[f"train_{recall_text}"].append(train_metrics[{recall_text}])
+            history["val_loss"].append(avg_val_loss)
+            history[f"val_{mrr_text}"].append(avg_val_mrr)
+            history[f"val_{ndcg_text}"].append(avg_val_ndcg)
+            history[f"val_{recall_text}"].append(avg_val_recall)
         
-        for padded_super_graph_val in  val_dataloader:
-            metrics = eval_step(model, padded_super_graph_val, optimizer)
-            epoch_val_mrr.append(metrics["mrr"])
-            epoch_val_ndcg.append(metrics["ndcg"])
-            epoch_val_loss.append(metrics["val_loss"])
-            epoch_val_recall.append(metrics["val_recall"])
-        
-        avg_val_loss = jnp.mean(jnp.array(epoch_val_loss))
-        avg_val_mrr = jnp.mean(jnp.array(epoch_val_mrr))
-        avg_val_ndcg = jnp.mean(jnp.array(epoch_val_ndcg))
-        avg_val_recall = jnp.mean(jnp.array(epoch_val_recall))
-        jax.debug.print("Epoch {epoch}: Train Loss {avg_train_loss:.4f} |Val Loss {avg_val_loss:.4f} "
-            "| Val NDCG {avg_val_ndcg:.4f} | Val MRR {avg_val_mrr:.4f} | Val recall {avg_val_recall:.4f}",
-            epoch=epoch, avg_train_loss=avg_train_loss, avg_val_loss=avg_val_loss,
-            avg_val_ndcg=avg_val_ndcg, avg_val_mrr=avg_val_mrr, avg_val_recall=avg_val_recall)
-        history["train_loss"].append(avg_train_loss)
-        history["val_loss"].append(avg_val_loss)
-        history["val_mrr"].append(avg_val_mrr)
-        history["val_ndcg"].append(avg_val_ndcg)
-        history["val_recall"].append(avg_val_recall)
-        
-        #early stopping
-        if avg_val_ndcg > best_ndcg:
-            best_ndcg = avg_val_ndcg
-            epochs_without_improvement = 0
-            best_state = model.split()
-            print(f"  New best NDCG! Saving model...")
-        elif epoch >= delay:
-            epochs_without_improvement += 1
-            print( f"  No improvement for {epochs_without_improvement} epoch(s).")
-        
-        if epochs_without_improvement >= patience:
-            print(f"Early stopping triggered at epoch {epoch}.")
-            model.update(best_state)
+            if avg_val_ndcg > best_ndcg:
+                best_ndcg = avg_val_ndcg
+                epochs_without_improvement = 0
+                best_state = model.split()
+                print(f"  New best NDCG! Saving model...")
+                mngr_best.save(
+                    global_step,
+                    args=ocp.args.Composite(
+                        model=ocp.args.StandardSave(nnx.state(model)),
+                        opt=ocp.args.StandardSave(nnx.state(optimizer)),
+                        global_step=ocp.args.StandardSave(global_step),
+                        # NNX RNGs need to be converted to state (dictionary of arrays)
+                        rngs=ocp.args.StandardSave(nnx.state(rngs)),
+                        # Include your dataloader from before
+                        dataloader=grain.checkpoint.CheckpointSave(iter(train_dataloader))
+                    )
+                )
+                mngr_best.wait_until_finished()
+            elif epoch >= delay:
+                epochs_without_improvement += 1
+                print( f"  No improvement for {epochs_without_improvement} epoch(s).")
+            if epochs_without_improvement >= patience:
+                print(f"Early stopping triggered at epoch {epoch}.")
+                model.update(best_state)
+                early_stop_triggered[0] = True
+                break
+            #write checkpoints
+            
+            #orbax for checkpointing.  saves latest 2
+            _graphdef, model_state = nnx.split(model)
+            _, opt_state = nnx.split(optimizer)
+            mngr_latest.save(
+                global_step,
+                args=ocp.args.Composite(
+                    model=ocp.args.StandardSave(model_state),
+                    opt=ocp.args.StandardSave(opt_state),
+                    global_step=ocp.args.StandardSave(global_step),
+                    # NNX RNGs need to be converted to state (dictionary of arrays)
+                    rngs=ocp.args.StandardSave(nnx.state(rngs)),
+                    # Include your dataloader from before
+                    dataloader=grain.checkpoint.CheckpointSave(iter(train_dataloader))
+                )
+            )
+            mngr_latest.wait_until_finished()  # Ensure it's on disk
+                
+        if early_stop_triggered[0]:
             break
         
     return history
 
-def test_fn(model, num_epochs: int, test_dataloader: grain.DataLoader,
-        optimizer: nnx.Optimizer, batch_size: int, max_history: int,
-        num_candidates: int):
+def test_fn(model, test_dataloader: grain.DataLoader, top_k:int):
+    """
+    calculate loss and metrics for the data in test_dataloader. this method expects that test_dataloader
+    was constructed for 1 epoch, but also has a stop at end of first epoch.
+    :param model:
+    :param test_dataloader:
+    :param top_k:
+    :return:
+    """
+    if not isinstance(test_dataloader._sampler, BatchSampler):
+        raise ValueError("test_dataloader sampler must be an instance of BatchSampler")
     
-    history = {"test_loss": [], "test_mrr": [], "test_ndcg": [], "test_f1": []}
-    epoch_test_loss = [], epoch_test_mrr = [], epoch_test_ndcg = [], epoch_test_f1 = []
-    for epoch in range(num_epochs):
-        pbar = tqdm(test_dataloader, desc=f"Epoch {epoch}")
-        for padded_super_graph in pbar:
-            metrics = eval_step(model, padded_super_graph, optimizer)
-            epoch_test_mrr.append(metrics["mrr"])
-            epoch_test_ndcg.append(metrics["ndcg"])
-            epoch_test_loss.append(metrics["val_loss"])
-            epoch_test_f1.append(metrics["val_f1"])
-            pbar.set_postfix({"test_loss": f"{metrics['loss']:.4f}",
-                "test_ndcg": f"{metrics['ndcg']:.4f}",
-                "test_mrr": f"{metrics['mrr']:.4f}",
-                "test_recall": f"{metrics['recall']:.4f}",
-            })
+    TEST_BATCH_SIZE = test_dataloader._sampler.batch_size
+    TOTAL_RECORDS = test_dataloader._sampler.__len__()
+    STEPS_PER_EPOCH = TOTAL_RECORDS // TEST_BATCH_SIZE  # = 7234
+    
+    ndcg_text = f'ndcg_{top_k}'
+    mrr_text = f'mrr_{top_k}'
+    recall_text = f'recall_{top_k}'
+    
+    history = {"test_loss": [], f"test_{mrr_text}": [], f"test_{ndcg_text}": [],
+        f"test_{recall_text}": []}
+    
+    epoch_test_loss = [], epoch_test_mrr = [], epoch_test_ndcg = [], epoch_test_recall = []
+    
+    for global_step, padded_super_graph in enumerate(test_dataloader):
+        epoch = global_step // STEPS_PER_EPOCH
+        batch_idx = global_step % STEPS_PER_EPOCH
+        #jraph.GraphsTuple
+        metrics = eval_step(model, padded_super_graph)
+        epoch_test_mrr.append(metrics[mrr_text])
+        epoch_test_ndcg.append(metrics[ndcg_text])
+        epoch_test_loss.append(metrics["loss"])
+        epoch_test_recall.append(metrics[recall_text])
+        if global_step % 100 == 0:
+            ndcg = metrics[ndcg_text]
+            recall = metrics[recall_text]
+            mrr = metrics[mrr_text]
+            print(f"Step {global_step} (Epoch {epoch}): test loss {metrics['loss']:.4f} "
+                  f"| test {ndcg_text} {ndcg:.4f} | test {mrr_text} {mrr:.4f} | test {recall_text} {recall:.4f}")
+        if global_step > 1 and global_step % STEPS_PER_EPOCH == 0:
+            break
         
-        avg_test_loss = jnp.mean(jnp.array(epoch_test_loss))
-        avg_test_mrr = jnp.mean(jnp.array(epoch_test_mrr))
-        avg_test_ndcg = jnp.mean(jnp.array(epoch_test_ndcg))
-        avg_test_f1 = jnp.mean(jnp.array(epoch_test_f1))
-        print(f"Epoch {epoch}: Test Loss {avg_test_loss:.4f} "
-            f"| test NDCG {avg_test_ndcg:.4f} | test MRR {avg_test_mrr:.4f} | test F1 {avg_test_f1:.4f}")
-        history["test_loss"].append(avg_test_loss)
-        history["test_mrr"].append(avg_test_mrr)
-        history["test_ndcg"].append(avg_test_ndcg)
-        history["test_f1"].append(avg_test_f1)
+    avg_test_loss = jnp.mean(jnp.array(epoch_test_loss))
+    avg_test_mrr = jnp.mean(jnp.array(epoch_test_mrr))
+    avg_test_ndcg = jnp.mean(jnp.array(epoch_test_ndcg))
+    avg_test_recall = jnp.mean(jnp.array(epoch_test_recall))
+    print(f"Test avg Loss {avg_test_loss:.4f} "
+          f"| test avg NDCG@{top_k} {avg_test_mrr:.4f} "
+          f"| test avg MRR@{top_k} {avg_test_ndcg:.4f} "
+          f"| test avg RECALL@{top_k} {avg_test_recall:.4f}"
+          )
+    history["test_loss"].append(avg_test_loss)
+    history[f"test_{mrr_text}"].append(avg_test_mrr)
+    history[f"test_{ndcg_text}"].append(avg_test_ndcg)
+    history[f"test_{recall_text}"].append(avg_test_recall)
         
     return history

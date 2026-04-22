@@ -2,7 +2,7 @@ goal is to make a ranker for the recommender systems
 and MLOps pipelines for it.
 
 In choosing data loading framework:
-(1) Google's grain is the tool of choice for the Jax AI Stack.
+(1) Google's grain from the Jax AI Stack.
 
 In choosing the LTR model, there are 3 basic approaches:
 (1) gradient boosting
@@ -41,15 +41,42 @@ hyper-parameter tuning:
 - OSS Vizier
 - Optuna
 - Ray Tune
-
-In choosing an MLOps pipeline:
-- needs to be compatible with Jax AI Stack, cloud compatible
-  and agnostic where possible.
-  - will implement a kubeflow pipeline
+- katib for use with kfp
 
 In choosing the model serialization and serving:
 - Orbax for jax checkpointing and serialization
 - Neptune Serving Engine compatibility
+
+In choosing an MLOps pipeline:
+- needs to be compatible with Jax AI Stack, cloud compatible
+  and agnostic where possible.
+- needs to be able to do data parallel distributed training.
+- Jax AI stack has fixed protobuf==7.34.1
+- KFP requires protobuf>=6.31.1,<7.0
+- most common options that work in local and cloud environments:
+  - KFP as the orchestrator running in its own virtual env
+    + docker container images holding the code which needs
+      the JAX AI stack libraries
+  - KubeRay as a kubernetes operator or ManagedRay
+    + RayTrain, RayTune 
+    + docker container images holding the code which needs
+      the JAX AI stack libraries
+    Ray handles JAX TPU/GPU memory management best.
+questions:
+- Ray runnable on kaggle?
+  - for the jax ai install to force the protobuf 7 install
+    %pip install with the --force-reinstall
+  - to prevent startup crashes
+      ray.init(dashboard_attr={"check_dashboard_dependencies": False}) 
+  - best to use Dual T4 GPU option if possible
+     - ScalingConfig(num_workers=2, use_gpu=True)
+     - ray.init(num_cpus=4, dashboard_enabled=False)
+    !pip install --upgrade --force-reinstall pip
+    !pip install -q protobuf==7.34.1 
+    !pip install -q jax-ai-stack==2025.10.28 "ray[train,tune]" 
+    # CRITICAL: Kaggle requires a kernel restart to acknowledge the new Protobuf runtime
+    import os
+    os._exit(0)
 
 Monitoring:
 - system performance monitoring:
@@ -84,16 +111,12 @@ GAT metrics to monitor outside of the listwise ranking metrics:
   - whether similar users are still connecting to similar movies
 
 Note: Gemini was used in searching for ranking architectures
-and getting to the graph solution, but a few manual efforts 
-were needed to retrieve information to modernize the solution.
-
-For the MLOps pipelines, will use kubeflow for cloud agnositic
-and cpu compatibility along with
-- built on kubernetes
-- automated hyper-param tuning with katib
-- highly scalable, distributable architecture
-- capable of handling all AI lifecycles
-- support for management, security, role-based access
+and getting to the graph solution.  Then it was most useful
+in providing a good start to efficient implementations of
+vectorized ops. For example, how to make efficient masks
+that operate on a batch with numpy and alternative ways to
+make branchless code.  Useful for all aspects of
+quick documentaton answers.
 
 -------
 in training model:
