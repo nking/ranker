@@ -43,11 +43,6 @@ To be implemented in this project:
 - the GraphRanker model
 - MLOps pipelines for all stages (details are below)
 
-Items not yet decided for MLOps:
-  - the equivalent of MLMD for artifacts and models
-    and how to incorporate that into the use of RayTune
-    and RayTrain or Ray Workflow
-
 Model requirements:
   GraphRanker
   - must be trainable on tpu, gpu, and cpu
@@ -64,9 +59,21 @@ Model requirements:
   - trained model eval metrics ndcg@k should be an
     improvement over the un-ranked retrieval results
     and should be at least <TBD>.
+  - model, data, and state echeckpointing
+  - experiment tracking that works on local cpu or can be
+    used to store into cloud specific solutions like
+    Vertex AI, SageMaker, Azure ML, etc
 
-I will use Jraphx + Flax NNX + Rax for creating the model
-    and will save it to a JAX serving format
+I will use the Jax AI stack for creating the model
+    Jraphx + Flax NNX + Rax
+    and will save it to a JAX serving format and/or
+    ray serving
+
+Dataloading:  Google Grain
+State Managements: Orbax
+Experiment Tracking: MLFlow-skinny
+MLOps workflow tasks:  ray[tune,train]
+code container: Docker or equiv
 
 MLOps details:
   tasks for the ray workflow or indiv tasks:
@@ -76,7 +83,7 @@ MLOps details:
         - pre-processing to create input array_reord format
           files has been done with apache beam in the 
           retrieval project
-        - grain is used in this project to create data loader
+        - Grain is used in this project to create data loader
     - calc statistics of data
     - generate data schema and perist it
     - validate data statistics
@@ -95,3 +102,9 @@ MLOps details:
   - monitoring pipeline:
     - <TBD>
 
+mlflow-skinny has 
+   Tracking API (log_metric, log_param)
+   External Plugins (GCP/Vertex, AWS, Azure)
+
+orbax checkpoint has
+   ability to store to local disk, GCS, AWS S3, Azure storage blob

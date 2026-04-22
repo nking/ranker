@@ -1,0 +1,30 @@
+ray[tune,train]:
+- ray start opens internal ports for communication
+  between workers.
+- default assumes a trusted network.
+  any machine that can see your head node's IP
+  address can possibly join the cluster as a 
+  worker and execute code
+  - fix: ensure security groups only allow traffic
+    on ports 6379, 10001 and worker port range within
+    the same private subnet
+- version 2.55.0 and later use token authentication
+  to protect a cluster
+  - set RAY_AUTH_MODE=token
+  - set RAY_USE_TLS=1
+- never run ray as root.
+  - create a ray user with permissions restricted 
+    only to src/ directory and data buckets
+
+Orbax:
+- use signed URLs or IAM roles to access your
+  checkpoints.
+  - when docker image needs cloud credentials,
+    use Ray's runtime_env to pass secrets
+    securely
+    - or use cloud provider's instance metadata
+      service
+
+local only dev:
+- use --node-ip-address 127.0.0.1 
+
