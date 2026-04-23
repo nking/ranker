@@ -74,6 +74,15 @@ class TestRanker(unittest.TestCase):
         print(f'process_count={jax.process_count()}')
         print(f'process_index={jax.process_index()}')
 
+    def test_dp(self):
+        mesh = jax.make_mesh((), ('data'))
+        jax.set_mesh(mesh)
+        print(mesh)
+        jax.distributed.initialize()
+        print(f'jax_num_cpu_devices={jax.config.jax_num_cpu_devices}')
+        jax.config.update('jax_num_cpu_devices', jax.local_device_count())
+        #jax.debug.visualize_array_sharding(x)
+    
     def test_run_train(self):
         
         max_history = 200
@@ -101,9 +110,9 @@ class TestRanker(unittest.TestCase):
         os.makedirs(mlflow_dir, exist_ok=True)
         os.makedirs(mlflow_artifacts_dir, exist_ok=True)
         
-        from movie_lens_ranker.train_ray import train_loop_per_worker
+        from movie_lens_ranker.train_run import train_loop_per_worker
         
-        nontrainable_data_config = {'movies_uri':self.movies_uri,
+        data_params_nontrainable = {'movies_uri':self.movies_uri,
             'recommendations_uri':self.recommendations_uri,
             'recommendations_ts_uri':self.recommendations_ts_uri,
             'ratings_train_uri':self.ratings_train_uri,
@@ -112,13 +121,13 @@ class TestRanker(unittest.TestCase):
             'val_negatives_uri':self.val_negatives_uri,
             'seed':seed
         }
-        trainable_data_config = {'max_history':max_history, 'num_candidates':num_candidates,
+        data_params_trainable = {'max_history':max_history, 'num_candidates':num_candidates,
             'num_epochs':num_epochs,
             'batch_size':batch_size}
-        nontrainable_model_config = {'latest_checkpoint_dir':latest_checkpoint_dir,
+        model_params_nontrainable = {'latest_checkpoint_dir':latest_checkpoint_dir,
             'log_dir':log_dir,
             'movie_embeddings_uri': self.movie_embeddings_uri, 'user_embeddings_uri':self.user_embeddings_uri}
-        trainable_model_config = {'top_k':top_k, 'learning_rate':learning_rate, 'weight_decay':weight_decay,
+        model_params_trainable = {'top_k':top_k, 'learning_rate':learning_rate, 'weight_decay':weight_decay,
             'out_dim':out_dim, 'hidden_dim':hidden_dim, 'num_layers':num_layers,
             'num_heads':num_heads, 'dropout_rate':dropout_rate,
         }
@@ -133,11 +142,13 @@ class TestRanker(unittest.TestCase):
             'create_experiment_if_not_exists': True
         }
         
-        config = {**nontrainable_data_config, **trainable_data_config, **nontrainable_model_config, **trainable_model_config}
-        config["mlflow_config"] = mlflow_config
-        
-        ray_results_dir = os.path.join(get_bin_dir(), "ray_results")
-        
+        config = {
+            'data_params_nontrainable':data_params_nontrainable,
+            'data_params_trainable':data_params_trainable,
+            'model_params_nontrainable':model_params_nontrainable,
+            'model_params_trainable':model_params_trainable,
+            'mlflow_config':mlflow_config}
+            
         def get_env_resources():
             # 'cpu', 'gpu', or 'tpu'
             backend = jax.extend.backend.get_backend().platform

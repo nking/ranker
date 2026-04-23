@@ -176,13 +176,18 @@ def _epoch_validation(model: GraphRanker, val_dataloader: DataLoader, top_k: int
         if val_local_step > 1 and val_local_step % STEPS_PER_EPOCH_LOCAL_VAL == 0:
             # finished a val epoch
             break
+    #jaxlib._jax.ArrayImpl;  shape=()
     avg_val_loss = jnp.mean(jnp.array(epoch_val_loss))
     avg_val_mrr = jnp.mean(jnp.array(epoch_val_mrr))
     avg_val_ndcg = jnp.mean(jnp.array(epoch_val_ndcg))
     avg_val_recall = jnp.mean(jnp.array(epoch_val_recall))
     
+    jax.debug.print("avg_val_loss shape={}", jnp.shape(avg_val_loss))
+    
     local_metrics = {'val_loss': avg_val_loss, 'val_ndcg': avg_val_ndcg, 'val_mrr': avg_val_mrr, 'val_recall': avg_val_recall}
     
+    return local_metrics
+    '''
     dict_specs = {k: P() for k in local_metrics.keys()}
     
     @jax.shard_map(mesh, in_specs=(dict_specs,), out_specs=dict_specs, check_vma=False)
@@ -192,6 +197,7 @@ def _epoch_validation(model: GraphRanker, val_dataloader: DataLoader, top_k: int
     
     # Now this call will find the mesh context it needs
     return sync_fn(local_metrics)
+    '''
 
 def train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
@@ -297,10 +303,10 @@ def train_fn(model, train_dataloader: grain.DataLoader,
             
             val_metrics = _epoch_validation(model, val_dataloader, top_k, STEPS_PER_EPOCH_LOCAL_VAL, mesh)
             
-            avg_val_loss = val_metrics["loss"]
-            avg_val_mrr = val_metrics['mrr']
-            avg_val_ndcg = val_metrics['ndcg']
-            avg_val_recall = val_metrics['recall']
+            avg_val_loss = val_metrics["val_loss"]
+            avg_val_mrr = val_metrics['val_mrr']
+            avg_val_ndcg = val_metrics['val_ndcg']
+            avg_val_recall = val_metrics['val_recall']
             
             print(f"Epoch {epoch}: Train avg Loss {avg_train_loss:.4f} "
                   f"| train NDCG@{top_k} {train_metrics['ndcg']:.4f} "
@@ -328,7 +334,8 @@ def train_fn(model, train_dataloader: grain.DataLoader,
                 f"val_{recall_text}":avg_val_recall.item()
             }
             
-            global_val_ndcg = jax.lax.pmean(avg_val_ndcg, axis_name="batch")
+            #global_val_ndcg = jax.lax.pmean(avg_val_ndcg, axis_name="batch")
+            global_val_ndcg = avg_val_ndcg
             
             #orbax for checkpointing.  saves latest 2
             _graphdef, model_state = nnx.split(model)
@@ -351,7 +358,7 @@ def train_fn(model, train_dataloader: grain.DataLoader,
             #if rank == 0:
             #    mlflow.log_metrics(ray_dict, step=epoch)
                 
-            if global_val_ndcg > best_ndcg + 1e-6:
+            if avg_val_ndcg > best_ndcg + 1e-6:
                 best_ndcg = global_val_ndcg
                 epochs_without_improvement = 0
                 if rank == 0:
