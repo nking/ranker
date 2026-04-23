@@ -1,11 +1,5 @@
 from typing import List, Dict
 
-#NOTE: this runs on the CPU in the grain dataloader before anything
-# is handed off to the GPU.
-# *** the file loading the dataloader should use:
-#    os.environ["JAX_PLATFORMS"] = "cpu"
-# to prevent jax from trying to use the GPU
-
 import grain.python as pgrain
 import jraph
 

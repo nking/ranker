@@ -1,6 +1,7 @@
 import os.path
 import unittest
 
+import jax.distributed
 import jraph
 import optax
 from array_record.python import array_record_module
@@ -67,65 +68,13 @@ class TestRanker(unittest.TestCase):
         self.train_val_test_negatives_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/train_val_test_negatives.array_record")
     
-    def test_grain_dataloader(self):
-        
-        #for dataloading, which is always on CPU, use this flag to prevent jax from trying to
-        # put jax arrays on GPU before training (which happens in another component)
-        os.environ["JAX_PLATFORMS"] = "cpu"
-        
-        ratings_train_uri, ratings_val_uri, ratings_test_uri \
-            = get_train_val_test_liked_uris(use_small=True)
-        
-        import jax
-        #jax.config.update("jax_debug_nans", True)
-        #np.set_printoptions(threshold=np.inf)
-        
-        max_history = 200
-        num_candidates = 40
-        batch_size = 64
-        num_epochs = 1
-        seed = 1234
-        shard_count = max(1, os.cpu_count() - 1)
-        
-        train_dataloader, val_dataloader = create_train_and_val_dataloaders(
-            total_workers=shard_count, worker_rank=0,
-            movies_uri=self.movies_uri,
-            recommendations_uri=self.recommendations_uri,
-            recommendations_ts_uri=self.recommendations_ts_uri,
-            train_ratings_uri=ratings_train_uri,
-            val_ratings_uri=ratings_val_uri,
-            train_negatives_uri=self.train_negatives_uri,
-            val_negatives_uri=self.val_negatives_uri,
-            max_history=max_history, num_candidates=num_candidates,
-            num_epochs=num_epochs, batch_size=batch_size, seed=seed)
-        
-        print(f'os cpu count={os.cpu_count()}\n shard_count={shard_count}')
-        
-        TRAIN_BATCH_SIZE = train_dataloader._sampler.batch_size
-        TOTAL_RECORDS = train_dataloader._sampler.total_records
-        STEPS_PER_EPOCH = TOTAL_RECORDS // TRAIN_BATCH_SIZE  # = 7234
-        
-        print(f'num_epochs={num_epochs}, shard_count={shard_count}, TRAIN_BATCH_SIZE={TRAIN_BATCH_SIZE}, TOTAL_RECORDS={TOTAL_RECORDS}, STEPS_PER_EPOCH={STEPS_PER_EPOCH}',
-            flush=True)
-        
-        print(
-            f'TOTAL_RECORDS={TOTAL_RECORDS}, len(sampler)={len(train_dataloader._sampler)}')
-        print(f'train_ra_sampler.num_batches={train_dataloader._sampler.num_batches}')
-        
-        a = None
-        i = 0
-        for batch in train_dataloader:
-            a = batch
-            i += 1
-        self.assertIsNotNone(a)
-        self.assertEqual(train_dataloader._sampler.num_batches, i*shard_count)
-    
-    def test_run_ray_train(self):
-        
-        import ray
-        if ray.is_initialized():
-            ray.shutdown()
-        ray.init()
+    def print_local_info(self):
+        print(f'local_devices={jax.local_devices()}') #[CpuDevice(id=0)]
+        print(f'local device count={jax.local_device_count()}')
+        print(f'process_count={jax.process_count()}')
+        print(f'process_index={jax.process_index()}')
+
+    def test_run_train(self):
         
         max_history = 200
         num_candidates = 40
@@ -193,24 +142,32 @@ class TestRanker(unittest.TestCase):
             # 'cpu', 'gpu', or 'tpu'
             backend = jax.extend.backend.get_backend().platform
             num_local_devices = jax.local_device_count()
+            devices = np.array(jax.devices())
+            mesh = jax.sharding.Mesh(devices, axis_names=('data',))
+            jax.set_mesh(mesh)
+            device_dict = {}
             if backend == "tpu":
-                return {"use_gpu": False, "use_tpu": True,
-                    "resources_per_worker": {"TPU": num_local_devices}}
+                jax.distributed.initialize()
+                device_dict.update({"use_gpu": False, "use_tpu": True,
+                    "resources_per_worker": {"TPU": num_local_devices}})
             elif backend == "gpu":
                 # Usually, Ray handles GPU assignment automatically with use_gpu=True,
                 # but specifying 1 GPU per worker ensures strict isolation.
-                return {"use_gpu": True, "use_tpu": False,
-                    "resources_per_worker": {"GPU": 1}}
+                jax.distributed.initialize()
+                device_dict.update({"use_gpu": True, "use_tpu": False,
+                    "resources_per_worker": {"GPU": 1}})
             else:
                 # CPU path
-                return {"use_gpu": False, "use_tpu": False,
-                    "resources_per_worker": {"CPU": 1}}
+                device_dict.update({"use_gpu": False, "use_tpu": False,
+                    "resources_per_worker": {"CPU": 1}})
+            return device_dict
         
         env_resources = get_env_resources()
+        
+        train_loop_per_worker(config)
        
         if False:
             test_dataloader = create_test_dataloader(
-                total_workers = worker_count, worker_rank = 0,
                 movies_uri = self.movies_uri,
                 recommendations_uri = self.recommendations_uri,
                 recommendations_ts_uri = self.recommendations_ts_uri,

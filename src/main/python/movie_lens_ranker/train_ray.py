@@ -1,20 +1,17 @@
+import jax
 import optax
 from flax import nnx
 import grain
 from math import log
 from movie_lens_ranker.data_loading import create_train_and_val_dataloaders
+from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.train import train_fn
 from movie_lens_ranker.util import read_embeddings
 
 # runs on every worker (GPU/TPU)
 def train_loop_per_worker(config):
     
-    context = train.get_context()
-    #global index of this woker:
-    worker_rank = context.get_world_rank()
-    #ttal number of tpus or gpus in the cluster:
-    total_workers = context.get_world_size()
-    
+    worker_rank =  jax.process_index()
     #config should contain these:
     nontrainable_data_keys = {'movies_uri', 'recommendations_uri', 'recommendations_ts_uri',
         'ratings_train_uri', 'ratings_val_uri', 'train_negatives_uri', 'val_negatives_uri',
@@ -27,6 +24,7 @@ def train_loop_per_worker(config):
         'out_dim', 'hidden_dim', 'num_layers', 'num_heads', 'dropout_rate',
     }
     
+    '''
     if worker_rank == 0:
         ray.train.mlflow.setup_mlflow(
             tracking_uri=config['mlflow_config']['tracking_uri'],
@@ -37,9 +35,9 @@ def train_loop_per_worker(config):
             artifact_location=config['mlflow_config']['artifact_location'],
             create_experiment_if_not_exists=config['mlflow_config']['create_experiment_if_not_exists']
         )
+    '''
     
     train_dataloader, val_dataloader = create_train_and_val_dataloaders(
-        total_workers=total_workers, worker_rank=0,
         movies_uri=config['movies_uri'],
         recommendations_uri=config['recommendations_uri'],
         recommendations_ts_uri=config['recommendations_ts_uri'],

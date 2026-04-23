@@ -8,6 +8,9 @@ from flax import nnx
 import rax
 import grain
 from flax.typing import Array
+from grain._src.python.data_loader import DataLoader
+from jax.sharding import NamedSharding, PartitionSpec as P
+from pydantic_core.core_schema import dict_schema
 
 from movie_lens_ranker.BatchSampler import BatchSampler
 
@@ -19,6 +22,7 @@ from movie_lens_ranker.BatchSampler import BatchSampler
 import orbax.checkpoint as ocp
 
 from movie_lens_ranker.model import GraphRanker
+from movie_lens_ranker.util_mesh import get_global_mesh
 
 
 def get_node_graph_index(graph: jraph.GraphsTuple):
@@ -156,6 +160,39 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) ->
     metrics_dict['loss'] = loss
     return metrics_dict
 
+def _epoch_validation(model: GraphRanker, val_dataloader: DataLoader, top_k: int,
+        STEPS_PER_EPOCH_LOCAL_VAL:int, mesh: jax.sharding.Mesh) -> Dict[str, Array]:
+    epoch_val_loss = []
+    epoch_val_mrr = []
+    epoch_val_ndcg = []
+    epoch_val_recall = []
+    for val_local_step, val_padded_super_graph in enumerate(val_dataloader):
+        val_metrics = eval_step(model, val_padded_super_graph, top_k)
+        # jax.debug.print('val_metrics={val_metrics}', val_metrics=val_metrics, ordered=True)
+        epoch_val_mrr.append(val_metrics['mrr'])
+        epoch_val_ndcg.append(val_metrics['ndcg'])
+        epoch_val_loss.append(val_metrics["loss"])
+        epoch_val_recall.append(val_metrics['recall'])
+        if val_local_step > 1 and val_local_step % STEPS_PER_EPOCH_LOCAL_VAL == 0:
+            # finished a val epoch
+            break
+    avg_val_loss = jnp.mean(jnp.array(epoch_val_loss))
+    avg_val_mrr = jnp.mean(jnp.array(epoch_val_mrr))
+    avg_val_ndcg = jnp.mean(jnp.array(epoch_val_ndcg))
+    avg_val_recall = jnp.mean(jnp.array(epoch_val_recall))
+    
+    local_metrics = {'val_loss': avg_val_loss, 'val_ndcg': avg_val_ndcg, 'val_mrr': avg_val_mrr, 'val_recall': avg_val_recall}
+    
+    dict_specs = {k: P() for k in local_metrics.keys()}
+    
+    @jax.shard_map(mesh, in_specs=(dict_specs,), out_specs=dict_specs, check_vma=False)
+    def sync_fn(metrics):
+        # Inside shard_map, 'data' is now a bound axis
+        return jax.lax.pmean(metrics, axis_name='data')
+    
+    # Now this call will find the mesh context it needs
+    return sync_fn(local_metrics)
+
 def train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer,
@@ -177,7 +214,9 @@ def train_fn(model, train_dataloader: grain.DataLoader,
     if not isinstance(val_dataloader._sampler, BatchSampler):
         raise ValueError("val_dataloader sampler must be an instance of BatchSampler")
     
-    rank = ray.train.get_context().get_world_rank()
+    mesh = get_global_mesh()
+    
+    rank = jax.process_index()
     
     #tracked_fn_1 = chex.assert_max_traces(train_step, n=1)
     #tracked_fn_2 = chex.assert_max_traces(eval_step, n=1)
@@ -255,24 +294,13 @@ def train_fn(model, train_dataloader: grain.DataLoader,
             #global_ndcg = pmap(lambda x: pmean(x, "batch"), "batch")(jnp.array([avg_metrics['ndcg']]))[0]
             
             train_metrics = eval_step(model, padded_super_graph, top_k)
-            epoch_val_loss = []
-            epoch_val_mrr = []
-            epoch_val_ndcg = []
-            epoch_val_recall = []
-            for val_local_step, val_padded_super_graph in enumerate(val_dataloader):
-                val_metrics = eval_step(model, val_padded_super_graph, top_k)
-                #jax.debug.print('val_metrics={val_metrics}', val_metrics=val_metrics, ordered=True)
-                epoch_val_mrr.append(val_metrics['mrr'])
-                epoch_val_ndcg.append(val_metrics['ndcg'])
-                epoch_val_loss.append(val_metrics["loss"])
-                epoch_val_recall.append(val_metrics['recall'])
-                if val_local_step > 1 and val_local_step % STEPS_PER_EPOCH_LOCAL_VAL == 0:
-                    #finished a val epoch
-                    break
-            avg_val_loss = jnp.mean(jnp.array(epoch_val_loss))
-            avg_val_mrr = jnp.mean(jnp.array(epoch_val_mrr))
-            avg_val_ndcg = jnp.mean(jnp.array(epoch_val_ndcg))
-            avg_val_recall = jnp.mean(jnp.array(epoch_val_recall))
+            
+            val_metrics = _epoch_validation(model, val_dataloader, top_k, STEPS_PER_EPOCH_LOCAL_VAL, mesh)
+            
+            avg_val_loss = val_metrics["loss"]
+            avg_val_mrr = val_metrics['mrr']
+            avg_val_ndcg = val_metrics['ndcg']
+            avg_val_recall = val_metrics['recall']
             
             print(f"Epoch {epoch}: Train avg Loss {avg_train_loss:.4f} "
                   f"| train NDCG@{top_k} {train_metrics['ndcg']:.4f} "
@@ -319,15 +347,10 @@ def train_fn(model, train_dataloader: grain.DataLoader,
             )
             mngr_latest.wait_until_finished()  # Ensure it's on disk
             
-            ray.train.report(
-                ray_dict, checkpoint=ray.train.Checkpoint.from_directory(
-                    latest_checkpoint_dir)
-            )
-            if rank == 0:
-                mlflow.log_metrics(ray_dict, step=epoch)
             
-            ray.train.report({"loss": float(loss)})
-            
+            #if rank == 0:
+            #    mlflow.log_metrics(ray_dict, step=epoch)
+                
             if global_val_ndcg > best_ndcg + 1e-6:
                 best_ndcg = global_val_ndcg
                 epochs_without_improvement = 0
