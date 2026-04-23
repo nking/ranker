@@ -5,6 +5,8 @@ from helper import *
 
 from movie_lens_ranker.RatingsHistoryLookupTransform import *
 from movie_lens_ranker.data_loading import *
+from movie_lens_ranker.util import read_embeddings
+
 
 class TestRanker(unittest.TestCase):
     def setUp(self):

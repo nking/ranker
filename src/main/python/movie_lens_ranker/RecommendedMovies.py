@@ -1,4 +1,4 @@
-from typing import Union, Tuple
+from typing import Tuple
 
 import numpy as np
 from array_record.python import array_record_module

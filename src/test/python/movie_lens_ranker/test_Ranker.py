@@ -7,7 +7,6 @@ from array_record.python import array_record_module
 from flax import nnx
 
 from helper import *
-from movie_lens_ranker.BatchSampler import BatchSampler
 from movie_lens_ranker.RandomAccessArrayRecordDataSource import *
 from movie_lens_ranker.RatingsHistoryLookupTransform import *
 from movie_lens_ranker.HardNegativeSamplingTransform import *
@@ -17,6 +16,7 @@ from movie_lens_ranker.JraphPaddedGraphTupleTransform import JraphPaddedGraphTup
 from movie_lens_ranker.data_loading import *
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.train import *
+from movie_lens_ranker.util import read_embeddings
 
 class TestRanker(unittest.TestCase):
     def setUp(self):
@@ -28,7 +28,7 @@ class TestRanker(unittest.TestCase):
         
         #(user_id, movie_id, rating, timestamp)
         self.ratings_train_uri, self.ratings_val_uri, self.ratings_test_uri \
-            = get_train_val_test_liked_uris(use_small=False)
+            = get_train_val_test_liked_uris(use_small=True)
         
         # (user_id, movie_id, rating, timestamp)
         self.ratings_train_disliked_uri, self.ratings_val_disliked_uri, self.ratings_test_disliked_uri \
@@ -73,6 +73,9 @@ class TestRanker(unittest.TestCase):
         # put jax arrays on GPU before training (which happens in another component)
         os.environ["JAX_PLATFORMS"] = "cpu"
         
+        ratings_train_uri, ratings_val_uri, ratings_test_uri \
+            = get_train_val_test_liked_uris(use_small=True)
+        
         import jax
         #jax.config.update("jax_debug_nans", True)
         #np.set_printoptions(threshold=np.inf)
@@ -80,92 +83,57 @@ class TestRanker(unittest.TestCase):
         max_history = 200
         num_candidates = 40
         batch_size = 64
+        num_epochs = 1
+        seed = 1234
+        shard_count = max(1, os.cpu_count() - 1)
+        
+        train_dataloader, val_dataloader = create_train_and_val_dataloaders(
+            total_workers=shard_count, worker_rank=0,
+            movies_uri=self.movies_uri,
+            recommendations_uri=self.recommendations_uri,
+            recommendations_ts_uri=self.recommendations_ts_uri,
+            train_ratings_uri=ratings_train_uri,
+            val_ratings_uri=ratings_val_uri,
+            train_negatives_uri=self.train_negatives_uri,
+            val_negatives_uri=self.val_negatives_uri,
+            max_history=max_history, num_candidates=num_candidates,
+            num_epochs=num_epochs, batch_size=batch_size, seed=seed)
+        
+        print(f'os cpu count={os.cpu_count()}\n shard_count={shard_count}')
+        
+        TRAIN_BATCH_SIZE = train_dataloader._sampler.batch_size
+        TOTAL_RECORDS = train_dataloader._sampler.total_records
+        STEPS_PER_EPOCH = TOTAL_RECORDS // TRAIN_BATCH_SIZE  # = 7234
+        
+        print(f'num_epochs={num_epochs}, shard_count={shard_count}, TRAIN_BATCH_SIZE={TRAIN_BATCH_SIZE}, TOTAL_RECORDS={TOTAL_RECORDS}, STEPS_PER_EPOCH={STEPS_PER_EPOCH}',
+            flush=True)
+        
+        print(
+            f'TOTAL_RECORDS={TOTAL_RECORDS}, len(sampler)={len(train_dataloader._sampler)}')
+        print(f'train_ra_sampler.num_batches={train_dataloader._sampler.num_batches}')
+        
+        a = None
+        i = 0
+        for batch in train_dataloader:
+            a = batch
+            i += 1
+        self.assertIsNotNone(a)
+        self.assertEqual(train_dataloader._sampler.num_batches, i*shard_count)
+    
+    def test_run_ray_train(self):
+        
+        import ray
+        if ray.is_initialized():
+            ray.shutdown()
+        ray.init()
+        
+        max_history = 200
+        num_candidates = 40
+        batch_size = 64
         num_epochs = 120
         seed = 1234
-        top_k = 100
-        worker_count = max(1, os.cpu_count() - 1)
-        shard_opts = grain.sharding.ShardOptions(shard_index=0, shard_count=1)
         
-        all_movie_ids: List[int] = read_movies_array_record(self.movies_uri,
-            batch_size=batch_size)
-        
-        #the number per user must be >= half of num_candidates
-        recommendations = RecommendedMovies(
-            movie_rec_file_path=self.recommendations_uri,
-            movie_rec_ts_file_path=self.recommendations_ts_uri)
-        
-        # each worker will have its own copy of these:
-        train_history = UserHistory(ratings_uri_list=self.ratings_train_uri, fixed_size=2048)
-        val_history = UserHistory(ratings_uri_list=self.ratings_val_uri, fixed_size=2048)
-
-        train_negatives = Negatives(self.train_negatives_uri, fixed_size=256)
-        train_val_negatives = Negatives(self.train_val_negatives_uri, fixed_size=256)
-        val_negatives = Negatives(self.val_negatives_uri, fixed_size=256)
-       
-        train_datasource = RandomAccessArrayRecordDataSource(self.ratings_train_uri)
-        val_datasource = RandomAccessArrayRecordDataSource(self.ratings_val_uri)
-       
-        train_ra_sampler = BatchSampler(num_records=train_datasource.__len__(),
-            num_epochs=num_epochs,
-            batch_size=batch_size, shuffle=True, seed=seed,
-            shard_options=shard_opts)
-        val_ra_sampler = BatchSampler(num_records=val_datasource.__len__(),
-            num_epochs=1, #validations are over 1 epoch
-            batch_size=batch_size, shuffle=True, seed=seed,
-            shard_options=shard_opts)
-        
-        # NOTE that train_history_dict, etc are passed by reference to the MapTransforms
-        train_dataloader = grain.DataLoader(
-            data_source=train_datasource,
-            sampler=train_ra_sampler,
-            operations=[
-                # enrich the train records with local subgraphs:
-                RatingsHistoryLookupTransform(
-                    history_lookup=train_history,
-                    max_history=max_history),
-                HardNegativeSamplingTransform(
-                    history_lookup=train_history,
-                    all_movie_ids=all_movie_ids,
-                    negatives=train_negatives,
-                    recommendations=recommendations,
-                    num_candidates=num_candidates, top_k=top_k, seed=seed),
-                SparseLocalSubgraphTransform(),
-                JraphPaddedGraphTupleTransform(batch_size=batch_size, max_history=max_history, num_candidates=num_candidates),
-            ],
-            # worker_count=worker_count,
-            shard_options=shard_opts
-        )
-        
-        val_dataloader = grain.DataLoader(
-            data_source=val_datasource,
-            sampler=val_ra_sampler,
-            operations=[
-                # enrich the train records with local subgraphs:
-                RatingsHistoryLookupTransform(
-                    history_lookup=val_history,
-                    max_history=max_history),
-                HardNegativeSamplingTransform(
-                    history_lookup=val_history,
-                    all_movie_ids=all_movie_ids,
-                    negatives=val_negatives,
-                    #negatives=train_val_negatives,
-                    recommendations=recommendations,
-                    num_candidates=num_candidates, top_k=top_k, seed=seed),
-                SparseLocalSubgraphTransform(),
-                JraphPaddedGraphTupleTransform(batch_size=batch_size, max_history=max_history, num_candidates=num_candidates),
-            ],
-            # worker_count=worker_count,
-            shard_options=shard_opts
-        )
-       
-        if False:
-            train_batch : jraph.GraphsTuple = next(iter(train_dataloader))
-            print(f'train_batch={train_batch}')
-
-            val_batch: jraph.GraphsTuple = next(iter(train_dataloader))
-            print(f'val_batch={val_batch}')
-            return
-        
+        top_k = 20
         learning_rate = 5e-4#1e-3
         weight_decay = 1e-4
         out_dim = 32
@@ -173,71 +141,83 @@ class TestRanker(unittest.TestCase):
         num_layers = 2  # captures the 2-hop neighborhood.  3 tends to oversmooth
         num_heads = 4  # each head sees 64 hidden / 4 heads = 16 dimensional subspace
         dropout_rate = 0.1
-        rngs = nnx.Rngs(seed)
+        
         checkpoint_dir = os.path.join(get_bin_dir(), "checkpoints")
         latest_checkpoint_dir = os.path.join(checkpoint_dir, "latest")
-        best_checkpoint_dir = os.path.join(checkpoint_dir, "best")
+        log_dir = os.path.join(get_bin_dir(), "logdir")
+        mlflow_dir = os.path.join(get_bin_dir(), "mlflow")
+        mlflow_artifacts_dir = os.path.join(get_bin_dir(), "mlflow_artifacts")
         os.makedirs(latest_checkpoint_dir, exist_ok=True)
-        os.makedirs(best_checkpoint_dir, exist_ok=True)
+        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(mlflow_dir, exist_ok=True)
+        os.makedirs(mlflow_artifacts_dir, exist_ok=True)
         
-        embeddings = read_embeddings(
-            user_embeddings_uri=self.user_embeddings_uri,
-            movie_embeddings_uri=self.movie_embeddings_uri,
-            batch_size=1024)
+        from movie_lens_ranker.train_ray import train_loop_per_worker
         
-        model = GraphRanker(user_movie_embeds=embeddings, num_candidates=num_candidates,
-            hidden_features=hidden_dim, num_layers=num_layers,
-            out_features=out_dim, heads=num_heads,
-            dropout_rate=dropout_rate, rngs=rngs)
+        nontrainable_data_config = {'movies_uri':self.movies_uri,
+            'recommendations_uri':self.recommendations_uri,
+            'recommendations_ts_uri':self.recommendations_ts_uri,
+            'ratings_train_uri':self.ratings_train_uri,
+            'ratings_val_uri':self.ratings_val_uri,
+            'train_negatives_uri':self.train_negatives_uri,
+            'val_negatives_uri':self.val_negatives_uri,
+            'seed':seed
+        }
+        trainable_data_config = {'max_history':max_history, 'num_candidates':num_candidates,
+            'num_epochs':num_epochs,
+            'batch_size':batch_size}
+        nontrainable_model_config = {'latest_checkpoint_dir':latest_checkpoint_dir,
+            'log_dir':log_dir,
+            'movie_embeddings_uri': self.movie_embeddings_uri, 'user_embeddings_uri':self.user_embeddings_uri}
+        trainable_model_config = {'top_k':top_k, 'learning_rate':learning_rate, 'weight_decay':weight_decay,
+            'out_dim':out_dim, 'hidden_dim':hidden_dim, 'num_layers':num_layers,
+            'num_heads':num_heads, 'dropout_rate':dropout_rate,
+        }
+    
+        mlflow_config = {
+            'tracking_uri': mlflow_dir,
+            'registry_uri': None,
+            'experiment_id': None,
+            'experiment_name': 'GraphRanker_dev',
+            'tracking_token': None,
+            'artifact_location': mlflow_artifacts_dir,
+            'create_experiment_if_not_exists': True
+        }
         
-        optimizer = nnx.Optimizer(model, optax.adamw(learning_rate, weight_decay=weight_decay), wrt=nnx.Param)
+        config = {**nontrainable_data_config, **trainable_data_config, **nontrainable_model_config, **trainable_model_config}
+        config["mlflow_config"] = mlflow_config
         
-        print(f"expect the model training to start w/ loss = {-np.log(1. / num_candidates)}")
+        ray_results_dir = os.path.join(get_bin_dir(), "ray_results")
         
-        train_metrics = train_fn(model=model, train_dataloader=train_dataloader,
-            val_dataloader=val_dataloader,
-            optimizer=optimizer, top_k=20,
-            latest_checkpoint_dir=latest_checkpoint_dir, best_checkpoint_dir=best_checkpoint_dir, rngs=rngs)
-        print(f'train_metrics: {train_metrics}')
+        def get_env_resources():
+            # 'cpu', 'gpu', or 'tpu'
+            backend = jax.extend.backend.get_backend().platform
+            num_local_devices = jax.local_device_count()
+            if backend == "tpu":
+                return {"use_gpu": False, "use_tpu": True,
+                    "resources_per_worker": {"TPU": num_local_devices}}
+            elif backend == "gpu":
+                # Usually, Ray handles GPU assignment automatically with use_gpu=True,
+                # but specifying 1 GPU per worker ensures strict isolation.
+                return {"use_gpu": True, "use_tpu": False,
+                    "resources_per_worker": {"GPU": 1}}
+            else:
+                # CPU path
+                return {"use_gpu": False, "use_tpu": False,
+                    "resources_per_worker": {"CPU": 1}}
         
+        env_resources = get_env_resources()
+       
         if False:
-            num_epochs = 1
-            test_history = UserHistory(ratings_uri_list=self.ratings_val_uri,
-                fixed_size=2048)
-            test_negatives = Negatives(self.test_negatives_uri, fixed_size=256)
-            
-            test_datasource = RandomAccessArrayRecordDataSource(
-                self.ratings_test_uri)
-            test_ra_sampler = BatchSampler(
-                num_records=test_datasource.__len__(),
-                num_epochs=num_epochs,
-                batch_size=batch_size, shuffle=True, seed=seed,
-                shard_options=shard_opts)
-           
-            test_dataloader = grain.DataLoader(
-                data_source=test_datasource,
-                sampler=test_ra_sampler,
-                operations=[
-                    # enrich the train records with local subgraphs:
-                    RatingsHistoryLookupTransform(
-                        history_lookup=test_history,
-                        max_history=max_history),
-                    HardNegativeSamplingTransform(
-                        history_lookup=test_history,
-                        all_movie_ids=all_movie_ids,
-                        negatives=test_negatives,
-                        # negatives=train_val_negatives,
-                        recommendations=recommendations,
-                        num_candidates=num_candidates, top_k=top_k, seed=seed),
-                    SparseLocalSubgraphTransform(),
-                    JraphPaddedGraphTupleTransform(batch_size=batch_size,
-                        max_history=max_history,
-                        num_candidates=num_candidates),
-                ],
-                # worker_count=worker_count,
-                shard_options=shard_opts
-            )
-            
+            test_dataloader = create_test_dataloader(
+                total_workers = worker_count, worker_rank = 0,
+                movies_uri = self.movies_uri,
+                recommendations_uri = self.recommendations_uri,
+                recommendations_ts_uri = self.recommendations_ts_uri,
+                ratings_uri = self.ratings_test_uri,
+                negatives_uri = self.test_negatives_uri,
+                max_history = max_history, num_candidates = num_candidates,
+                batch_size = batch_size, seed = seed)
             eval_metrics = test_fn(model=model, test_dataloader=test_dataloader, top_k=top_k)
         
     if __name__ == '__main__':

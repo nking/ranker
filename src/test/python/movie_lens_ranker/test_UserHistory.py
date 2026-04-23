@@ -1,19 +1,13 @@
-import os.path
 import unittest
-import time
 
 import numpy as np
 from array_record.python import array_record_module
-from movie_lens_ranker.RecommendedMovies import RecommendedMovies
 
 from helper import *
-from movie_lens_ranker.BatchSampler import BatchSampler
-from movie_lens_ranker.RandomAccessArrayRecordDataSource import *
-from movie_lens_ranker.UserHistory import UserHistory
 from movie_lens_ranker.data_loading import *
-import grain
 
-from movie_lens_ranker.data_loading import _read_embeddings
+from movie_lens_ranker.util import _read_embeddings, build_history_lookup
+
 
 class TestUserHistory_vec(unittest.TestCase):
     def setUp(self):

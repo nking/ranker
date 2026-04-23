@@ -66,13 +66,24 @@ Model requirements:
 
 I will use the Jax AI stack for creating the model
     Jraphx + Flax NNX + Rax
-    and will save it to a JAX serving format and/or
-    ray serving
+    and will save it to a JAX serving format and/or __
+
+Note: I worked through using ray[tune,train] for part of
+the MLOps, but it is in a state of transitioning to v2 and
+the Tuner is not compatible with the new v2 trainer, just one
+major bug, but after 1 day of trying to configure it, will
+try another framework, that is more stable and or simpler 
+if possible.
+options:
+- google's vizier for hypertune training
+  use kfp and custom train job...?
+- W&B weights and biases?
+
 
 Dataloading:  Google Grain
 State Managements: Orbax
 Experiment Tracking: MLFlow-skinny
-MLOps workflow tasks:  ray[tune,train]
+MLOps workflow tasks:  
 code container: Docker or equiv
 
 MLOps details:

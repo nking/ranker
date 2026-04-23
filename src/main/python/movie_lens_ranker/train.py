@@ -3,6 +3,7 @@ from typing import Dict, Tuple
 import jax
 import jraph
 import jax.numpy as jnp
+import mlflow
 from flax import nnx
 import rax
 import grain
@@ -150,6 +151,7 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) ->
         return loss, {f"mrr": mrr, f"ndcg": ndcg, f"recall": recall}
     
     # has_aux is necessary when loss_fn returns more than scalar loss
+    #TODO: try this: loss, metrics_dict = loss_fn(model, padded_graph)
     (loss, metrics_dict), grads = nnx.value_and_grad(loss_fn, has_aux=True)(model, padded_graph)
     metrics_dict['loss'] = loss
     return metrics_dict
@@ -157,38 +159,50 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) ->
 def train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer,
-        top_k:int, latest_checkpoint_dir: str, best_checkpoint_dir:str, rngs:nnx.Rngs):
-    
-    '''
-    model = config['model']
-    train_dataloader = config['train_dataloader']
-    val_dataloader = config['val_dataloader']
-    optimizer = config['optimizer']
-    top_k = config['top_k']
-    latest_checkpoint_dir = config['latest_checkpoint_dir']
-    best_checkpoint_dir = conig['best_checkpoint_dir']
-    '''
-    
+        top_k:int, latest_checkpoint_dir: str, rngs:nnx.Rngs):
+    """
+    a shard's portion of the training
+    :param model:
+    :param train_dataloader:
+    :param val_dataloader:
+    :param optimizer:
+    :param top_k:
+    :param latest_checkpoint_dir:
+    :param rngs:
+    :return:
+    """
+   
     if not isinstance(train_dataloader._sampler, BatchSampler):
         raise ValueError("train_dataloader sampler must be an instance of BatchSampler")
     if not isinstance(val_dataloader._sampler, BatchSampler):
         raise ValueError("val_dataloader sampler must be an instance of BatchSampler")
+    
+    rank = ray.train.get_context().get_world_rank()
     
     #tracked_fn_1 = chex.assert_max_traces(train_step, n=1)
     #tracked_fn_2 = chex.assert_max_traces(eval_step, n=1)
     
     TRAIN_BATCH_SIZE = train_dataloader._sampler.batch_size
     TOTAL_RECORDS = train_dataloader._sampler.total_records
-    STEPS_PER_EPOCH = TOTAL_RECORDS // TRAIN_BATCH_SIZE  # = 7234
+    STEPS_PER_EPOCH_GLOBAL = train_dataloader._sampler.num_batches  # = 7234
+    NUM_TRAIN_SHARDS = train_dataloader._sampler._shard_options.shard_count
+    STEPS_PER_EPOCH_LOCAL = STEPS_PER_EPOCH_GLOBAL//NUM_TRAIN_SHARDS
     
-    print(f'TRAIN_BATCH_SIZE={TRAIN_BATCH_SIZE}, TOTAL_RECORDS={TOTAL_RECORDS}, STEPS_PER_EPOCH={STEPS_PER_EPOCH}', flush=True)
+    print(f'TRAIN_BATCH_SIZE={TRAIN_BATCH_SIZE}, TOTAL_RECORDS={TOTAL_RECORDS}', flush=True)
+    print(f'STEPS_PER_EPOCH_GLOBAL_TRAIN={STEPS_PER_EPOCH_GLOBAL}')
+    print(f'STEPS_PER_EPOCH_LOCAL_TRAIN={STEPS_PER_EPOCH_LOCAL}')
     
     VAL_BATCH_SIZE = train_dataloader._sampler.batch_size
     TOTAL_RECORDS_VAL = val_dataloader._sampler.total_records
-    STEPS_PER_EPOCH_VAL = TOTAL_RECORDS_VAL // VAL_BATCH_SIZE # 903
+    STEPS_PER_EPOCH_GLOBAL_VAL = val_dataloader._sampler.num_batches # 903
+    NUM_VAL_SHARDS = val_dataloader._sampler._shard_options.shard_count
+    STEPS_PER_EPOCH_LOCAL_VAL = STEPS_PER_EPOCH_GLOBAL_VAL // NUM_VAL_SHARDS
     
-    print(f'VAL_BATCH_SIZE={VAL_BATCH_SIZE}, TOTAL_RECORDS_VAL={TOTAL_RECORDS_VAL}, STEPS_PER_EPOCH_VAL={STEPS_PER_EPOCH_VAL}', flush=True)
-    
+    print(f'VAL_BATCH_SIZE={VAL_BATCH_SIZE}, TOTAL_RECORDS_VAL={TOTAL_RECORDS_VAL}', flush=True)
+    print(f'STEPS_PER_EPOCH_GLOBAL_VAL={STEPS_PER_EPOCH_GLOBAL_VAL}')
+    print(f'STEPS_PER_EPOCH_LOCAL_VAL={STEPS_PER_EPOCH_LOCAL_VAL}')
+
+    #TODO: add back save of best checkpoint now that ray will not be handling it
     mngr_latest = ocp.CheckpointManager(latest_checkpoint_dir,
         item_handlers={
             'model': ocp.StandardCheckpointHandler(),
@@ -198,16 +212,6 @@ def train_fn(model, train_dataloader: grain.DataLoader,
             'dataloader': grain.checkpoint.CheckpointHandler()
         },
         options=ocp.CheckpointManagerOptions(max_to_keep=2)
-    )
-    mngr_best = ocp.CheckpointManager(best_checkpoint_dir,
-        item_handlers={
-            'model': ocp.StandardCheckpointHandler(),
-            'opt': ocp.StandardCheckpointHandler(),
-            'global_step': ocp.StandardCheckpointHandler(),
-            'rngs': ocp.StandardCheckpointHandler(),
-            'dataloader': grain.checkpoint.CheckpointHandler()
-        },
-        options=ocp.CheckpointManagerOptions(max_to_keep=1)
     )
     
     ndcg_text = f'ndcg_{top_k}'
@@ -222,42 +226,47 @@ def train_fn(model, train_dataloader: grain.DataLoader,
     patience = 5
     best_ndcg = -1.0
     epochs_without_improvement = 0
-    best_state = None  # To store the best weights
-    best_graph_def = None
     delay = 10 # min number of epochs to learn
     
     epoch_avg_train_loss = []
     early_stop_triggered = [False]
     
-    for global_step, padded_super_graph in enumerate(train_dataloader):
-        epoch = global_step // STEPS_PER_EPOCH
-        batch_idx = global_step % STEPS_PER_EPOCH
+    #stacked_val = stack_val_batches(val_dataloader, steps_per_worker)
+    for local_step, padded_super_graph in enumerate(train_dataloader):
+        epoch = local_step // STEPS_PER_EPOCH_LOCAL
         #jraph.GraphsTuple
         loss = train_step(model, padded_super_graph, optimizer)
         epoch_avg_train_loss.append(loss)
         
-        if global_step % 100 == 0:
-            print(f"Step {global_step} (Epoch {epoch}): Train Loss {loss:.4f}")
+        if local_step % 100 == 0 and rank==0:
+            print(f"Step {local_step} (Epoch {epoch}): Train Loss {loss:.4f}")
             # writer.add_scalar("loss", loss, global_step)
         
-        if global_step > 1 and global_step % STEPS_PER_EPOCH == 0:
+        if (local_step + 1) % STEPS_PER_EPOCH_LOCAL == 0:
             #finished a train epoch.  calc avg train loss and val metrics
             avg_train_loss = jnp.mean(jnp.array(epoch_avg_train_loss))
-            train_metrics = eval_step(model, padded_super_graph, top_k)
             epoch_avg_train_loss.clear()
             
+            #stacked_val = stack_val_batches(val_dataloader, STEPS_PER_EPOCH_LOCAL_VAL)
+            #avg_metrics = validation_epoch_compiled(state, stacked_val, top_k)
+            
+            # 3. Synchronize across Ray workers using pmap + pmean
+            # Ensure avg_metrics['ndcg'] is a 1D array of size 1 for pmap
+            #global_ndcg = pmap(lambda x: pmean(x, "batch"), "batch")(jnp.array([avg_metrics['ndcg']]))[0]
+            
+            train_metrics = eval_step(model, padded_super_graph, top_k)
             epoch_val_loss = []
             epoch_val_mrr = []
             epoch_val_ndcg = []
             epoch_val_recall = []
-            for val_global_step, val_padded_super_graph in enumerate(val_dataloader):
+            for val_local_step, val_padded_super_graph in enumerate(val_dataloader):
                 val_metrics = eval_step(model, val_padded_super_graph, top_k)
                 #jax.debug.print('val_metrics={val_metrics}', val_metrics=val_metrics, ordered=True)
                 epoch_val_mrr.append(val_metrics['mrr'])
                 epoch_val_ndcg.append(val_metrics['ndcg'])
                 epoch_val_loss.append(val_metrics["loss"])
                 epoch_val_recall.append(val_metrics['recall'])
-                if val_global_step > 1 and val_global_step % STEPS_PER_EPOCH_VAL == 0:
+                if val_local_step > 1 and val_local_step % STEPS_PER_EPOCH_LOCAL_VAL == 0:
                     #finished a val epoch
                     break
             avg_val_loss = jnp.mean(jnp.array(epoch_val_loss))
@@ -272,62 +281,129 @@ def train_fn(model, train_dataloader: grain.DataLoader,
                   f"avg val loss {avg_val_loss:.4f} | val NDCG@{top_k} {avg_val_ndcg:.4f} "
                   f"| val MRR@{top_k} {avg_val_mrr:.4f} | val recall_{top_k} {avg_val_recall:.4f}")
             
-            history["train_loss"].append(avg_train_loss)
-            history[f"train_{mrr_text}"].append(train_metrics['mrr'])
-            history[f"train_{ndcg_text}"].append(train_metrics['ndcg'])
-            history[f"train_{recall_text}"].append(train_metrics['recall'])
-            history["val_loss"].append(avg_val_loss)
-            history[f"val_{mrr_text}"].append(avg_val_mrr)
-            history[f"val_{ndcg_text}"].append(avg_val_ndcg)
-            history[f"val_{recall_text}"].append(avg_val_recall)
-        
-            if avg_val_ndcg > best_ndcg:
-                best_ndcg = avg_val_ndcg
-                epochs_without_improvement = 0
-                best_graph_def, best_state = nnx.split(model)
-                print(f"  New best NDCG! Saving model...")
-                mngr_best.save(
-                    global_step,
-                    args=ocp.args.Composite(
-                        model=ocp.args.StandardSave(nnx.state(model)),
-                        opt=ocp.args.StandardSave(nnx.state(optimizer)),
-                        global_step=ocp.args.StandardSave({'step': global_step}),
-                        # NNX RNGs need to be converted to state (dictionary of arrays)
-                        rngs=ocp.args.StandardSave(nnx.state(rngs)),
-                        # Include your dataloader from before
-                        dataloader=grain.checkpoint.CheckpointSave(iter(train_dataloader))
-                    )
-                )
-                mngr_best.wait_until_finished()
-            elif epoch >= delay:
-                epochs_without_improvement += 1
-                print( f"  No improvement for {epochs_without_improvement} epoch(s).")
-            if epochs_without_improvement >= patience:
-                print(f"Early stopping triggered at epoch {epoch}.")
-                nnx.update(model, best_state)
-                early_stop_triggered[0] = True
-                break
+            history["train_loss"].append(avg_train_loss.item())
+            history[f"train_{mrr_text}"].append(train_metrics['mrr'].item())
+            history[f"train_{ndcg_text}"].append(train_metrics['ndcg'].item())
+            history[f"train_{recall_text}"].append(train_metrics['recall'].item())
+            history["val_loss"].append(avg_val_loss.item())
+            history[f"val_{mrr_text}"].append(avg_val_mrr.item())
+            history[f"val_{ndcg_text}"].append(avg_val_ndcg.item())
+            history[f"val_{recall_text}"].append(avg_val_recall.item())
+            ray_dict = {
+                "train_loss":avg_train_loss.item(),
+                f"train_{mrr_text}":train_metrics['mrr'].item(),
+                f"train_{ndcg_text}" : train_metrics['ndcg'].item(),
+                f"train_{recall_text}" : train_metrics['recall'].item(),
+                "val_loss":avg_val_loss.item(),
+                f"val_{mrr_text}":avg_val_mrr.item(),
+                f"val_{ndcg_text}":avg_val_ndcg.item(),
+                f"val_{recall_text}":avg_val_recall.item()
+            }
+            
+            global_val_ndcg = jax.lax.pmean(avg_val_ndcg, axis_name="batch")
+            
             #orbax for checkpointing.  saves latest 2
             _graphdef, model_state = nnx.split(model)
             _, opt_state = nnx.split(optimizer)
             mngr_latest.save(
-                global_step,
+                local_step*NUM_TRAIN_SHARDS,
                 args=ocp.args.Composite(
                     model=ocp.args.StandardSave(model_state),
                     opt=ocp.args.StandardSave(opt_state),
-                    global_step=ocp.args.StandardSave({'step': global_step}),
+                    global_step=ocp.args.StandardSave({'step': local_step*NUM_TRAIN_SHARDS}),
                     # NNX RNGs need to be converted to state (dictionary of arrays)
                     rngs=ocp.args.StandardSave(nnx.state(rngs)),
                     # Include your dataloader from before
-                    dataloader=grain.checkpoint.CheckpointSave(iter(train_dataloader))
+                    dataloader=grain.checkpoint.CheckpointSave(train_dataloader)
                 )
             )
             mngr_latest.wait_until_finished()  # Ensure it's on disk
-                
+            
+            ray.train.report(
+                ray_dict, checkpoint=ray.train.Checkpoint.from_directory(
+                    latest_checkpoint_dir)
+            )
+            if rank == 0:
+                mlflow.log_metrics(ray_dict, step=epoch)
+            
+            ray.train.report({"loss": float(loss)})
+            
+            if global_val_ndcg > best_ndcg + 1e-6:
+                best_ndcg = global_val_ndcg
+                epochs_without_improvement = 0
+                if rank == 0:
+                    print(f"  New best NDCG!")
+            elif epoch >= delay:
+                epochs_without_improvement += 1
+                if rank == 0:
+                    print( f"  No improvement for {epochs_without_improvement} epoch(s).")
+            if epochs_without_improvement >= patience:
+                if rank == 0:
+                    print(f"Early stopping triggered at epoch {epoch}.")
+                early_stop_triggered[0] = True
+                break
+            
         if early_stop_triggered[0]:
             break
         
     return history
+
+def stack_val_batches(dataloader, num_steps):
+    batches = []
+    for i, batch in enumerate(dataloader):
+        batches.append(batch)
+        if i + 1 == num_steps:
+            break
+    # Use jax.tree.map to stack all GraphsTuples into one
+    # This creates a Pytree where nodes shape is [num_steps, total_nodes, feature_dim]
+    stacked_batches = jax.tree.map(lambda *args: jnp.stack(args), *batches)
+    return stacked_batches
+
+def get_stacked_shards(dataloader, steps_per_worker):
+    batches = []
+    for i, batch in enumerate(dataloader):
+        batches.append(batch)
+        if i + 1 >= steps_per_worker:
+            break
+    # Stacks into a single Pytree where every leaf has leading dim 'steps_per_worker'
+    return jax.tree.map(lambda *args: jnp.stack(args), *batches)
+
+
+@nnx.jit
+def validation_epoch_compiled(model: nnx.Module, stacked_batches, top_k):
+    """
+    Compiled validation epoch.
+    Processes multiple batches on-device without returning to Python.
+    """
+    def scan_body(carry, batch):
+        # Call your existing eval_step logic
+        # Since eval_step is also @nnx.jit, XLA will inline it here
+        metrics = eval_step(model, batch, top_k)
+        return None, metrics
+    
+    # jax.lax.scan iterates over the leading dimension of stacked_batches
+    _, metrics_history = jax.lax.scan(scan_body, None, stacked_batches)
+    
+    # metrics_history now contains arrays of shape [steps_per_worker, ...]
+    # We average them directly on the GPU
+    return jax.tree.map(lambda x: jnp.mean(x), metrics_history)
+
+def run_full_validation(model, val_dataloader, top_k, steps=903, micro_batch_size=100):
+    all_step_metrics = []
+    
+    # Iterate through the loader in chunks
+    for _ in range(0, steps, micro_batch_size):
+        # 1. Stack a smaller chunk (e.g., 100 batches)
+        chunk = stack_val_batches(val_dataloader, micro_batch_size)
+        
+        # 2. Run compiled validation on this chunk
+        # This keeps GPU utilization high without OOMing the Host RAM
+        chunk_metrics = validation_epoch_compiled(model, chunk, top_k)
+        all_step_metrics.append(chunk_metrics)
+    
+    # Final average across chunks
+    return jax.tree.map(lambda *args: jnp.mean(jnp.array(args)),
+        *all_step_metrics)
 
 def test_fn(model, test_dataloader: grain.DataLoader, top_k:int):
     """

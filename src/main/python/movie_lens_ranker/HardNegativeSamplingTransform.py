@@ -14,7 +14,7 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
     as "candidate_ids" and "labels"
     """
     def __init__(self, history_lookup: UserHistory, all_movie_ids:List[int], negatives:Negatives,
-        recommendations:RecommendedMovies, num_candidates=20, top_k:int=200,
+        recommendations:RecommendedMovies, num_candidates=20,
         seed:int = 0):
         """
         initialize a CandidateSamplingTransform object
@@ -31,7 +31,6 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
         self.num_candidates = num_candidates
         self.n_approx = self.num_candidates // 2
         self.n_hard = self.num_candidates - 1 - self.n_approx
-        self.top_k = top_k
         self.recommendations = recommendations
         self.seed = seed
         self.n_approx = self.num_candidates // 2

@@ -9,6 +9,8 @@ from movie_lens_ranker.JraphPaddedGraphTupleTransform import \
 from movie_lens_ranker.RatingsHistoryLookupTransform import *
 from movie_lens_ranker.SparseLocalSubgraphTransform import *
 from movie_lens_ranker.data_loading import *
+from movie_lens_ranker.util import read_embeddings
+
 
 class TestJraphPaddedGraphTupleTransform(unittest.TestCase):
     def setUp(self):

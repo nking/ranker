@@ -2,12 +2,12 @@ import os.path
 import unittest
 from array_record.python import array_record_module
 from helper import *
-from movie_lens_ranker.HardNegativeSamplingTransform import *
 
 from movie_lens_ranker.RatingsHistoryLookupTransform import *
 from movie_lens_ranker.UserHistory import UserHistory
 from movie_lens_ranker.Negatives_vec import Negatives
 from movie_lens_ranker.data_loading import *
+from movie_lens_ranker.util import read_embeddings
 
 class TestRanker(unittest.TestCase):
     def setUp(self):

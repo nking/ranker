@@ -1,5 +1,3 @@
-from typing import Optional
-
 import grain
 import numpy as np
 

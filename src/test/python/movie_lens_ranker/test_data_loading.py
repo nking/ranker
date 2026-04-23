@@ -2,15 +2,13 @@ import os.path
 import unittest
 import time
 
-import numpy as np
 from array_record.python import array_record_module
 from helper import *
-from movie_lens_ranker.BatchSampler import BatchSampler
+from movie_lens_ranker.util import *
+from movie_lens_ranker.util import _read_embeddings
 from movie_lens_ranker.RandomAccessArrayRecordDataSource import *
 from movie_lens_ranker.data_loading import *
 import grain
-
-from movie_lens_ranker.data_loading import _read_embeddings
 
 class TestDataLoading(unittest.TestCase):
     def setUp(self):
@@ -57,7 +55,7 @@ class TestDataLoading(unittest.TestCase):
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)
         self.assertTrue(isinstance(embeddings, jnp.ndarray))
-        self.assertEqual(len(embeddings), 6040 + 3883)
+        self.assertEqual(len(embeddings), 6040 + 3883 + 1)
     
     def test_read_ratings_array_records(self):
         """

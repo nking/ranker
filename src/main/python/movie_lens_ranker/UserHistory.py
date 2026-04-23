@@ -2,9 +2,8 @@ from typing import Union, List, Tuple
 
 import numpy as np
 from array_record.python import array_record_module
-import msgpack
 
-from movie_lens_ranker.data_loading import build_history_lookup
+from movie_lens_ranker.util import build_history_lookup
 
 
 class UserHistory (object):

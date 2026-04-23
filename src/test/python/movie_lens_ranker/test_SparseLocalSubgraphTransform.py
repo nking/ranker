@@ -2,11 +2,10 @@ import os.path
 import unittest
 from array_record.python import array_record_module
 from helper import *
-from movie_lens_ranker.HardNegativeSamplingTransform import *
 
-from movie_lens_ranker.RatingsHistoryLookupTransform import *
 from movie_lens_ranker.SparseLocalSubgraphTransform import *
 from movie_lens_ranker.data_loading import *
+from movie_lens_ranker.util import read_embeddings
 
 class TestSparseLocalSubgraphTransform(unittest.TestCase):
     def setUp(self):

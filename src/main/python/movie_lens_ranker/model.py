@@ -4,6 +4,7 @@ from flax import nnx
 import jraph
 from array_record.python import array_record_module
 from movie_lens_ranker.data_loading import *
+import jax.numpy as jnp
 
 class GraphRanker(nnx.Module):
     def __init__(self, user_movie_embeds: jnp.ndarray,
