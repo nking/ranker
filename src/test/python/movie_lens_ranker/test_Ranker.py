@@ -99,10 +99,12 @@ class TestRanker(unittest.TestCase):
         
         checkpoint_dir = os.path.join(get_bin_dir(), "checkpoints")
         latest_checkpoint_dir = os.path.join(checkpoint_dir, "latest")
+        best_checkpoint_dir = os.path.join(checkpoint_dir, "best")
         log_dir = os.path.join(get_bin_dir(), "logdir")
         mlflow_dir = os.path.join(get_bin_dir(), "mlflow")
         mlflow_artifacts_dir = os.path.join(get_bin_dir(), "mlflow_artifacts")
         os.makedirs(latest_checkpoint_dir, exist_ok=True)
+        os.makedirs(best_checkpoint_dir, exist_ok=True)
         os.makedirs(log_dir, exist_ok=True)
         os.makedirs(mlflow_dir, exist_ok=True)
         os.makedirs(mlflow_artifacts_dir, exist_ok=True)
@@ -122,6 +124,7 @@ class TestRanker(unittest.TestCase):
             'num_epochs':num_epochs,
             'batch_size':batch_size}
         model_params_nontrainable = {'latest_checkpoint_dir':latest_checkpoint_dir,
+            'best_checkpoint_dir':best_checkpoint_dir,
             'log_dir':log_dir,
             'movie_embeddings_uri': self.movie_embeddings_uri, 'user_embeddings_uri':self.user_embeddings_uri}
         model_params_trainable = {'top_k':top_k, 'learning_rate':learning_rate, 'weight_decay':weight_decay,

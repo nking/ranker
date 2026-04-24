@@ -24,8 +24,6 @@ from movie_lens_ranker.BatchSampler import BatchSampler
 import orbax.checkpoint as ocp
 
 from movie_lens_ranker.model import GraphRanker
-from movie_lens_ranker.util_mesh import get_global_mesh
-
 
 def get_node_graph_index(graph: jraph.GraphsTuple):
     """
@@ -161,6 +159,36 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) ->
     metrics_dict['loss'] = loss
     return metrics_dict
 
+def _epoch_validation_chunked(model, val_dataloader, top_k):
+    all_metrics = []
+    current_chunk = []
+    chunk_size = 8
+    
+    for i, batch in enumerate(val_dataloader):
+        current_chunk.append(batch)
+        
+        # When chunk is full, process it
+        if len(current_chunk) == chunk_size:
+            mega_batch = jtu.tree_map(lambda *xs: jnp.stack(xs),
+                *current_chunk)
+            # Process the chunk in one vectorized GPU call
+            chunk_metrics = vectorized_epoch_eval(model, mega_batch, top_k)
+            all_metrics.append(chunk_metrics)
+            current_chunk = []  # Reset
+    
+    # Process any remaining batches in the last partial chunk
+    if current_chunk:
+        mega_batch = jtu.tree_map(lambda *xs: jnp.stack(xs), *current_chunk)
+        all_metrics.append(vectorized_epoch_eval(model, mega_batch, top_k))
+    
+    # Average across all chunks
+    # We stack all the results (e.g., [8, 8, 8, 4]) and take the global mean
+    final_metrics = jtu.tree_map(
+        lambda *xs: jnp.mean(jnp.concatenate([x.reshape(-1) for x in xs])),
+        *all_metrics
+    )
+    return final_metrics
+
 @nnx.jit
 def vectorized_epoch_eval(model, mega_batch, top_k):
     # mega_batch here is a chunk of N batches stacked
@@ -168,7 +196,16 @@ def vectorized_epoch_eval(model, mega_batch, top_k):
     return v_eval(model, mega_batch, top_k)
 
 def _epoch_validation(model: GraphRanker, val_dataloader: DataLoader,
-        top_k: int, STEPS_PER_EPOCH_LOCAL_VAL: int):
+        top_k: int):
+    """
+    calc metrics for val dataset. Note, if this method consumes too much memory, use the
+    _epoch_validation_chunked instead.
+    
+    :param model:
+    :param val_dataloader:
+    :param top_k:
+    :return:
+    """
     # 1. Collect all batches from the loader into a list
     # (Assuming memory permits holding one epoch of padded graphs)
     all_batches = [batch for batch in val_dataloader]
@@ -183,30 +220,7 @@ def _epoch_validation(model: GraphRanker, val_dataloader: DataLoader,
     
     return avg_metrics
 
-def _epoch_validation_working_large_RAM_0(model: GraphRanker, val_dataloader: DataLoader,
-        top_k: int, STEPS_PER_EPOCH_LOCAL_VAL:int):
-    # 1. Collect all batches from the loader into a list
-    # (Assuming memory permits holding one epoch of padded graphs)
-    all_batches = [batch for batch in val_dataloader]
-    
-    # 2. Stack the list of GraphsTuples into a single vectorized GraphsTuple
-    # Every leaf will now have shape (Num_Batches, Padded_Size, ...)
-    mega_batch = jtu.tree_map(lambda *xs: jnp.stack(xs), *all_batches)
-    
-    # 3. Create the vectorized version of your eval_step
-    # in_axes: model is None (don't vectorise model), batch is 0 (vectorise over 0-th dim)
-    v_eval = nnx.vmap(eval_step, in_axes=(None, 0, None))
-    
-    # 4. Execute all evaluations in one call
-    val_metrics = v_eval(model, mega_batch, top_k)
-    
-    # val_metrics['loss'] is now an array of shape (Num_Batches,)
-    avg_metrics = jax.tree.map(jnp.mean, val_metrics)
-    
-    return avg_metrics
-
-def _epoch_validation_working_simplest(model: GraphRanker, val_dataloader: DataLoader, top_k: int,
-        STEPS_PER_EPOCH_LOCAL_VAL:int) -> Dict[str, Array]:
+def _epoch_validation_simplest(model: GraphRanker, val_dataloader: DataLoader, top_k: int) -> Dict[str, Array]:
     epoch_val_loss = []
     epoch_val_mrr = []
     epoch_val_ndcg = []
@@ -244,7 +258,8 @@ def _epoch_validation_working_simplest(model: GraphRanker, val_dataloader: DataL
 def train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer,
-        top_k:int, latest_checkpoint_dir: str, rngs:nnx.Rngs):
+        top_k:int, latest_checkpoint_dir: str, best_checkpoint_dir:str,
+        rngs:nnx.Rngs):
     """
     a shard's portion of the training
     :param model:
@@ -261,9 +276,7 @@ def train_fn(model, train_dataloader: grain.DataLoader,
         raise ValueError("train_dataloader sampler must be an instance of BatchSampler")
     if not isinstance(val_dataloader._sampler, BatchSampler):
         raise ValueError("val_dataloader sampler must be an instance of BatchSampler")
-    
-    mesh = get_global_mesh()
-    
+        
     rank = jax.process_index()
     
     #tracked_fn_1 = chex.assert_max_traces(train_step, n=1)
@@ -291,6 +304,16 @@ def train_fn(model, train_dataloader: grain.DataLoader,
 
     #TODO: add back save of best checkpoint now that ray will not be handling it
     mngr_latest = ocp.CheckpointManager(latest_checkpoint_dir,
+        item_handlers={
+            'model': ocp.StandardCheckpointHandler(),
+            'opt': ocp.StandardCheckpointHandler(),
+            'global_step': ocp.StandardCheckpointHandler(),
+            'rngs': ocp.StandardCheckpointHandler(),
+            'dataloader': grain.checkpoint.CheckpointHandler()
+        },
+        options=ocp.CheckpointManagerOptions(max_to_keep=2)
+    )
+    mngr_best = ocp.CheckpointManager(best_checkpoint_dir,
         item_handlers={
             'model': ocp.StandardCheckpointHandler(),
             'opt': ocp.StandardCheckpointHandler(),
@@ -343,7 +366,7 @@ def train_fn(model, train_dataloader: grain.DataLoader,
             
             train_metrics = eval_step(model, padded_super_graph, top_k)
             
-            val_metrics = _epoch_validation(model, val_dataloader, top_k, STEPS_PER_EPOCH_LOCAL_VAL)
+            val_metrics = _epoch_validation(model, val_dataloader, top_k)
             
             avg_val_loss = val_metrics["loss"]
             avg_val_mrr = val_metrics['mrr']
@@ -391,11 +414,10 @@ def train_fn(model, train_dataloader: grain.DataLoader,
                     # NNX RNGs need to be converted to state (dictionary of arrays)
                     rngs=ocp.args.StandardSave(nnx.state(rngs)),
                     # Include your dataloader from before
-                    dataloader=grain.checkpoint.CheckpointSave(train_dataloader)
+                    dataloader=grain.checkpoint.CheckpointSave(iter(train_dataloader))
                 )
             )
             mngr_latest.wait_until_finished()  # Ensure it's on disk
-            
             
             #if rank == 0:
             #    mlflow.log_metrics(ray_dict, step=epoch)
@@ -405,6 +427,24 @@ def train_fn(model, train_dataloader: grain.DataLoader,
                 epochs_without_improvement = 0
                 if rank == 0:
                     print(f"  New best NDCG!")
+                #all shards write their best
+                _graphdef, model_state = nnx.split(model)
+                _, opt_state = nnx.split(optimizer)
+                mngr_best.save(
+                    local_step * NUM_TRAIN_SHARDS,
+                    args=ocp.args.Composite(
+                        model=ocp.args.StandardSave(model_state),
+                        opt=ocp.args.StandardSave(opt_state),
+                        global_step=ocp.args.StandardSave(
+                            {'step': local_step * NUM_TRAIN_SHARDS}),
+                        # NNX RNGs need to be converted to state (dictionary of arrays)
+                        rngs=ocp.args.StandardSave(nnx.state(rngs)),
+                        # Include your dataloader from before
+                        dataloader=grain.checkpoint.CheckpointSave(
+                            iter(train_dataloader))
+                    )
+                )
+                mngr_best.wait_until_finished()  # Ensure it's on disk
             elif epoch >= delay:
                 epochs_without_improvement += 1
                 if rank == 0:

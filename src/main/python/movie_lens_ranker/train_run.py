@@ -83,4 +83,5 @@ def train_loop_per_worker(config):
         val_dataloader=val_dataloader,
         optimizer=optimizer, top_k=model_params_trainable['top_k'],
         latest_checkpoint_dir=model_params_nontrainable['latest_checkpoint_dir'],
+        best_checkpoint_dir=model_params_nontrainable['best_checkpoint_dir'],
         rngs=rngs)
