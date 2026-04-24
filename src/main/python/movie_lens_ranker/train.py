@@ -1,6 +1,8 @@
 from typing import Dict, Tuple
 
 import jax
+import jax.tree_util as jtu
+
 import jraph
 import jax.numpy as jnp
 import mlflow
@@ -155,13 +157,56 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) ->
         return loss, {f"mrr": mrr, f"ndcg": ndcg, f"recall": recall}
     
     # has_aux is necessary when loss_fn returns more than scalar loss
-    #TODO: try this: loss, metrics_dict = loss_fn(model, padded_graph)
-    (loss, metrics_dict), grads = nnx.value_and_grad(loss_fn, has_aux=True)(model, padded_graph)
+    loss, metrics_dict = loss_fn(model, padded_graph)
     metrics_dict['loss'] = loss
     return metrics_dict
 
-def _epoch_validation(model: GraphRanker, val_dataloader: DataLoader, top_k: int,
-        STEPS_PER_EPOCH_LOCAL_VAL:int, mesh: jax.sharding.Mesh) -> Dict[str, Array]:
+@nnx.jit
+def vectorized_epoch_eval(model, mega_batch, top_k):
+    # mega_batch here is a chunk of N batches stacked
+    v_eval = nnx.vmap(eval_step, in_axes=(None, 0, None))
+    return v_eval(model, mega_batch, top_k)
+
+def _epoch_validation(model: GraphRanker, val_dataloader: DataLoader,
+        top_k: int, STEPS_PER_EPOCH_LOCAL_VAL: int):
+    # 1. Collect all batches from the loader into a list
+    # (Assuming memory permits holding one epoch of padded graphs)
+    all_batches = [batch for batch in val_dataloader]
+    
+    # 2. Stack the list of GraphsTuples into a single vectorized GraphsTuple
+    # Every leaf will now have shape (Num_Batches, Padded_Size, ...)
+    mega_batch = jtu.tree_map(lambda *xs: jnp.stack(xs), *all_batches)
+    
+    val_metrics = vectorized_epoch_eval(model, mega_batch, top_k)
+    # val_metrics['loss'] is now an array of shape (Num_Batches,)
+    avg_metrics = jax.tree.map(jnp.mean, val_metrics)
+    
+    return avg_metrics
+
+def _epoch_validation_working_large_RAM_0(model: GraphRanker, val_dataloader: DataLoader,
+        top_k: int, STEPS_PER_EPOCH_LOCAL_VAL:int):
+    # 1. Collect all batches from the loader into a list
+    # (Assuming memory permits holding one epoch of padded graphs)
+    all_batches = [batch for batch in val_dataloader]
+    
+    # 2. Stack the list of GraphsTuples into a single vectorized GraphsTuple
+    # Every leaf will now have shape (Num_Batches, Padded_Size, ...)
+    mega_batch = jtu.tree_map(lambda *xs: jnp.stack(xs), *all_batches)
+    
+    # 3. Create the vectorized version of your eval_step
+    # in_axes: model is None (don't vectorise model), batch is 0 (vectorise over 0-th dim)
+    v_eval = nnx.vmap(eval_step, in_axes=(None, 0, None))
+    
+    # 4. Execute all evaluations in one call
+    val_metrics = v_eval(model, mega_batch, top_k)
+    
+    # val_metrics['loss'] is now an array of shape (Num_Batches,)
+    avg_metrics = jax.tree.map(jnp.mean, val_metrics)
+    
+    return avg_metrics
+
+def _epoch_validation_working_simplest(model: GraphRanker, val_dataloader: DataLoader, top_k: int,
+        STEPS_PER_EPOCH_LOCAL_VAL:int) -> Dict[str, Array]:
     epoch_val_loss = []
     epoch_val_mrr = []
     epoch_val_ndcg = []
@@ -173,9 +218,6 @@ def _epoch_validation(model: GraphRanker, val_dataloader: DataLoader, top_k: int
         epoch_val_ndcg.append(val_metrics['ndcg'])
         epoch_val_loss.append(val_metrics["loss"])
         epoch_val_recall.append(val_metrics['recall'])
-        if val_local_step > 1 and val_local_step % STEPS_PER_EPOCH_LOCAL_VAL == 0:
-            # finished a val epoch
-            break
     #jaxlib._jax.ArrayImpl;  shape=()
     avg_val_loss = jnp.mean(jnp.array(epoch_val_loss))
     avg_val_mrr = jnp.mean(jnp.array(epoch_val_mrr))
@@ -184,7 +226,7 @@ def _epoch_validation(model: GraphRanker, val_dataloader: DataLoader, top_k: int
     
     jax.debug.print("avg_val_loss shape={}", jnp.shape(avg_val_loss))
     
-    local_metrics = {'val_loss': avg_val_loss, 'val_ndcg': avg_val_ndcg, 'val_mrr': avg_val_mrr, 'val_recall': avg_val_recall}
+    local_metrics = {'loss': avg_val_loss, 'ndcg': avg_val_ndcg, 'mrr': avg_val_mrr, 'recall': avg_val_recall}
     
     return local_metrics
     '''
@@ -301,12 +343,12 @@ def train_fn(model, train_dataloader: grain.DataLoader,
             
             train_metrics = eval_step(model, padded_super_graph, top_k)
             
-            val_metrics = _epoch_validation(model, val_dataloader, top_k, STEPS_PER_EPOCH_LOCAL_VAL, mesh)
+            val_metrics = _epoch_validation(model, val_dataloader, top_k, STEPS_PER_EPOCH_LOCAL_VAL)
             
-            avg_val_loss = val_metrics["val_loss"]
-            avg_val_mrr = val_metrics['val_mrr']
-            avg_val_ndcg = val_metrics['val_ndcg']
-            avg_val_recall = val_metrics['val_recall']
+            avg_val_loss = val_metrics["loss"]
+            avg_val_mrr = val_metrics['mrr']
+            avg_val_ndcg = val_metrics['ndcg']
+            avg_val_recall = val_metrics['recall']
             
             print(f"Epoch {epoch}: Train avg Loss {avg_train_loss:.4f} "
                   f"| train NDCG@{top_k} {train_metrics['ndcg']:.4f} "

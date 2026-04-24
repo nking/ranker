@@ -68,20 +68,17 @@ class TestRanker(unittest.TestCase):
         self.train_val_test_negatives_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/train_val_test_negatives.array_record")
     
-    def print_local_info(self):
+    def test_local_info(self):
         print(f'local_devices={jax.local_devices()}') #[CpuDevice(id=0)]
         print(f'local device count={jax.local_device_count()}')
         print(f'process_count={jax.process_count()}')
         print(f'process_index={jax.process_index()}')
 
     def test_dp(self):
-        mesh = jax.make_mesh((), ('data'))
+        print(f"devices = {jax.devices()}")
+        mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=('data',))
         jax.set_mesh(mesh)
         print(mesh)
-        jax.distributed.initialize()
-        print(f'jax_num_cpu_devices={jax.config.jax_num_cpu_devices}')
-        jax.config.update('jax_num_cpu_devices', jax.local_device_count())
-        #jax.debug.visualize_array_sharding(x)
     
     def test_run_train(self):
         
