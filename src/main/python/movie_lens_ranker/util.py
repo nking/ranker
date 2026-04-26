@@ -9,6 +9,10 @@ import msgpack
 import numpy as np
 from absl import flags
 
+from jax.sharding import PartitionSpec as P
+# In JAX 0.8+, shard_map is typically in the main namespace
+from jax import shard_map
+
 FLAGS = flags.FLAGS
 
 data_params_nontrainable_keys = {'movies_uri', 'recommendations_uri',
@@ -20,7 +24,7 @@ data_params_nontrainable_keys = {'movies_uri', 'recommendations_uri',
 data_params_trainable_keys = {'max_history', 'num_candidates', 'num_epochs',
     'batch_size'}
 model_params_nontrainable_keys = {'latest_checkpoint_dir',
-    'best_checkpoint_dir', 'log_dir', 'movie_embeddings_uri', 'user_embeddings_uri',
+    'best_checkpoint_dir', 'movie_embeddings_uri', 'user_embeddings_uri',
     'mlflow_config'}
 model_params_trainable_keys = {'top_k', 'learning_rate', 'weight_decay',
     'out_dim', 'hidden_dim', 'num_layers', 'num_heads', 'edge_embed_dim',
@@ -49,7 +53,7 @@ def get_env_resources():
         # CPU path
         device_dict.update({"use_gpu": False, "use_tpu": False,
             "resources_per_worker": {"CPU": 1}})
-    return device_dict
+    return device_dict, mesh
 
 
 def parse_args_into_dict_with_exists_check():
@@ -70,9 +74,18 @@ def set_flags_from_dict(params_dict):
         else:
             # Optional: Define the flag on the fly if it's missing
             # This is helpful for dynamic Optuna params
-            flags.DEFINE_alias(key, key)  # Or use a generic DEFINE
+            try:
+                flags.DEFINE_alias(key, key)  # Or use a generic DEFINE
+            except Exception:
+                if isinstance(value, str):
+                    flags.DEFINE_string(key, key, f"{key}={value}")
+                elif isinstance(value, int):
+                    flags.DEFINE_integer(key, value, f"{key}={value}")
+                elif isinstance(value, float):
+                    flags.DEFINE_float(key, value, f"{key}={value}")
+                elif isinstance(value, bool):
+                    flags.DEFINE_bool(key, value, f"{key}={value}");
             setattr(FLAGS, key, value)
-    
     # Crucial for unit tests: tells absl it's safe to read these values
     if not FLAGS.is_parsed():
         FLAGS.mark_as_parsed()
@@ -130,9 +143,6 @@ def get_args_parser():
     )
     parser.add_argument("--best_checkpoint_dir", type=str,
         help="uri to write checkpoints to for best model.  model, data, optimizer and seed state are saved"
-    )
-    parser.add_argument("--log_dir", type=str,
-        help="uri to write tensorflow logs to, such as metrics"
     )
     parser.add_argument("--mlflow_tracking_uri", type=str,
         help="MLFlow tracking uri"

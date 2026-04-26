@@ -1,4 +1,9 @@
+from functools import partial
 from typing import Dict, Tuple, Union, Any
+
+from jax.sharding import PartitionSpec as P
+# In JAX 0.8+, shard_map is typically in the main namespace
+from jax import shard_map
 
 import mlflow
 import numpy as np
@@ -30,6 +35,8 @@ import orbax.checkpoint as ocp
 from movie_lens_ranker.data_loading import create_train_and_val_dataloaders
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.util import read_embeddings, get_env_resources
+
+env_resources, mesh = get_env_resources()
 
 def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple):
     # Forward Pass: returns ONLY candidate scores [num_total_graphs * K]
@@ -143,6 +150,15 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) ->
     loss, metrics_dict = loss_fn(model, padded_graph)
     metrics_dict['loss'] = loss
     return metrics_dict
+    
+# in_specs=P() tells JAX the input is a scalar
+# out_specs=P() (empty) implies the output is a single global (replicated) value
+#  and is sharded across the 'data' axis
+@jax.jit
+@partial(shard_map, mesh=mesh, in_specs=P(), out_specs=P())
+def aggregate_metric(scalar_metric):
+    # context set by jax.set_mesh() during compilation.
+    return jax.lax.pmean(scalar_metric, axis_name='data')
 
 def _epoch_validation_chunked(model, val_dataloader, top_k):
     all_metrics = []
@@ -201,9 +217,9 @@ def _epoch_validation(model: GraphRanker, val_dataloader: DataLoader,
     
     val_metrics = vectorized_epoch_eval(model, mega_batch, top_k)
     # val_metrics['loss'] is now an array of shape (Num_Batches,)
-    avg_metrics = jax.tree.map(jnp.mean, val_metrics)
-    
-    return avg_metrics
+    local_avg_val_metrics = jax.tree.map(jnp.mean, val_metrics)
+    global_avg_metrics = jax.tree.map(aggregate_metric, local_avg_val_metrics)
+    return global_avg_metrics
 
 def _epoch_validation_simplest(model: GraphRanker, val_dataloader: DataLoader, top_k: int) -> Dict[str, Array]:
     epoch_val_loss = []
@@ -274,9 +290,10 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     NUM_TRAIN_SHARDS = train_dataloader._sampler._shard_options.shard_count
     STEPS_PER_EPOCH_LOCAL = STEPS_PER_EPOCH_GLOBAL//NUM_TRAIN_SHARDS
     
-    print(f'TRAIN_BATCH_SIZE={TRAIN_BATCH_SIZE}, TOTAL_RECORDS={TOTAL_RECORDS}', flush=True)
+    print(f'TRAIN_BATCH_SIZE={TRAIN_BATCH_SIZE}, TOTAL_RECORDS={TOTAL_RECORDS}, NUM_TRAIN_SHARDS={NUM_TRAIN_SHARDS}', flush=True)
     print(f'STEPS_PER_EPOCH_GLOBAL_TRAIN={STEPS_PER_EPOCH_GLOBAL}')
     print(f'STEPS_PER_EPOCH_LOCAL_TRAIN={STEPS_PER_EPOCH_LOCAL}')
+    print(f'NUM_EPOCHS to train={train_dataloader._sampler._num_epochs}')
     
     VAL_BATCH_SIZE = train_dataloader._sampler.batch_size
     TOTAL_RECORDS_VAL = val_dataloader._sampler.total_records
@@ -284,13 +301,10 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     NUM_VAL_SHARDS = val_dataloader._sampler._shard_options.shard_count
     STEPS_PER_EPOCH_LOCAL_VAL = STEPS_PER_EPOCH_GLOBAL_VAL // NUM_VAL_SHARDS
     
-    print(f'VAL_BATCH_SIZE={VAL_BATCH_SIZE}, TOTAL_RECORDS_VAL={TOTAL_RECORDS_VAL}', flush=True)
+    print(f'VAL_BATCH_SIZE={VAL_BATCH_SIZE}, TOTAL_RECORDS_VAL={TOTAL_RECORDS_VAL}, NUM_VAL_SHARDS={NUM_VAL_SHARDS}', flush=True)
     print(f'STEPS_PER_EPOCH_GLOBAL_VAL={STEPS_PER_EPOCH_GLOBAL_VAL}')
     print(f'STEPS_PER_EPOCH_LOCAL_VAL={STEPS_PER_EPOCH_LOCAL_VAL}')
     
-    mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=('data',))
-    jax.set_mesh(mesh)
-
     mngr_latest = ocp.CheckpointManager(latest_checkpoint_dir,
         item_handlers={
             'model': ocp.StandardCheckpointHandler(),
@@ -332,58 +346,57 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         train_dataloader_iter = restored_train_dataloader_iter
         if restored_global_step is None:
             raise RuntimeError('globalrestored_global_step_step cannot be None if restored_train_dataloader_iter because restore is implicit')
-        #global_step = local_step * NUM_TRAIN_SHARDS
+        #global_step = batch_idx * NUM_TRAIN_SHARDS
         start_step = restored_global_step // NUM_TRAIN_SHARDS
     
     #NOTE: cannot improve efficiency for this outer loop because gradient loss needs to
     # be calculated and updated for each iteration.
     
-    #for local_step, padded_super_graph in enumerate(train_dataloader):
-    for local_step, padded_super_graph in enumerate(train_dataloader_iter, start=start_step):
-        epoch = local_step // STEPS_PER_EPOCH_LOCAL
+    #for batch_idx, padded_super_graph in enumerate(train_dataloader):
+    for batch_idx, padded_super_graph in enumerate(train_dataloader_iter, start=start_step):
+        local_step = batch_idx * TRAIN_BATCH_SIZE
+        global_step = local_step * NUM_TRAIN_SHARDS
+        epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
         #jraph.GraphsTuple
         loss = train_step(model, padded_super_graph, optimizer)
         epoch_avg_train_loss.append(loss)
         
-        if local_step % 100 == 0 and rank==0:
-            print(f"Step {local_step} (Epoch {epoch}): Train Loss {loss:.4f}")
+        if batch_idx % 5 == 0 and rank==0:
+            print(f"batch {batch_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}")
             # writer.add_scalar("loss", loss, global_step)
         
-        if (local_step + 1) % STEPS_PER_EPOCH_LOCAL == 0:
+        if (batch_idx + 1) % STEPS_PER_EPOCH_GLOBAL == 0:
             #finished a train epoch.  calc avg train loss and val metrics
             avg_train_loss = jnp.mean(jnp.array(epoch_avg_train_loss))
             epoch_avg_train_loss.clear()
             train_metrics = eval_step(model, padded_super_graph, top_k)
             
-            #val_dataloader is also sharded, so don't isolate this to only shard 0:
-            val_metrics = _epoch_validation(model, val_dataloader, top_k)
+            # val_dataloader is also sharded, so don't isolate this to only shard 0.
+            # Also, this is synced across all shards, so all shards have same conditional logic for global_avg_val_metrics below here
+            global_avg_val_metrics = _epoch_validation(model, val_dataloader, top_k)
             
-            avg_val_loss = val_metrics["loss"]
-            avg_val_mrr = val_metrics['mrr']
-            avg_val_ndcg = val_metrics['ndcg']
-            avg_val_recall = val_metrics['recall']
+            global_avg_val_loss = global_avg_val_metrics["loss"]
+            global_avg_val_mrr = global_avg_val_metrics['mrr']
+            global_avg_val_ndcg = global_avg_val_metrics['ndcg']
+            global_avg_val_recall = global_avg_val_metrics['recall']
             
             print(f"Epoch {epoch}: Train avg Loss {avg_train_loss:.4f} "
                   f"| train NDCG@{top_k} {train_metrics['ndcg']:.4f} "
                   f"| train MRR@{top_k} {train_metrics['mrr']:.4f} "
                   f"| train recall_{top_k} {train_metrics['recall']:.4f}"
-                  f"avg val loss {avg_val_loss:.4f} | val NDCG@{top_k} {avg_val_ndcg:.4f} "
-                  f"| val MRR@{top_k} {avg_val_mrr:.4f} | val recall_{top_k} {avg_val_recall:.4f}")
+                  f"avg val loss {global_avg_val_loss:.4f} | val NDCG@{top_k} {global_avg_val_ndcg:.4f} "
+                  f"| val MRR@{top_k} {global_avg_val_mrr:.4f} | val recall_{top_k} {global_avg_val_recall:.4f}")
             
             metrics_dict = {
                 "train_loss":avg_train_loss.item(),
                 f"train_{mrr_text}":train_metrics['mrr'].item(),
                 f"train_{ndcg_text}" : train_metrics['ndcg'].item(),
                 f"train_{recall_text}" : train_metrics['recall'].item(),
-                "val_loss":avg_val_loss.item(),
-                f"val_{mrr_text}":avg_val_mrr.item(),
-                f"val_{ndcg_text}":avg_val_ndcg.item(),
-                f"val_{recall_text}":avg_val_recall.item()
+                "val_loss":global_avg_val_loss.item(),
+                f"val_{mrr_text}":global_avg_val_mrr.item(),
+                f"val_{ndcg_text}":global_avg_val_ndcg.item(),
+                f"val_{recall_text}":global_avg_val_recall.item()
             }
-            
-            global_val_ndcg = jax.lax.pmean(avg_val_ndcg, axis_name="data")
-            
-            global_step = local_step * NUM_TRAIN_SHARDS
             
             #orbax for checkpointing.  saves latest 2
             _graphdef, model_state = nnx.split(model)
@@ -402,8 +415,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             )
             mngr_latest.wait_until_finished()  # Ensure it's on disk
             
-            if global_val_ndcg > best_ndcg + 1e-6:
-                best_ndcg = global_val_ndcg.item()
+            if global_avg_val_ndcg > best_ndcg + 1e-6:
+                best_ndcg = global_avg_val_ndcg.item()
                 epochs_without_improvement = 0
                 if rank == 0:
                     print(f"  New best NDCG!")
@@ -434,7 +447,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 break
             
             if rank == 0:
-                trial.report(float(global_val_ndcg.item()), step=epoch)
+                if trial is not None:
+                    trial.report(float(best_ndcg), step=epoch)
                 mlflow.log_metrics(metrics_dict, step=global_step)
                 
         if early_stop_triggered[0]:
@@ -489,7 +503,7 @@ def build_model_optimizer_and_dataloders(config:dict) -> Dict[str, Any]:
 
 def train_fn(config: dict, trial: Trial = None):
     
-    env_resources = get_env_resources()
+    #env_resources, mesh = get_env_resources()
     
     worker_rank = jax.process_index()
     
@@ -501,21 +515,22 @@ def train_fn(config: dict, trial: Trial = None):
     val_dataloader = _dict['val_dataloader']
     
     mlflow_run = None
-    best_val_ndcg_k = None
+    best_val_ndcg_k = -1.0
     try:
         if worker_rank == 0:
             mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
-            mlflow.set_experiment(config['mlflow_experiment_name'],
-                config['mlflow_experiment_id'])
-            mlflow.set_registry_uri(config['mlflow_artifact_location'])
-            mlflow.set_tag("phase", config["phase"])
+            mlflow.set_experiment(
+                experiment_name=config['mlflow_experiment_name'],
+            )
+            mlflow.set_registry_uri(config['mlflow_registry_uri'])
             # Start a run specifically for this Optuna trial
-            # don't use nested=True because the parent isn't in the same thread
+            # don't use nested=True because the parent isn't in the same thread in production
             mlflow_run = mlflow.start_run(
                 run_name=f"trial_{config.get('trial_id', 0)}",
                 #tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
                 tags = {"mlflow.parentRunId" : config['mlflow_parent_run_id']}
             )
+            mlflow.set_tag("phase", config["phase"]) #do not move this before start_run
             mlflow.log_params(config)
         
             mlflow.log_text(str(model), "model_summary.txt")

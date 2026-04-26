@@ -82,7 +82,7 @@ class TestRanker(unittest.TestCase):
         jax.set_mesh(mesh)
         print(mesh)
     
-    def get_or_create_mlflow_experiment(experiment_name: str):
+    def get_or_create_mlflow_experiment(self, experiment_name: str):
         if experiment := mlflow.get_experiment_by_name(experiment_name):
             return experiment.experiment_id
         else:
@@ -90,10 +90,12 @@ class TestRanker(unittest.TestCase):
         
     def test_run_train_without_optuna(self):
         
+        os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=4'
+        
         max_history = 200
         num_candidates = 40
         batch_size = 64
-        num_epochs = 120
+        num_epochs = 10#120
         seed = 1234
         
         top_k = 20
@@ -109,16 +111,15 @@ class TestRanker(unittest.TestCase):
         checkpoint_dir = os.path.join(get_bin_dir(), "checkpoints")
         latest_checkpoint_dir = os.path.join(checkpoint_dir, "latest")
         best_checkpoint_dir = os.path.join(checkpoint_dir, "best")
-        log_dir = os.path.join(get_bin_dir(), "logdir")
         mlflow_dir = os.path.join(get_bin_dir(), "mlflow")
         mlflow_registry_dir = os.path.join(get_bin_dir(), "mlflow_registry")
         os.makedirs(latest_checkpoint_dir, exist_ok=True)
         os.makedirs(best_checkpoint_dir, exist_ok=True)
-        os.makedirs(log_dir, exist_ok=True)
         os.makedirs(mlflow_dir, exist_ok=True)
         os.makedirs(mlflow_registry_dir, exist_ok=True)
         
-        data_params_nontrainable = {'movies_uri':self.movies_uri,
+        data_params_nontrainable = {
+            'movies_uri':self.movies_uri,
             'recommendations_uri':self.recommendations_uri,
             'recommendations_ts_uri':self.recommendations_ts_uri,
             'ratings_train_uri':self.ratings_train_uri,
@@ -132,7 +133,6 @@ class TestRanker(unittest.TestCase):
             'batch_size':batch_size}
         model_params_nontrainable = {'latest_checkpoint_dir':latest_checkpoint_dir,
             'best_checkpoint_dir':best_checkpoint_dir,
-            'log_dir':log_dir,
             'movie_embeddings_uri': self.movie_embeddings_uri, 'user_embeddings_uri':self.user_embeddings_uri}
         model_params_trainable = {'top_k':top_k, 'learning_rate':learning_rate, 'weight_decay':weight_decay,
             'out_dim':out_dim, 'hidden_dim':hidden_dim, 'num_layers':num_layers,
@@ -143,8 +143,9 @@ class TestRanker(unittest.TestCase):
         
         try:
             mlflow.delete_experiment(STUDY_NAME)
+            print(f'Deleted experiment {STUDY_NAME}')
         except Exception as e:
-            print(f'error while deleting experiment: {e}')
+            pass
         mlflow.set_experiment(STUDY_NAME)
         # Create the parent run and immediately get its ID
         parent_run = mlflow.start_run(run_name="unittest_train")
@@ -154,22 +155,25 @@ class TestRanker(unittest.TestCase):
         mlflow_config = {
             'mlflow_tracking_uri': mlflow_dir,
             'mlflow_registry_uri': mlflow_registry_dir,
-            'mlflow_experiment_id': self.get_or_create_mlflow_experiment(STUDY_NAME), #gotten from optunat
+            'mlflow_experiment_id': self.get_or_create_mlflow_experiment(STUDY_NAME),
             'mlflow_experiment_name': STUDY_NAME,
-            'mlflow_tracking_token': None,
+            #'mlflow_tracking_token': None,
             'mlflow_parent_run_id': mlflow_parent_run_id
         }
         
-        config = {**data_params_nontrainable,**data_params_trainable,
-            **model_params_nontrainable,**model_params_trainable,
+        config = {**data_params_nontrainable, **data_params_trainable,
+            **model_params_nontrainable, **model_params_trainable,
             **mlflow_config}
         
+        config['study_name'] = STUDY_NAME
         config["trial_id"] = 1
         config['phase'] = 'train'
         
         config['best_checkpoint_dir'] = f"{config['best_checkpoint_dir']}/{config['study_name']}/trial_{config['trial_id']}"
         config['latest_checkpoint_dir'] = f"{config['latest_checkpoint_dir']}/{config['study_name']}/trial_{config['trial_id']}"
-        
+        os.makedirs(latest_checkpoint_dir, exist_ok=True)
+        os.makedirs(best_checkpoint_dir, exist_ok=True)
+
         set_flags_from_dict(config)
         
         best_val_ndcg_k, STATE = train_fn(config)
