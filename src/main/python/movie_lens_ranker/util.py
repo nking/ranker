@@ -1,12 +1,181 @@
+import argparse
 from collections import defaultdict
 from typing import Tuple, Dict, List, Union, Set
+
+import jax
 import jax.numpy as jnp
 from array_record.python import array_record_module
 import msgpack
 import numpy as np
+from absl import flags
 
-# each kubeflow worker will load these into memory
-# or this will be changed to a distributable loading
+FLAGS = flags.FLAGS
+
+data_params_nontrainable_keys = {'movies_uri', 'recommendations_uri',
+    'recommendations_ts_uri',
+    'ratings_train_uri', 'ratings_val_uri', 'train_negatives_uri',
+    'val_negatives_uri',
+    'seed'
+}
+data_params_trainable_keys = {'max_history', 'num_candidates', 'num_epochs',
+    'batch_size'}
+model_params_nontrainable_keys = {'latest_checkpoint_dir',
+    'best_checkpoint_dir', 'log_dir', 'movie_embeddings_uri', 'user_embeddings_uri',
+    'mlflow_config'}
+model_params_trainable_keys = {'top_k', 'learning_rate', 'weight_decay',
+    'out_dim', 'hidden_dim', 'num_layers', 'num_heads', 'edge_embed_dim',
+    'dropout_rate',
+}
+
+def get_env_resources():
+    # 'cpu', 'gpu', or 'tpu'
+    backend = jax.extend.backend.get_backend().platform
+    num_local_devices = jax.local_device_count()
+    devices = np.array(jax.devices())
+    mesh = jax.sharding.Mesh(devices, axis_names=('data',))
+    jax.set_mesh(mesh)
+    device_dict = {}
+    if backend == "tpu":
+        jax.distributed.initialize()
+        device_dict.update({"use_gpu": False, "use_tpu": True,
+            "resources_per_worker": {"TPU": num_local_devices}})
+    elif backend == "gpu":
+        # Usually, Ray handles GPU assignment automatically with use_gpu=True,
+        # but specifying 1 GPU per worker ensures strict isolation.
+        jax.distributed.initialize()
+        device_dict.update({"use_gpu": True, "use_tpu": False,
+            "resources_per_worker": {"GPU": 1}})
+    else:
+        # CPU path
+        device_dict.update({"use_gpu": False, "use_tpu": False,
+            "resources_per_worker": {"CPU": 1}})
+    return device_dict
+
+
+def parse_args_into_dict_with_exists_check():
+    parser = get_args_parser()
+    args = parser.parse_args()
+    args_dict = vars(args)
+    for key in {**data_params_nontrainable_keys, **data_params_trainable_keys,
+        **model_params_nontrainable_keys, **model_params_trainable_keys}:
+        if key not in args_dict:
+            raise ValueError("missing required argument: {}".format(key))
+    return args_dict
+
+def set_flags_from_dict(params_dict):
+    """Sets absl FLAGS from a dictionary, ensuring they are marked as parsed."""
+    for key, value in params_dict.items():
+        if hasattr(FLAGS, key):
+            setattr(FLAGS, key, value)
+        else:
+            # Optional: Define the flag on the fly if it's missing
+            # This is helpful for dynamic Optuna params
+            flags.DEFINE_alias(key, key)  # Or use a generic DEFINE
+            setattr(FLAGS, key, value)
+    
+    # Crucial for unit tests: tells absl it's safe to read these values
+    if not FLAGS.is_parsed():
+        FLAGS.mark_as_parsed()
+
+
+def get_args_parser():
+    parser = argparse.ArgumentParser(description="parse for training run", )
+    # ====== NON-TRAINABLE DATA PARAMS ======
+    parser.add_argument("--movies_uri", type=str,
+        help="uri for array_record containing movie ids"
+    )
+    parser.add_argument("--recommendations_uri", type=str,
+        help="uri for array_record containing, each row being [user_id, [movie_ids]]"
+    )
+    parser.add_argument("--recommendations_ts_uri", type=str,
+        help="uri for array_record containing the timestamps for recommendations_uri, each row being [user_id, [timestamps]]"
+    )
+    parser.add_argument("--ratings_train_uri", type=str,
+        help="uri for array_record containing the ratings train dataset, each row being [user_id, movie_id, rating, timestamp]. for this project the dataset should contain only positives"
+    )
+    parser.add_argument("--ratings_val_uri", type=str,
+        help="uri for array_record containing the ratings val dataset, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
+    )
+    parser.add_argument("--train_negatives_uri", type=str,
+        help="uri for array_record containing the ratings train dataset negatives, each row being [user_id, movie_id, rating, timestamp]"
+    )
+    parser.add_argument("--val_negatives_uri", type=str,
+        help="uri for array_record containing the ratings val dataset negatives, each row being [user_id, movie_id, rating, timestamp]"
+    )
+    parser.add_argument("--seed", type=int, default=0,
+        help="seed used for pseudo random number generator"
+    )
+    # ====== TRAINABLE DATA PARAMS ======
+    parser.add_argument("--max_history", type=int,
+        help="maximum number per user of positive ratings to use for their graph"
+    )
+    parser.add_argument("--num_candidates", type=int,
+        help="number per user of negatives + positive to use for their final graph"
+    )
+    parser.add_argument("--num_epochs", type=int,
+        help="number of epochs to train"
+    )
+    parser.add_argument("--batch_size", type=int,
+        help="number of data examples to use at a time for training"
+    )
+    # ====== NON-TRAINABLE MODEL PARAMS ======
+    parser.add_argument("--user_embeddings_uri", type=str,
+        help="uri to read the retrieval written user embeddings. each row holds [user_id] [embeddings]]"
+    )
+    parser.add_argument("--movie_embeddings_uri", type=str,
+        help="uri to read the retrieval written movie embeddings. each row holds [movie_id] [embeddings]]"
+    )
+    parser.add_argument("--latest_checkpoint_dir", type=str,
+        help="uri to write latest checkpoints too.  model, data, optimizer and seed state are saved"
+    )
+    parser.add_argument("--best_checkpoint_dir", type=str,
+        help="uri to write checkpoints to for best model.  model, data, optimizer and seed state are saved"
+    )
+    parser.add_argument("--log_dir", type=str,
+        help="uri to write tensorflow logs to, such as metrics"
+    )
+    parser.add_argument("--mlflow_tracking_uri", type=str,
+        help="MLFlow tracking uri"
+    )
+    parser.add_argument("--mlflow_registry_uri", type=str,
+        help="MLFlow registry uri"
+    )
+    parser.add_argument("--mlflow_experiment_name", type=str,
+        help="MLFlow experiment name"
+    )
+    # ====== TRAINABLE MODEL PARAMS ======
+    parser.add_argument("--top_k", type=int,
+        help="used when calculating metrics NDCG@k, recal@k, MRR@k"
+    )
+    parser.add_argument("--learning_rate", type=int,
+        help="learning_rate for the AdamW optimizer"
+    )
+    parser.add_argument("--weight_decay", type=int,
+        help="weight_decay for the AdamW optimizer"
+    )
+    parser.add_argument("--weight_decay", type=int,
+        help="weight_decay for the AdamW optimizer"
+    )
+    parser.add_argument("--out_dim", type=int,
+        help="output dimension of the score head dense layer in GraphRanker"
+    )
+    parser.add_argument("--hidden_dim", type=int,
+        help="size of hidden layers per head in the GATv2 layer of GraphPranker"
+    )
+    parser.add_argument("--num_layers", type=int,
+        help="number of layers in the GATv2 layer of the GraphRanker"
+    )
+    parser.add_argument("--num_heads", type=int,
+        help="number of attention heads in the GATv2 layer of the GraphRanker"
+    )
+    parser.add_argument("--edge_embed_dim", type=int,
+        help="size of output of the GATv2 layer of GraphPranker"
+    )
+    parser.add_argument("--dropout_rate", type=float,
+        help="the dropout probability of a layer in the GATv2 layer of the GraphRanker"
+    )
+    return parser
+
 
 def read_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
     """

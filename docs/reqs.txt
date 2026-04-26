@@ -76,8 +76,8 @@ try another framework, that is more stable and or simpler
 if possible.
 options:
 - google's vizier for hypertune training
-  use kfp and custom train job...?
-- W&B weights and biases?
+   - version compat conflicts. see notes.
+- optuna, katib
 
 
 Dataloading:  Google Grain
@@ -85,9 +85,10 @@ State Managements: Orbax
 Experiment Tracking: MLFlow-skinny
 MLOps workflow tasks:  
 code container: Docker or equiv
+orchestrator: xmanager for dev, kfp later
 
 MLOps details:
-  tasks for the ray workflow or indiv tasks:
+  tasks for the workflow or indiv tasks:
   the stars are highest priority
   - training and deployment pipeline:
     - * ingest data
@@ -119,3 +120,5 @@ mlflow-skinny has
 
 orbax checkpoint has
    ability to store to local disk, GCS, AWS S3, Azure storage blob
+
+optuna needs a database

@@ -7,6 +7,7 @@ import optax
 from array_record.python import array_record_module
 from flax import nnx
 
+from absl import flags
 from helper import *
 from movie_lens_ranker.RandomAccessArrayRecordDataSource import *
 from movie_lens_ranker.RatingsHistoryLookupTransform import *
@@ -17,7 +18,8 @@ from movie_lens_ranker.JraphPaddedGraphTupleTransform import JraphPaddedGraphTup
 from movie_lens_ranker.data_loading import *
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.train import *
-from movie_lens_ranker.util import read_embeddings
+from movie_lens_ranker.util import read_embeddings, set_flags_from_dict
+
 
 class TestRanker(unittest.TestCase):
     def setUp(self):
@@ -80,7 +82,13 @@ class TestRanker(unittest.TestCase):
         jax.set_mesh(mesh)
         print(mesh)
     
-    def test_run_train(self):
+    def get_or_create_mlflow_experiment(experiment_name: str):
+        if experiment := mlflow.get_experiment_by_name(experiment_name):
+            return experiment.experiment_id
+        else:
+            return mlflow.create_experiment(experiment_name)
+        
+    def test_run_train_without_optuna(self):
         
         max_history = 200
         num_candidates = 40
@@ -95,6 +103,7 @@ class TestRanker(unittest.TestCase):
         hidden_dim = 64  # 2 * embed_in_dim is probably good
         num_layers = 2  # captures the 2-hop neighborhood.  3 tends to oversmooth
         num_heads = 4  # each head sees 64 hidden / 4 heads = 16 dimensional subspace
+        edge_embed_dim = 8
         dropout_rate = 0.1
         
         checkpoint_dir = os.path.join(get_bin_dir(), "checkpoints")
@@ -102,14 +111,12 @@ class TestRanker(unittest.TestCase):
         best_checkpoint_dir = os.path.join(checkpoint_dir, "best")
         log_dir = os.path.join(get_bin_dir(), "logdir")
         mlflow_dir = os.path.join(get_bin_dir(), "mlflow")
-        mlflow_artifacts_dir = os.path.join(get_bin_dir(), "mlflow_artifacts")
+        mlflow_registry_dir = os.path.join(get_bin_dir(), "mlflow_registry")
         os.makedirs(latest_checkpoint_dir, exist_ok=True)
         os.makedirs(best_checkpoint_dir, exist_ok=True)
         os.makedirs(log_dir, exist_ok=True)
         os.makedirs(mlflow_dir, exist_ok=True)
-        os.makedirs(mlflow_artifacts_dir, exist_ok=True)
-        
-        from movie_lens_ranker.train_run import train_loop_per_worker
+        os.makedirs(mlflow_registry_dir, exist_ok=True)
         
         data_params_nontrainable = {'movies_uri':self.movies_uri,
             'recommendations_uri':self.recommendations_uri,
@@ -129,55 +136,49 @@ class TestRanker(unittest.TestCase):
             'movie_embeddings_uri': self.movie_embeddings_uri, 'user_embeddings_uri':self.user_embeddings_uri}
         model_params_trainable = {'top_k':top_k, 'learning_rate':learning_rate, 'weight_decay':weight_decay,
             'out_dim':out_dim, 'hidden_dim':hidden_dim, 'num_layers':num_layers,
-            'num_heads':num_heads, 'dropout_rate':dropout_rate,
+            'num_heads':num_heads, 'edge_embed_dim':edge_embed_dim, 'dropout_rate':dropout_rate,
         }
+        
+        STUDY_NAME = "GraphRanker_tuning_unittest"
+        
+        try:
+            mlflow.delete_experiment(STUDY_NAME)
+        except Exception as e:
+            print(f'error while deleting experiment: {e}')
+        mlflow.set_experiment(STUDY_NAME)
+        # Create the parent run and immediately get its ID
+        parent_run = mlflow.start_run(run_name="unittest_train")
+        mlflow_parent_run_id = parent_run.info.run_id
+        mlflow.end_run()
     
         mlflow_config = {
-            'tracking_uri': mlflow_dir,
-            'registry_uri': None,
-            'experiment_id': None,
-            'experiment_name': 'GraphRanker_dev',
-            'tracking_token': None,
-            'artifact_location': mlflow_artifacts_dir,
-            'create_experiment_if_not_exists': True
+            'mlflow_tracking_uri': mlflow_dir,
+            'mlflow_registry_uri': mlflow_registry_dir,
+            'mlflow_experiment_id': self.get_or_create_mlflow_experiment(STUDY_NAME), #gotten from optunat
+            'mlflow_experiment_name': STUDY_NAME,
+            'mlflow_tracking_token': None,
+            'mlflow_parent_run_id': mlflow_parent_run_id
         }
         
-        config = {
-            'data_params_nontrainable':data_params_nontrainable,
-            'data_params_trainable':data_params_trainable,
-            'model_params_nontrainable':model_params_nontrainable,
-            'model_params_trainable':model_params_trainable,
-            'mlflow_config':mlflow_config}
-            
-        def get_env_resources():
-            # 'cpu', 'gpu', or 'tpu'
-            backend = jax.extend.backend.get_backend().platform
-            num_local_devices = jax.local_device_count()
-            devices = np.array(jax.devices())
-            mesh = jax.sharding.Mesh(devices, axis_names=('data',))
-            jax.set_mesh(mesh)
-            device_dict = {}
-            if backend == "tpu":
-                jax.distributed.initialize()
-                device_dict.update({"use_gpu": False, "use_tpu": True,
-                    "resources_per_worker": {"TPU": num_local_devices}})
-            elif backend == "gpu":
-                # Usually, Ray handles GPU assignment automatically with use_gpu=True,
-                # but specifying 1 GPU per worker ensures strict isolation.
-                jax.distributed.initialize()
-                device_dict.update({"use_gpu": True, "use_tpu": False,
-                    "resources_per_worker": {"GPU": 1}})
-            else:
-                # CPU path
-                device_dict.update({"use_gpu": False, "use_tpu": False,
-                    "resources_per_worker": {"CPU": 1}})
-            return device_dict
+        config = {**data_params_nontrainable,**data_params_trainable,
+            **model_params_nontrainable,**model_params_trainable,
+            **mlflow_config}
         
-        env_resources = get_env_resources()
+        config["trial_id"] = 1
+        config['phase'] = 'train'
         
-        train_loop_per_worker(config)
+        config['best_checkpoint_dir'] = f"{config['best_checkpoint_dir']}/{config['study_name']}/trial_{config['trial_id']}"
+        config['latest_checkpoint_dir'] = f"{config['latest_checkpoint_dir']}/{config['study_name']}/trial_{config['trial_id']}"
+        
+        set_flags_from_dict(config)
+        
+        best_val_ndcg_k, STATE = train_fn(config)
+        
+        print(f'final best val ndcg@k={best_val_ndcg_k}')
        
         if False:
+            print(f'run test metrics')
+            #TOTO: needs a runner too
             test_dataloader = create_test_dataloader(
                 movies_uri = self.movies_uri,
                 recommendations_uri = self.recommendations_uri,

@@ -14,14 +14,14 @@ class GraphRanker(nnx.Module):
             dropout_rate: float = 0.1, rngs: nnx.Rngs = nnx.Rngs(0)):
         """
         :param user_movie_embeds: concat of [user embeddings and movie_embeddings]
-        :param num_candidates:
-        :param hidden_features:
-        :param num_layers:
-        :param out_features:
-        :param heads:
-        :param edge_embed_dim: typically a value in range 4 to 16
-        :param dropout_rate:
-        :param rngs:
+        :param num_candidates: number per user of negatives + positive to use for their final graph
+        :param hidden_features: size of hidden layers per head in the GATv2 layer
+        :param num_layers: number of layers in the GATv2 layer
+        :param out_features: utput dimension of the score head dense layer
+        :param heads: number of attention heads in the GATv2 layer
+        :param edge_embed_dim: typically a value in range 4 to 16. size of output of GATv2 layer
+        :param dropout_rate: the dropout probability of a layer in the GATv2 layer
+        :param rngs: the pseudo random number generator
         """
         self.edge_embed_dim = edge_embed_dim
         self.embed_in_dim = user_movie_embeds.shape[1]

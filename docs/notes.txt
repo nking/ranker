@@ -37,46 +37,81 @@ Test, model evaluation Metrics:
 - listwise ranking metrics
   NDCG@k, precision@k, recall@k, f1sore@k, MRR@k
 
-hyper-parameter tuning:
+hyper-parameter tuning options:
 - OSS Vizier
 - Optuna
 - Ray Tune
 - katib for use with kfp
+summary: below, version conflicts are mentioned
+leaving optuna and katib as best options.
+katib uses optuna internally.
 
 In choosing the model serialization and serving:
 - Orbax for jax checkpointing and serialization
-- Neptune Serving Engine compatibility
+- jax serving format
+- consider Neptune Serving Engine compatibility
 
 In choosing an MLOps pipeline:
 - needs to be compatible with Jax AI Stack, cloud compatible
   and agnostic where possible.
-- needs to be able to do data parallel distributed training.
-- Jax AI stack has fixed protobuf==7.34.1
+- needs data parallel distributed training.
+- needs experiment tracking and logging details such
+  as metrics.  needs visualization.
+- might need to exist in venv separate from the
+  jax ai stack
+  - Jax AI stack has jax==0.10.0, which for python 3.12
+     has fixed protobuf==7.34.1, but so far all seems well
+     when protobuf==6.33.6
 - KFP requires protobuf>=6.31.1,<7.0
-- most common options that work in local and cloud environments:
+- xmanager==0.7.1 requires sqlalchemy==1.2.19, but
+  only the very first tag google-vizier==v0.0.2-alpha
+  SQLAlchemy==1.2, all else have >= 1.4,
+  SQLAlchemy doesn't officially support threading and
+  memory management of py3.12, so needs py3.11
+- google-vizier==0.1.24 installs  SQL 2.0.49
+  so cannot share same venv as xmanager
+==> an orchestator env w/ google-vizier==v0.0.2-alpha
+    and a seperate training container env using
+    google-vizier==0.1.24 have schema differences
+    and gRPC protocol differences.
+    ==> cannot use google-vizier w/ xmanager as orchestor
+        and latest jax ai stack as api in training container.
+- optuna==4.8.0 says sqlalchemy>=1.4.2
+  need to use pip install optuna -c orchestrator_constrants.txt
+  to keep it from upgrading SQLAlchemy
+- optuna as a tuner does not have the version conflicts
+  - in the orchestrator environment:
+     - use optuna to init a study and define search space
+  - in the training container:
+     - use optuna to get study suggested params w/ study.ask()
+       and report the results using study.tell()
+  - can use postgres, mysql,
+    - or a smaller footprint db?
+  - with some coding for it, should be easy to reuse same
+    code when xmanager + optuna are orchestration
+    and when kfp + katib are orchestration.
+- most common options that work in local and cloud environments,
+  that don't have version conflicts mentioned above.
   - KFP as the orchestrator running in its own virtual env
-    + docker container images holding the code which needs
+    - docker container images holding the code which needs
       the JAX AI stack libraries
+    - katib as tuner, but katib is using optuna
   - KubeRay as a kubernetes operator or ManagedRay
-    + RayTrain, RayTune 
-    + docker container images holding the code which needs
+    - docker container images holding the code which needs
       the JAX AI stack libraries
-    Ray handles JAX TPU/GPU memory management best.
-questions:
-- Ray runnable on kaggle?
-  - for the jax ai install to force the protobuf 7 install
-    %pip install with the --force-reinstall
-  - to prevent startup crashes
-      ray.init(dashboard_attr={"check_dashboard_dependencies": False}) 
-  - best to use Dual T4 GPU option if possible
-     - ScalingConfig(num_workers=2, use_gpu=True)
-     - ray.init(num_cpus=4, dashboard_enabled=False)
-    !pip install --upgrade --force-reinstall pip
-    !pip install -q protobuf==7.34.1 
-    !pip install -q jax-ai-stack==2025.10.28 "ray[train,tune]" 
-    # CRITICAL: Kaggle requires a kernel restart to acknowledge the new Protobuf runtime
-    import os
-    os._exit(0)
+    Ray handles JAX TPU/GPU memory management best, but has
+    bugs in incompatiblity of their Tuner with new v2 Train.
+  - xmanager as orchestrator
+    - optuna as tuner
+in summary, am now considering:
+  (1) development, tuning, training:
+      - xmanager for orchestrator,
+        jax ai stack in training container,
+        and optuna in both environments
+  (2) full mlops, only listing tuning, training here:
+      - kfp for orchestrator
+        jax ai stack in training container,
+        katib for tuning 
 
 Monitoring:
 - system performance monitoring:
