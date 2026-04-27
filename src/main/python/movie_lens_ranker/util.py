@@ -21,15 +21,9 @@ data_params_nontrainable_keys = {'movies_uri', 'recommendations_uri',
     'val_negatives_uri',
     'seed'
 }
-data_params_trainable_keys = {'max_history', 'num_candidates', 'num_epochs',
-    'batch_size'}
 model_params_nontrainable_keys = {'latest_checkpoint_dir',
     'best_checkpoint_dir', 'movie_embeddings_uri', 'user_embeddings_uri',
     'mlflow_config'}
-model_params_trainable_keys = {'top_k', 'learning_rate', 'weight_decay',
-    'out_dim', 'hidden_dim', 'num_layers', 'num_heads', 'edge_embed_dim',
-    'dropout_rate',
-}
 mlflow_config_keys = {
     'mlflow_tracking_uri',
     'mlflow_registry_uri',
@@ -39,6 +33,21 @@ mlflow_config_keys = {
     'mlflow_parent_run_id'
 }
 tb_config_keys = {'tb_log_dir'}
+model_params_trainable_keys = {
+    'top_k',
+    'learning_rate',
+    'weight_decay',
+    'out_dim',
+    'hidden_dim',
+    'num_layers',
+    'num_heads',
+    'edge_embed_dim',
+    'dropout_rate',
+}
+data_params_trainable_keys = {'max_history',
+    'num_candidates',
+    'num_epochs',
+    'batch_size'}
 
 def get_env_resources():
     # 'cpu', 'gpu', or 'tpu'

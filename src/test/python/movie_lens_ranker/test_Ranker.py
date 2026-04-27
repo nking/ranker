@@ -1,9 +1,11 @@
+import glob
 import os.path
 import pathlib
 import unittest
 
 import jax.distributed
 import jraph
+import mlflow
 import optax
 from array_record.python import array_record_module
 from flax import nnx
@@ -20,6 +22,7 @@ from movie_lens_ranker.data_loading import *
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.train import *
 from movie_lens_ranker.util import read_embeddings, set_flags_from_dict
+from movie_lens_ranker.util_plots import plot_mlflow_metrics
 
 
 class TestRanker(unittest.TestCase):
@@ -96,7 +99,7 @@ class TestRanker(unittest.TestCase):
         max_history = 200
         num_candidates = 40
         batch_size = 64
-        num_epochs = 10#120
+        num_epochs = 3# 10#120
         seed = 1234
         
         top_k = 20
@@ -196,7 +199,44 @@ class TestRanker(unittest.TestCase):
                 # dir_path = filepath.resolve()
                 dirs[srch_dir].append(os.path.join(dir_path.parent, dir_path.name))
             self.assertTrue(len(dirs[srch_dir]) > 0)
-       
+        a = None
+        b = None
+        for metric_file in dirs['metrics']:
+            for file_path in glob.glob(f'{metric_file}/*'):
+                with open(file_path, 'r') as f:
+                    line = f.readline().strip()
+                    ts, value, epoch = line.split()
+                    self.assertIsNotNone(value)
+                    self.assertIsNotNone(epoch)
+                    a = value
+                    b = epoch
+        self.assertIsNotNone(a)
+        self.assertIsNotNone(b)
+        a = None
+        for param_file in dirs['params']:
+            for file_path in glob.glob(f'{param_file}/*'):
+                with open(file_path, 'r') as f:
+                    line = f.readline().strip()
+                    self.assertIsNotNone(line)
+                    a = line
+        self.assertIsNotNone(a)
+        
+        #
+        #tag tags = {"mlflow.parentRunId" : config['mlflow_parent_run_id']}
+        #get the mlflow directory
+        experiment = mlflow.get_experiment_by_name(config['mlflow_experiment_name'])
+        if experiment is None:
+            raise ValueError(f"Experiment {config['mlflow_experiment_name']} not found.")
+        path = experiment.artifact_location
+        entries = os.listdir(path)
+        subdirs = [os.path.join(path, e) for e in entries if os.path.isdir(os.path.join(path, e))]
+        subdirs.sort(key=os.path.getctime, reverse=True)
+        metrics_dir = f'{subdirs[0]}/metrics'
+        self.assertTrue(os.path.exists(metrics_dir))
+        plot_mlflow_metrics(metrics_dir)
+        for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
+            self.assertTrue(os.path.exists(os.path.join(get_bin_dir(), f"{key}.png")))
+        
         if False:
             print(f'run test metrics')
             #TOTO: needs a runner too
