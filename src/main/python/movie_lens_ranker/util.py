@@ -30,6 +30,15 @@ model_params_trainable_keys = {'top_k', 'learning_rate', 'weight_decay',
     'out_dim', 'hidden_dim', 'num_layers', 'num_heads', 'edge_embed_dim',
     'dropout_rate',
 }
+mlflow_config_keys = {
+    'mlflow_tracking_uri',
+    'mlflow_registry_uri',
+    'mlflow_experiment_id',
+    'mlflow_experiment_name',
+    # 'mlflow_tracking_token': None,
+    'mlflow_parent_run_id'
+}
+tb_config_keys = {'tb_log_dir'}
 
 def get_env_resources():
     # 'cpu', 'gpu', or 'tpu'

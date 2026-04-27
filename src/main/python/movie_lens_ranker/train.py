@@ -1,6 +1,8 @@
+import os
 from functools import partial
 from typing import Dict, Tuple, Union, Any
 
+from flax.metrics.tensorboard import SummaryWriter
 from jax.sharding import PartitionSpec as P
 # In JAX 0.8+, shard_map is typically in the main namespace
 from jax import shard_map
@@ -261,6 +263,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer,
         top_k:int, latest_checkpoint_dir: str, best_checkpoint_dir:str,
         rngs:nnx.Rngs, trial:Trial=None,
+        train_tb_writer:SummaryWriter=None, val_tb_writer:SummaryWriter=None,
         restored_train_dataloader_iter=None, restored_global_step:int=None) -> Tuple[float, Union[optuna.trial.TrialState, None]]:
     """
     a shard's portion of the training
@@ -278,7 +281,9 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         raise ValueError("train_dataloader sampler must be an instance of BatchSampler")
     if not isinstance(val_dataloader._sampler, BatchSampler):
         raise ValueError("val_dataloader sampler must be an instance of BatchSampler")
-        
+    if (train_tb_writer and not val_tb_writer) or (not train_tb_writer and val_tb_writer):
+        raise ValueError("both tensorboard writers not be None if one is not None")
+    
     rank = jax.process_index()
     
     #tracked_fn_1 = chex.assert_max_traces(train_step, n=1)
@@ -402,7 +407,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             _graphdef, model_state = nnx.split(model)
             _, opt_state = nnx.split(optimizer)
             mngr_latest.save(
-                global_step,
+                epoch,
                 args=ocp.args.Composite(
                     model=ocp.args.StandardSave(model_state),
                     opt=ocp.args.StandardSave(opt_state),
@@ -415,6 +420,12 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             )
             mngr_latest.wait_until_finished()  # Ensure it's on disk
             
+            if train_tb_writer is not None:
+                #tensorboard automatically overlays curves of same tag in different directories
+                for key in ("loss", ndcg_text, mrr_text, recall_text):
+                    train_tb_writer.scalar(key, metrics_dict[key], step=epoch)
+                    val_tb_writer.scalar(key, metrics_dict[f'val_{key}'], step=epoch)
+                   
             if global_avg_val_ndcg > best_ndcg + 1e-6:
                 best_ndcg = global_avg_val_ndcg.item()
                 epochs_without_improvement = 0
@@ -424,7 +435,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 _graphdef, model_state = nnx.split(model)
                 _, opt_state = nnx.split(optimizer)
                 mngr_best.save(
-                    global_step,
+                    epoch,
                     args=ocp.args.Composite(
                         model=ocp.args.StandardSave(model_state),
                         opt=ocp.args.StandardSave(opt_state),
@@ -515,9 +526,14 @@ def train_fn(config: dict, trial: Trial = None):
     val_dataloader = _dict['val_dataloader']
     
     mlflow_run = None
+    train_tb_writer = None
+    val_tb_writer = None
     best_val_ndcg_k = -1.0
     try:
         if worker_rank == 0:
+            train_tb_writer = SummaryWriter(os.path.join(config['tb_logs_uri'], 'train'))
+            val_tb_writer = SummaryWriter(os.path.join(config['tb_logs_uri'], 'val'))
+            
             mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
             mlflow.set_experiment(
                 experiment_name=config['mlflow_experiment_name'],
@@ -545,9 +561,13 @@ def train_fn(config: dict, trial: Trial = None):
             optimizer=optimizer, top_k=config['top_k'],
             latest_checkpoint_dir=config['latest_checkpoint_dir'],
             best_checkpoint_dir=config['best_checkpoint_dir'],
-            rngs=rngs, trial=trial)
+            rngs=rngs, trial=trial, train_tb_writer=train_tb_writer, val_tb_writer=val_tb_writer)
         
     finally:
+        if train_tb_writer is not None:
+            train_tb_writer.close()
+        if val_tb_writer is not None:
+            val_tb_writer.close()
         if mlflow_run is not None:
             mlflow.log_metric(f"final_ndcg_{config['top_k']}", float(best_val_ndcg_k))
             mlflow.end_run()
@@ -614,8 +634,8 @@ def restore_model_from_checkpoint(checkpoint_uri:str, config:dict):
         options=ocp.CheckpointManagerOptions(max_to_keep=2)
     )
     
-    step = mngr_best.latest_step()
-    if step is not None:
+    epoch = mngr_best.latest_step()
+    if epoch is not None:
         _dict = build_model_optimizer_and_dataloders(config)
         model = _dict['model']
         optimizer = _dict['optimizer']
@@ -627,7 +647,7 @@ def restore_model_from_checkpoint(checkpoint_uri:str, config:dict):
             _, model_state = nnx.split(model)
             _, opt_state = nnx.split(optimizer)
             restored = mngr_best.restore(
-                step,
+                epoch,
                 args=ocp.args.Composite(
                     model=ocp.args.StandardRestore(model_state),
                     opt=ocp.args.StandardRestore(opt_state),

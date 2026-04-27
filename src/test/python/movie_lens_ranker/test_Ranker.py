@@ -1,4 +1,5 @@
 import os.path
+import pathlib
 import unittest
 
 import jax.distributed
@@ -113,10 +114,12 @@ class TestRanker(unittest.TestCase):
         best_checkpoint_dir = os.path.join(checkpoint_dir, "best")
         mlflow_dir = os.path.join(get_bin_dir(), "mlflow")
         mlflow_registry_dir = os.path.join(get_bin_dir(), "mlflow_registry")
+        tb_logs_uri = os.path.join(get_bin_dir(), "tb_logs_uri")
         os.makedirs(latest_checkpoint_dir, exist_ok=True)
         os.makedirs(best_checkpoint_dir, exist_ok=True)
         os.makedirs(mlflow_dir, exist_ok=True)
         os.makedirs(mlflow_registry_dir, exist_ok=True)
+        os.makedirs(tb_logs_uri, exist_ok=True)
         
         data_params_nontrainable = {
             'movies_uri':self.movies_uri,
@@ -160,10 +163,11 @@ class TestRanker(unittest.TestCase):
             #'mlflow_tracking_token': None,
             'mlflow_parent_run_id': mlflow_parent_run_id
         }
+        tb_config = {'tb_logs_uri' : tb_logs_uri}
         
         config = {**data_params_nontrainable, **data_params_trainable,
             **model_params_nontrainable, **model_params_trainable,
-            **mlflow_config}
+            **mlflow_config, **tb_config}
         
         config['study_name'] = STUDY_NAME
         config["trial_id"] = 1
@@ -171,14 +175,27 @@ class TestRanker(unittest.TestCase):
         
         config['best_checkpoint_dir'] = f"{config['best_checkpoint_dir']}/{config['study_name']}/trial_{config['trial_id']}"
         config['latest_checkpoint_dir'] = f"{config['latest_checkpoint_dir']}/{config['study_name']}/trial_{config['trial_id']}"
-        os.makedirs(latest_checkpoint_dir, exist_ok=True)
-        os.makedirs(best_checkpoint_dir, exist_ok=True)
+        config['tb_logs_uri'] = f"{config['tb_logs_uri']}/{config['study_name']}/trial_{config['trial_id']}"
+
+        os.makedirs(config['latest_checkpoint_dir'], exist_ok=True)
+        os.makedirs(config['best_checkpoint_dir'], exist_ok=True)
+        os.makedirs(config['tb_logs'], exist_ok=True)
 
         set_flags_from_dict(config)
         
         best_val_ndcg_k, STATE = train_fn(config)
         
         print(f'final best val ndcg@k={best_val_ndcg_k}')
+        
+        ## ======== validate mlflow and checkpoints ==========
+        root = pathlib.Path(mlflow_dir)
+        dirs = {'metrics':[], 'params':[], 'artifacts':[]}
+        for srch_dir in dirs.keys():
+            for dir_path in root.rglob(srch_dir):
+                # dir_path is relative to root. Uncomment the next line for absolute paths
+                # dir_path = filepath.resolve()
+                dirs[srch_dir].append(os.path.join(dir_path.parent, dir_path.name))
+            self.assertTrue(len(dirs[srch_dir]) > 0)
        
         if False:
             print(f'run test metrics')
