@@ -2,7 +2,6 @@ import os
 from functools import partial
 from typing import Dict, Tuple, Union, Any
 
-from tensorboardX import SummaryWriter
 from jax.sharding import PartitionSpec as P
 # In JAX 0.8+, shard_map is typically in the main namespace
 from jax import shard_map
@@ -263,7 +262,6 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer,
         top_k:int, latest_checkpoint_dir: str, best_checkpoint_dir:str,
         rngs:nnx.Rngs, trial:Trial=None,
-        train_tb_writer:SummaryWriter=None, val_tb_writer:SummaryWriter=None,
         restored_train_dataloader_iter=None, restored_global_step:int=None) -> Tuple[float, Union[optuna.trial.TrialState, None]]:
     """
     a shard's portion of the training
@@ -281,8 +279,6 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         raise ValueError("train_dataloader sampler must be an instance of BatchSampler")
     if not isinstance(val_dataloader._sampler, BatchSampler):
         raise ValueError("val_dataloader sampler must be an instance of BatchSampler")
-    if (train_tb_writer and not val_tb_writer) or (not train_tb_writer and val_tb_writer):
-        raise ValueError("both tensorboard writers not be None if one is not None")
     
     rank = jax.process_index()
     
@@ -368,7 +364,6 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         
         if batch_idx % 5 == 0 and rank==0:
             print(f"batch {batch_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}")
-            # writer.add_scalar("loss", loss, global_step)
         
         if (batch_idx + 1) % STEPS_PER_EPOCH_GLOBAL == 0:
             #finished a train epoch.  calc avg train loss and val metrics
@@ -420,13 +415,6 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             )
             mngr_latest.wait_until_finished()  # Ensure it's on disk
             
-            if train_tb_writer is not None:
-                #tensorboard automatically overlays curves of same tag in different directories
-                for key in ("loss", ndcg_text, mrr_text, recall_text):
-                    train_tb_writer.add_scalar(key, metrics_dict[f'train_{key}'], global_step=epoch)
-                    val_tb_writer.add_scalar(key, metrics_dict[f'val_{key}'], global_step=epoch)
-                train_tb_writer.flush()
-                val_tb_writer.flush()
             if global_avg_val_ndcg > best_ndcg + 1e-6:
                 best_ndcg = global_avg_val_ndcg.item()
                 epochs_without_improvement = 0
@@ -461,7 +449,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             if rank == 0:
                 if trial is not None:
                     trial.report(float(best_ndcg), step=epoch)
-                mlflow.log_metrics(metrics_dict, step=global_step)
+                mlflow.log_metrics(metrics_dict, step=epoch)
                 
         if early_stop_triggered[0]:
             break
@@ -527,14 +515,9 @@ def train_fn(config: dict, trial: Trial = None):
     val_dataloader = _dict['val_dataloader']
     
     mlflow_run = None
-    train_tb_writer = None
-    val_tb_writer = None
     best_val_ndcg_k = -1.0
     try:
         if worker_rank == 0:
-            train_tb_writer = SummaryWriter(os.path.join(config['tb_logs_uri'], 'train'))
-            val_tb_writer = SummaryWriter(os.path.join(config['tb_logs_uri'], 'val'))
-            
             mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
             mlflow.set_experiment(
                 experiment_name=config['mlflow_experiment_name'],
@@ -562,13 +545,9 @@ def train_fn(config: dict, trial: Trial = None):
             optimizer=optimizer, top_k=config['top_k'],
             latest_checkpoint_dir=config['latest_checkpoint_dir'],
             best_checkpoint_dir=config['best_checkpoint_dir'],
-            rngs=rngs, trial=trial, train_tb_writer=train_tb_writer, val_tb_writer=val_tb_writer)
+            rngs=rngs, trial=trial)
         
     finally:
-        if train_tb_writer is not None:
-            train_tb_writer.close()
-        if val_tb_writer is not None:
-            val_tb_writer.close()
         if mlflow_run is not None:
             mlflow.log_metric(f"final_ndcg_{config['top_k']}", float(best_val_ndcg_k))
             mlflow.end_run()

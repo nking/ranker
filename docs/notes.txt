@@ -119,6 +119,8 @@ Monitoring:
     - visibilitiy into XLA computation graphs
     - high level optimizer operations
     - memory usage on TPUs and GPUs
+    - Conflict of tensorboard w/ python versions > 3.10
+      due to setuptools being removed?
   - Perfetto
   - prometheus and Grafana
 - ML observability and Drift:

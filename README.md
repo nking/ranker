@@ -18,7 +18,7 @@ https://github.com/nking/reranker.git
 
 instructions:
   set up a virtual environment using conda or virtualenv
-  with a python version that is >= 3.10.0
+  with a python version that is 3.12 
      e.g. conda create --name ranker_py312 python=3.12
   
   activate the virtual environment

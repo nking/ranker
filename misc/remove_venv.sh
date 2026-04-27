@@ -1,3 +1,3 @@
-#!/usr/bin/env bash
+#!/bin/bash
 conda deactivate
-conda env remove --name ranker_py312
+conda env remove --name ranker_py312 -y
