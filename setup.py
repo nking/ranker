@@ -14,6 +14,7 @@ setup(
     'dvc==3.67.0',
     'mlflow-skinny==3.11.1',
     'optuna==2.10.1',
+    'tensorboardx-2.6.5',
   ],
   extras_require={"test": ["pytest"]},
   classifiers=[ 'Natural Language :: English',

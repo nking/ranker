@@ -2,7 +2,7 @@ import os
 from functools import partial
 from typing import Dict, Tuple, Union, Any
 
-from flax.metrics.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
 from jax.sharding import PartitionSpec as P
 # In JAX 0.8+, shard_map is typically in the main namespace
 from jax import shard_map
@@ -423,9 +423,10 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             if train_tb_writer is not None:
                 #tensorboard automatically overlays curves of same tag in different directories
                 for key in ("loss", ndcg_text, mrr_text, recall_text):
-                    train_tb_writer.scalar(key, metrics_dict[key], step=epoch)
-                    val_tb_writer.scalar(key, metrics_dict[f'val_{key}'], step=epoch)
-                   
+                    train_tb_writer.add_scalar(key, metrics_dict[f'train_{key}'], global_step=epoch)
+                    val_tb_writer.add_scalar(key, metrics_dict[f'val_{key}'], global_step=epoch)
+                train_tb_writer.flush()
+                val_tb_writer.flush()
             if global_avg_val_ndcg > best_ndcg + 1e-6:
                 best_ndcg = global_avg_val_ndcg.item()
                 epochs_without_improvement = 0

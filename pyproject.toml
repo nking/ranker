@@ -17,7 +17,8 @@ dependencies = [
   'jraphx==0.0.4',
   'dvc==3.67.0',
   'mlflow-skinny==3.11.1',
-  'optuna==2.10.1'
+  'optuna==2.10.1',
+  'tensorboardx-2.6.5',
 ]
 readme = "README.md"
 license = "MIT"

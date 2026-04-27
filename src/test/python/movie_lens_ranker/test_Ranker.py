@@ -114,7 +114,7 @@ class TestRanker(unittest.TestCase):
         best_checkpoint_dir = os.path.join(checkpoint_dir, "best")
         mlflow_dir = os.path.join(get_bin_dir(), "mlflow")
         mlflow_registry_dir = os.path.join(get_bin_dir(), "mlflow_registry")
-        tb_logs_uri = os.path.join(get_bin_dir(), "tb_logs_uri")
+        tb_logs_uri = os.path.join(get_bin_dir(), "tb_logs")
         os.makedirs(latest_checkpoint_dir, exist_ok=True)
         os.makedirs(best_checkpoint_dir, exist_ok=True)
         os.makedirs(mlflow_dir, exist_ok=True)
@@ -179,7 +179,7 @@ class TestRanker(unittest.TestCase):
 
         os.makedirs(config['latest_checkpoint_dir'], exist_ok=True)
         os.makedirs(config['best_checkpoint_dir'], exist_ok=True)
-        os.makedirs(config['tb_logs'], exist_ok=True)
+        os.makedirs(config['tb_logs_uri'], exist_ok=True)
 
         set_flags_from_dict(config)
         
