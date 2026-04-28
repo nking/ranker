@@ -32,7 +32,7 @@ mlflow_config_keys = {
     # 'mlflow_tracking_token': None,
     'mlflow_parent_run_id'
 }
-tb_config_keys = {'tb_log_dir'}
+optuna_config_keys = {'optuna_storage_uri'}
 model_params_trainable_keys = {
     'top_k',
     'learning_rate',
@@ -79,7 +79,8 @@ def parse_args_into_dict_with_exists_check():
     args = parser.parse_args()
     args_dict = vars(args)
     for key in {**data_params_nontrainable_keys, **data_params_trainable_keys,
-        **model_params_nontrainable_keys, **model_params_trainable_keys}:
+        **model_params_nontrainable_keys, **model_params_trainable_keys,
+        **optuna_config_keys}:
         if key not in args_dict:
             raise ValueError("missing required argument: {}".format(key))
     return args_dict

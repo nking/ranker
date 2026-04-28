@@ -39,6 +39,58 @@ from movie_lens_ranker.util import read_embeddings, get_env_resources
 
 env_resources, mesh = get_env_resources()
 
+def get_nontrainable_train_config(movies_uri:str,
+        recommendations_uri:str, recommendations_ts_uri:str,
+        ratings_train_uri:str, ratings_val_uri:str,
+        train_negatives_uri:str, val_negatives_uri:str,
+        latest_checkpoint_dir:str, best_checkpoint_dir:str,
+        movie_embeddings_uri:str, user_embeddings_uri:str,
+        num_epochs:int=120, batch_size:int=64, seed:int=0) -> Dict[str, Union[str, int, float]]:
+    
+    config = {}
+    config['movies_uri'] = movies_uri
+    config['recommendations_uri'] = recommendations_uri
+    config['recommendations_ts_uri'] = recommendations_ts_uri
+    config['ratings_train_uri'] = ratings_train_uri
+    config['ratings_val_uri'] = ratings_val_uri
+    config['train_negatives_uri'] = train_negatives_uri
+    config['val_negatives_uri'] = val_negatives_uri
+    config['latest_checkpoint_dir']= latest_checkpoint_dir
+    config['best_checkpoint_dir']= best_checkpoint_dir
+    config['movie_embeddings_uri']= movie_embeddings_uri
+    config['user_embeddings_uri']= user_embeddings_uri
+    config['seed'] = seed
+    config['num_epochs'] = num_epochs
+    config['batch_size'] = batch_size
+   
+    return config
+    
+def get_optuna_suggestions(trial : Trial) -> Dict[str, Any]:
+    config = {}
+    config['top_k'] = 20
+    config['num_layers'] = 2; trial.set_user_attr("num_layers", 2) #2 hop neighborhood.  3 tends to oversmooth
+    config['num_heads'] = trial.suggest_categorical("num_heads", [2, 4, 8])
+    # Ensure hidden_dim is a multiple of num_heads
+    config['hidden_dim'] = trial.suggest_categorical("hidden_dim",
+        [h for h in [64, 128, 256] if h % config['num_heads'] == 0])
+    config["num_candidates"] = trial.suggest_int("num_candidates", 2*config['top_k'], 500, 10, log=False)
+    config["max_history"] = trial.suggest_int("max_history", 2*config['top_k'], 5*config['hidden_dim'], log=False)
+    config['learning_rate'] = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
+    config['out_dim'] = trial.suggest_categorical("out_dim", [16, 32])
+    config['edge_embed_dim'] = trial.suggest_categorical("edge_embed_dim", [8, 16])
+    config['dropout_rate'] = trial.suggest_float("dropout_rate", 0.1, 0.3, step=0.05, log=False)
+    
+    #TODO: plot learning_rate/weight_decay plot_learning_rate_vs_weight_decays() and if they're linear, use these next
+    # 2 lines instead of the 3rd because we want to try to cover the whole space
+    #wd_ratio = trial.suggest_float("wd_ratio", 0.01, 1.0, log=True)
+    #config['weight_decay'] = config['learning_rate'] * wd_ratio
+    config['weight_decay'] = trial.suggest_float("weight_decay", 1e-4, 1e-2, log=True)
+    
+    #if config['hidden_dim'] % config['num_heads'] != 0:
+    #    raise optuna.exceptions.TrialPruned("Incompatible dimensions")
+    
+    return config
+
 def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple):
     # Forward Pass: returns ONLY candidate scores [num_total_graphs * K]
     all_scores = model(padded_graph) #LinearizeTracer<float32[60]>

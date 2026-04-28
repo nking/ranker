@@ -1,29 +1,24 @@
 import glob
 import os.path
 import pathlib
+import threading
 import unittest
 
 import jax.distributed
-import jraph
-import mlflow
-import optax
 from array_record.python import array_record_module
-from flax import nnx
 
 from absl import flags
+from optuna import create_study, load_study
+from optuna.pruners import MedianPruner
+from optuna.samplers import RandomSampler
+
 from helper import *
-from movie_lens_ranker.RandomAccessArrayRecordDataSource import *
-from movie_lens_ranker.RatingsHistoryLookupTransform import *
-from movie_lens_ranker.HardNegativeSamplingTransform import *
-from movie_lens_ranker.SparseLocalSubgraphTransform import \
-    SparseLocalSubgraphTransform
-from movie_lens_ranker.JraphPaddedGraphTupleTransform import JraphPaddedGraphTupleTransform
 from movie_lens_ranker.data_loading import *
-from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.train import *
-from movie_lens_ranker.util import read_embeddings, set_flags_from_dict
+from movie_lens_ranker.util import set_flags_from_dict
 from movie_lens_ranker.util_plots import plot_mlflow_metrics
 
+from movie_lens_ranker.optuna_trial_run import main as run_optuna_main
 
 class TestRanker(unittest.TestCase):
     def setUp(self):
@@ -124,22 +119,25 @@ class TestRanker(unittest.TestCase):
         os.makedirs(mlflow_registry_dir, exist_ok=True)
         os.makedirs(tb_logs_uri, exist_ok=True)
         
-        data_params_nontrainable = {
-            'movies_uri':self.movies_uri,
-            'recommendations_uri':self.recommendations_uri,
-            'recommendations_ts_uri':self.recommendations_ts_uri,
-            'ratings_train_uri':self.ratings_train_uri,
-            'ratings_val_uri':self.ratings_val_uri,
-            'train_negatives_uri':self.train_negatives_uri,
-            'val_negatives_uri':self.val_negatives_uri,
-            'seed':seed
-        }
+        non_trainable_params = get_nontrainable_train_config(
+            movies_uri=self.movies_uri,
+            recommendations_uri=self.recommendations_uri,
+            recommendations_ts_uri=self.recommendations_ts_uri,
+            ratings_train_uri=self.ratings_train_uri,
+            ratings_val_uri=self.ratings_val_uri,
+            train_negatives_uri=self.train_negatives_uri,
+            val_negatives_uri=self.val_negatives_uri,
+            latest_checkpoint_dir =latest_checkpoint_dir,
+            best_checkpoint_dir = best_checkpoint_dir,
+            movie_embeddings_uri = self.movie_embeddings_uri,
+            user_embeddings_uri = self.user_embeddings_uri,
+            num_epochs=num_epochs, batch_size=batch_size, seed=seed
+        )
+        
         data_params_trainable = {'max_history':max_history, 'num_candidates':num_candidates,
             'num_epochs':num_epochs,
             'batch_size':batch_size}
-        model_params_nontrainable = {'latest_checkpoint_dir':latest_checkpoint_dir,
-            'best_checkpoint_dir':best_checkpoint_dir,
-            'movie_embeddings_uri': self.movie_embeddings_uri, 'user_embeddings_uri':self.user_embeddings_uri}
+        
         model_params_trainable = {'top_k':top_k, 'learning_rate':learning_rate, 'weight_decay':weight_decay,
             'out_dim':out_dim, 'hidden_dim':hidden_dim, 'num_layers':num_layers,
             'num_heads':num_heads, 'edge_embed_dim':edge_embed_dim, 'dropout_rate':dropout_rate,
@@ -166,11 +164,9 @@ class TestRanker(unittest.TestCase):
             #'mlflow_tracking_token': None,
             'mlflow_parent_run_id': mlflow_parent_run_id
         }
-        tb_config = {'tb_logs_uri' : tb_logs_uri}
         
-        config = {**data_params_nontrainable, **data_params_trainable,
-            **model_params_nontrainable, **model_params_trainable,
-            **mlflow_config, **tb_config}
+        config = {**non_trainable_params, **data_params_trainable,
+            **model_params_trainable, **mlflow_config}
         
         config['study_name'] = STUDY_NAME
         config["trial_id"] = 1
@@ -250,5 +246,86 @@ class TestRanker(unittest.TestCase):
                 batch_size = batch_size, seed = seed)
             eval_metrics = test_fn(model=model, test_dataloader=test_dataloader, top_k=top_k)
         
+    def test_run_train_with_optuna(self):
+        
+        num_epochs = 3
+        batch_size = 64
+        seed = 234
+        
+        checkpoint_dir = os.path.join(get_bin_dir(), "checkpoints")
+        latest_checkpoint_dir = os.path.join(checkpoint_dir, "latest")
+        best_checkpoint_dir = os.path.join(checkpoint_dir, "best")
+        mlflow_dir = os.path.join(get_bin_dir(), "mlflow")
+        mlflow_registry_dir = os.path.join(get_bin_dir(), "mlflow_registry")
+        tb_logs_uri = os.path.join(get_bin_dir(), "tb_logs")
+        #optuna_db_path = os.path.join(get_bin_dir(), "optuna_GraphRanker_unittest.db")
+        os.makedirs(latest_checkpoint_dir, exist_ok=True)
+        os.makedirs(best_checkpoint_dir, exist_ok=True)
+        os.makedirs(mlflow_dir, exist_ok=True)
+        os.makedirs(mlflow_registry_dir, exist_ok=True)
+        os.makedirs(tb_logs_uri, exist_ok=True)
+        
+        STUDY_NAME = "GraphRanker_tuning_unittest"
+        #db_uri = f"sqlite:///{optuna_db_path}"
+        optuna_storage_uri = "sqlite:///file:memdb1?mode=memory&cache=shared"
+        
+        # Initialize the optuna study in the database
+        # This just "reserves the name" in your Postgres/MySQL DB
+        study = create_study(
+            study_name=STUDY_NAME,
+            storage=optuna_storage_uri,
+            sampler=RandomSampler(),
+            pruner=MedianPruner(),
+            direction="maximize",
+            load_if_exists=True
+        )
+        
+        # init mlflow experiment
+        try:
+            exp_id = mlflow.get_experiment_by_name(STUDY_NAME)
+            if exp_id is not None:
+                mlflow.delete_experiment(STUDY_NAME)
+        except Exception as e:
+            print(f'error while deleting experiment: {e}')
+        mlflow.set_experiment(STUDY_NAME)
+        # Create the parent run and immediately get its ID
+        parent_run = mlflow.start_run(run_name="Optuna_HPO")
+        mlflow_parent_run_id = parent_run.info.run_id
+        mlflow.end_run()
+        
+        set_flags_from_dict({
+            'movies_uri': self.movies_uri,
+            'recommendations_uri': self.recommendations_uri,
+            'recommendations_ts_uri' : self.recommendations_ts_uri,
+            'ratings_train_uri' : self.ratings_train_uri, 'ratings_val_uri' :self.ratings_val_uri,
+            'train_negatives_uri': self.train_negatives_uri, 'val_negatives_uri': self.val_negatives_uri,
+            'latest_checkpoint_dir':latest_checkpoint_dir,
+            'best_checkpoint_dir': best_checkpoint_dir,
+            'movie_embeddings_uri' : self.movie_embeddings_uri,
+            'user_embeddings_uri': self.user_embeddings_uri,
+            'num_epochs' : num_epochs, 'batch_size':batch_size, 'seed':seed,
+            'study_name' : STUDY_NAME,
+             "trial_id" : 1,
+             'phase' : 'train',
+            'optuna_storage_uri':optuna_storage_uri,
+            'mlflow_tracking_uri': mlflow_dir,
+            'mlflow_registry_uri': mlflow_registry_dir,
+            'mlflow_experiment_id': self.get_or_create_mlflow_experiment(STUDY_NAME),
+            'mlflow_experiment_name': STUDY_NAME,
+            # 'mlflow_tracking_token': None,
+            'mlflow_parent_run_id': mlflow_parent_run_id
+        })
+        
+        run_optuna_main(None)
+        
+        FLAGS = flags.FLAGS
+        study = load_study(study_name=STUDY_NAME, storage=optuna_storage_uri)
+        print(f"Best trial: {study.best_trial.number}")
+        print(f"Best value (NDCG): {study.best_value}")
+        # Return the winning params
+        best_params = study.best_trial.params
+        best_trial_id = study.best_trial.number
+        
+    
     if __name__ == '__main__':
         unittest.main()

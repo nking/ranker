@@ -8,9 +8,9 @@ import xmanager as xm
 from optuna import create_study, load_study
 from absl import flags
 import os
-import shutil
-import sys
-import subprocess
+
+from optuna.pruners import MedianPruner
+from optuna.samplers import RandomSampler
 
 MLFLOW_DIR = os.path.join(os.getcwd(), "bin", "mlflow")
 
@@ -22,21 +22,44 @@ def get_best_config(study_name, storage_url):
     # Return the winning params
     return study.best_trial.params, study.best_trial.number
 
+def get_project_dir() -> str:
+  cwd = os.getcwd()
+  head = cwd
+  proj_dir = ""
+  while head and head != os.sep:
+    head, tail = os.path.split(head)
+    if tail:  # Add only if not an empty string (e.g., from root or multiple separators)
+      if tail == "ranker":
+        proj_dir = os.path.join(head, tail)
+        break
+  return proj_dir
+
+def get_bin_dir() -> str:
+  return os.path.join(get_project_dir(), "bin")
+
 def main():
     
-    STUDY_NAME = "GraphRanker_tuning_xmgr"
+    STUDY_NAME = "GraphRanker_tuning_xmngr"
+    optuna_db_path = os.path.join(get_bin_dir(), "optuna_GraphRanker_xmngr.db")
+    optuna_storage_uri =  f"sqlite:///{optuna_db_path}"
+    
     
     # Initialize the optuna study in the database
     # This just "reserves the name" in your Postgres/MySQL DB
     create_study(
         study_name=STUDY_NAME,
-        storage="postgresql://user:pass@host:5432/db", 
+        storage=optuna_storage_uri,
+        sampler=RandomSampler(),
+        pruner=MedianPruner(),
+        direction="maximize",
         load_if_exists=True
     )
     
     #init mlflow experiment
     try:
-        mlflow.delete_experiment(STUDY_NAME)
+        exp_id = mlflow.get_experiment_by_name(STUDY_NAME)
+        if exp_id is not None:
+            mlflow.delete_experiment(STUDY_NAME)
     except Exception as e:
         print(f'error while deleting experiment: {e}')
     mlflow.set_experiment(STUDY_NAME)
@@ -64,8 +87,29 @@ def main():
                 # args are read as FLAGs by optuna_trial_run
                 args={
                     'study_name': STUDY_NAME,
-                    'storage_url': "postgresql://user:pass@host:5432/db",
+                    'optuna_storage_uri': optuna_storage_uri,
                     'phase': 'train/tune',
+                    'mlflow_parent_run_id': mlflow_parent_run_id,
+                    'movies_uri': movies_uri,
+                    'recommendations_uri': recommendations_uri,
+                    'recommendations_ts_uri': recommendations_ts_uri,
+                    'ratings_train_uri': ratings_train_uri,
+                    'ratings_val_uri': ratings_val_uri,
+                    'train_negatives_uri': train_negatives_uri,
+                    'val_negatives_uri': val_negatives_uri,
+                    'latest_checkpoint_dir': latest_checkpoint_dir,
+                    'best_checkpoint_dir': best_checkpoint_dir,
+                    'movie_embeddings_uri': movie_embeddings_uri,
+                    'user_embeddings_uri': user_embeddings_uri,
+                    'num_epochs': num_epochs,
+                    'batch_size': batch_size,
+                    'seed': seed,
+                    "trial_id": 1,
+                    'mlflow_tracking_uri': mlflow_dir,
+                    'mlflow_registry_uri': mlflow_registry_dir,
+                    'mlflow_experiment_id': mlflow.get_experiment_by_name(STUDY_NAME),
+                    'mlflow_experiment_name': STUDY_NAME,
+                    # 'mlflow_tracking_token': None,
                     'mlflow_parent_run_id': mlflow_parent_run_id
                 }
             ))) for _ in range(20)]

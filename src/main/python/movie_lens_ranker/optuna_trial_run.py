@@ -1,6 +1,8 @@
+import threading
+
 import mlflow
 from absl import flags
-from movie_lens_ranker.train import train_fn, test_fn
+from movie_lens_ranker.train import train_fn, test_fn, get_optuna_suggestions
 
 FLAGS = flags.FLAGS
 
@@ -20,7 +22,8 @@ def main(_):
     :param _:
     :return:
     """
-    config = FLAGS.to_dict()
+    #contains same keys as get_nontrainable_train_config() and
+    config = FLAGS.flag_values_dict()
     
     if FLAGS.phase == 'test':
         return test_fn(config)
@@ -28,7 +31,7 @@ def main(_):
     # Connect to the study created by the launcher
     study = optuna.load_study(
         study_name=config['study_name'],
-        storage=config['storage_url']
+        storage=config['optuna_storage_uri'],
     )
     
     # Optuna's DB locking ensures each container gets unique params
@@ -42,6 +45,10 @@ def main(_):
     #append trial id to uris:
     config['best_checkpoint_dir'] = f"{config['best_checkpoint_dir']}/{config['study_name']}/trial_{config['trial_id']}"
     config['latest_checkpoint_dir'] = f"{config['latest_checkpoint_dir']}/{config['study_name']}/trial_{config['trial_id']}"
+    
+    # get trial suggestions
+    optuna_params = get_optuna_suggestions(trial)
+    config.update(optuna_params)
     
     best_val_ndcg_k, STATE = train_fn(config, trial)
     
