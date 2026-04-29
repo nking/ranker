@@ -40,9 +40,11 @@ def get_bin_dir() -> str:
 def main():
     
     STUDY_NAME = "GraphRanker_tuning_xmngr"
-    optuna_db_path = os.path.join(get_bin_dir(), "optuna_GraphRanker_xmngr.db")
-    optuna_storage_uri =  f"sqlite:///{optuna_db_path}"
-    
+    optuna_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}.db")
+    optuna_storage_uri = f"sqlite:///{optuna_db_path}?mode=memory&cache=shared"
+    if os.path.exists(optuna_db_path):
+        os.remove(optuna_db_path)
+        print(f"Deleted old database at {optuna_db_path}")
     
     # Initialize the optuna study in the database
     # This just "reserves the name" in your Postgres/MySQL DB
@@ -76,7 +78,16 @@ def main():
             xm.python_executable(
                 path='.',
                 entrypoint=xm.ModuleName('optuna_trial_run'), # Points to optuna_trial_run.py
-                docker_instructions=[...] 
+                docker_instructions=[
+                    'FROM python:3.11-slim AS builder',
+                    'WORKDIR /app',
+                    'RUN apt-get update && apt-get install -y --no-install-recommends gcc build-essential',
+                    'COPY --from=builder /root/.local /root/.local',
+                    'ENV PATH=/root/.local/bin:$PATH',
+                    'COPY ../src/main/python/movie_lens_ranker ./src/main/python/movie_lens_ranker',
+                    'COPY ../pyproject.toml ./',
+                    'RUN pip install --user --no-cache-dir -e .',
+                ]
             )
         ])
         
@@ -110,7 +121,6 @@ def main():
                     'mlflow_experiment_id': mlflow.get_experiment_by_name(STUDY_NAME),
                     'mlflow_experiment_name': STUDY_NAME,
                     # 'mlflow_tracking_token': None,
-                    'mlflow_parent_run_id': mlflow_parent_run_id
                 }
             ))) for _ in range(20)]
         

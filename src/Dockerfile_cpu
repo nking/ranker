@@ -1,8 +1,0 @@
-# pip install jax ai stack==2025.10.28
-# ...
-#pip install ray[train,tune] >= 2.55.0
-# mlflow-skinny
-# if storing in VertexAI: google-cloud-mlflow though check compat with jaxaistack
-#     for example, protobuf version
-#  similarly AWS: pip install sagemaker-mlflow
-#    Azure: pip install azure-ai-ml

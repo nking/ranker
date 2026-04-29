@@ -1,6 +1,6 @@
 import os
 from functools import partial
-from typing import Dict, Tuple, Union, Any
+from typing import Dict, Tuple, Union, Any, Optional
 
 from jax.sharding import PartitionSpec as P
 # In JAX 0.8+, shard_map is typically in the main namespace
@@ -33,7 +33,8 @@ from grain._src.python.data_loader import DataLoader
 from movie_lens_ranker.BatchSampler import BatchSampler
 
 import orbax.checkpoint as ocp
-from movie_lens_ranker.data_loading import create_train_and_val_dataloaders
+from movie_lens_ranker.data_loading import create_train_and_val_dataloaders, \
+    create_test_dataloader
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.util import read_embeddings, get_env_resources
 
@@ -313,7 +314,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer,
         top_k:int, latest_checkpoint_dir: str, best_checkpoint_dir:str,
-        rngs:nnx.Rngs, trial:Trial=None,
+        rngs:nnx.Rngs, config_dict:Dict[str, Union[str, int, float]],
+        trial:Trial=None,
         restored_train_dataloader_iter=None, restored_global_step:int=None) -> Tuple[float, Union[optuna.trial.TrialState, None]]:
     """
     a shard's portion of the training
@@ -364,7 +366,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             'opt': ocp.StandardCheckpointHandler(),
             'global_step': ocp.StandardCheckpointHandler(),
             'rngs': ocp.StandardCheckpointHandler(),
-            'dataloader': grain.checkpoint.CheckpointHandler()
+            'train_dataloader': grain.checkpoint.CheckpointHandler(),
+            'config': ocp.handlers.JsonCheckpointHandler()
         },
         options=ocp.CheckpointManagerOptions(max_to_keep=2)
     )
@@ -374,7 +377,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             'opt': ocp.StandardCheckpointHandler(),
             'global_step': ocp.StandardCheckpointHandler(),
             'rngs': ocp.StandardCheckpointHandler(),
-            'train_dataloader': grain.checkpoint.CheckpointHandler()
+            'train_dataloader': grain.checkpoint.CheckpointHandler(),
+            'config': ocp.handlers.JsonCheckpointHandler()
         },
         options=ocp.CheckpointManagerOptions(max_to_keep=2)
     )
@@ -458,11 +462,12 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 args=ocp.args.Composite(
                     model=ocp.args.StandardSave(model_state),
                     opt=ocp.args.StandardSave(opt_state),
-                    global_step=ocp.args.StandardSave({'step':global_step}),
+                    global_step=ocp.args.StandardSave({'global_step':global_step}),
                     # NNX RNGs need to be converted to state (dictionary of arrays)
                     rngs=ocp.args.StandardSave(nnx.state(rngs)),
                     # Include your dataloader from before
-                    dataloader=grain.checkpoint.CheckpointSave(iter(train_dataloader))
+                    train_dataloader=grain.checkpoint.CheckpointSave(iter(train_dataloader)),
+                    config=ocp.args.JsonSave(config_dict)
                 )
             )
             mngr_latest.wait_until_finished()  # Ensure it's on disk
@@ -471,7 +476,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 best_ndcg = global_avg_val_ndcg.item()
                 epochs_without_improvement = 0
                 if rank == 0:
-                    print(f"  New best NDCG!")
+                    print(f"  New best val NDCG! ({global_avg_val_ndcg})")
                 #all shards write their best
                 _graphdef, model_state = nnx.split(model)
                 _, opt_state = nnx.split(optimizer)
@@ -480,11 +485,12 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                     args=ocp.args.Composite(
                         model=ocp.args.StandardSave(model_state),
                         opt=ocp.args.StandardSave(opt_state),
-                        global_step=ocp.args.StandardSave({'step': global_step}),
+                        global_step=ocp.args.StandardSave({'global_step': global_step}),
                         # NNX RNGs need to be converted to state (dictionary of arrays)
                         rngs=ocp.args.StandardSave(nnx.state(rngs)),
                         # Include your dataloader from before
-                        train_dataloader=grain.checkpoint.CheckpointSave(iter(train_dataloader))
+                        train_dataloader=grain.checkpoint.CheckpointSave(iter(train_dataloader)),
+                        config=ocp.args.JsonSave(config_dict)
                     )
                 )
                 mngr_best.wait_until_finished()  # Ensure it's on disk
@@ -514,7 +520,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         
     return best_ndcg, optuna_STATE
 
-def build_model_optimizer_and_dataloders(config:dict) -> Dict[str, Any]:
+def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs=None) -> Dict[str, Any]:
     train_dataloader, val_dataloader = create_train_and_val_dataloaders(
         movies_uri=config['movies_uri'],
         recommendations_uri=config['recommendations_uri'],
@@ -535,7 +541,8 @@ def build_model_optimizer_and_dataloders(config:dict) -> Dict[str, Any]:
         movie_embeddings_uri=config['movie_embeddings_uri'],
         batch_size=1024)
     
-    rngs = nnx.Rngs(config['seed'])
+    if rngs is None:
+        rngs = nnx.Rngs(config['seed'])
     
     model = GraphRanker(user_movie_embeds=embeddings,
         num_candidates=config['num_candidates'],
@@ -553,13 +560,11 @@ def build_model_optimizer_and_dataloders(config:dict) -> Dict[str, Any]:
     return {"rngs": rngs, "model": model, "optimizer": optimizer,
         'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader}
 
-def train_fn(config: dict, trial: Trial = None):
-    
-    #env_resources, mesh = get_env_resources()
+def train_fn(config: dict, trial: Trial = None, rngs:nnx.Rngs=None):
     
     worker_rank = jax.process_index()
     
-    _dict = build_model_optimizer_and_dataloders(config)
+    _dict = build_model_optimizer_and_dataloaders(config, rngs=rngs)
     model = _dict['model']
     optimizer = _dict['optimizer']
     rngs = _dict['rngs']
@@ -577,14 +582,22 @@ def train_fn(config: dict, trial: Trial = None):
             mlflow.set_registry_uri(config['mlflow_registry_uri'])
             # Start a run specifically for this Optuna trial
             # don't use nested=True because the parent isn't in the same thread in production
+            run_id = config.get('mlflow_run_id', None) #is not None for a "restore, resume training"
             mlflow_run = mlflow.start_run(
+                run_id=run_id,
                 run_name=f"trial_{config.get('trial_id', 0)}",
                 #tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
                 tags = {"mlflow.parentRunId" : config['mlflow_parent_run_id']}
             )
+            config['mlflow_run_id'] = mlflow_run.info.run_id
             mlflow.set_tag("phase", config["phase"]) #do not move this before start_run
             mlflow.log_params(config)
-        
+            if trial is not None:
+                #store mlflow run_id in optuna, so can get config from mlflows param more easily
+                print(f'mlflow_run.info.run_id={mlflow_run.info.run_id}', flush=True)
+                trial.set_user_attr("mlflow_run_id", mlflow_run.info.run_id)
+                print( f"VERIFY: Trial attr: {trial.user_attrs.get('mlflow_run_id')}", flush=True)
+
             mlflow.log_text(str(model), "model_summary.txt")
             mlflow.log_param("best_checkpoint_uri", config['best_checkpoint_dir'])
             mlflow.log_param("latest_checkpoint_dir", config['latest_checkpoint_dir'])
@@ -597,15 +610,14 @@ def train_fn(config: dict, trial: Trial = None):
             optimizer=optimizer, top_k=config['top_k'],
             latest_checkpoint_dir=config['latest_checkpoint_dir'],
             best_checkpoint_dir=config['best_checkpoint_dir'],
-            rngs=rngs, trial=trial)
-        
+            rngs=rngs, config_dict=config,
+            trial=trial)
+        return best_val_ndcg_k, STATE
     finally:
         if mlflow_run is not None:
             mlflow.log_metric(f"final_ndcg_{config['top_k']}", float(best_val_ndcg_k))
             mlflow.end_run()
-        
-    return best_val_ndcg_k, STATE
-
+    
 def stack_val_batches(dataloader, num_steps):
     batches = []
     for i, batch in enumerate(dataloader):
@@ -653,97 +665,191 @@ def run_full_validation(model, val_dataloader, top_k, steps=903, micro_batch_siz
     return jax.tree.map(lambda *args: jnp.mean(jnp.array(args)),
         *all_step_metrics)
 
-def restore_model_from_checkpoint(checkpoint_uri:str, config:dict):
-    
-    mngr_best = ocp.CheckpointManager(checkpoint_uri,
+def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -> Dict[str, Any]:
+    """
+    restore the model, dataloadern and state from checkpoint_uri.  if get_Earliest is set to True,
+    the earlies of the saved runs will be returned.  This is useful for testing continuation of
+    training from an earlier checkpoint.
+    :param checkpoint_uri:
+    :param get_earliest: False by default, else returns earliest of saved checkpoints
+    :return: dictionary holding: 'model', 'optimizer', 'train_dataloader', 'train_dataloader_iter',
+            'val_dataloader', 'rngs', 'global_step', 'config
+    """
+    mngr = ocp.CheckpointManager(checkpoint_uri,
         item_handlers={
             'model': ocp.StandardCheckpointHandler(),
             'opt': ocp.StandardCheckpointHandler(),
             'global_step': ocp.StandardCheckpointHandler(),
             'rngs': ocp.StandardCheckpointHandler(),
-            'dataloader': grain.checkpoint.CheckpointHandler()
+            'train_dataloader': grain.checkpoint.CheckpointHandler(),
+            'config': ocp.handlers.JsonCheckpointHandler()
         },
         options=ocp.CheckpointManagerOptions(max_to_keep=2)
     )
     
-    epoch = mngr_best.latest_step()
-    if epoch is not None:
-        _dict = build_model_optimizer_and_dataloders(config)
-        model = _dict['model']
-        optimizer = _dict['optimizer']
-        rngs = _dict['rngs']
-        train_dataloader = _dict['train_dataloader']
-        val_dataloader = _dict['val_dataloader']
+    if get_earliest:
+        available_steps = mngr.all_steps()
+        epoch = available_steps[0]
+    else:
+        epoch = mngr.latest_step()
+    if epoch is None:
+        raise FileNotFoundError(f"No checkpoint found at {checkpoint_uri}")
     
-        if mngr_best.latest_step() is not None:
-            _, model_state = nnx.split(model)
-            _, opt_state = nnx.split(optimizer)
-            restored = mngr_best.restore(
-                epoch,
-                args=ocp.args.Composite(
-                    model=ocp.args.StandardRestore(model_state),
-                    opt=ocp.args.StandardRestore(opt_state),
-                    global_step=ocp.args.StandardRestore({'global_step': 0}),
-                    rngs=ocp.args.StandardRestore(nnx.state(rngs)),
-                    # Grain requires the actual iterator object to restore state in-place
-                    train_dataloader=grain.checkpoint.CheckpointRestore( iter(train_dataloader))
-                )
-            )
-            
-            train_state = restored.state
-            train_dataloder_iter = restored.dataloadernnx.update(model, restored['model'])
-            nnx.update(optimizer, restored['opt'])
-            nnx.update(rngs, restored['rngs'])
-            global_step = restored['global_step']['step']
-            
-            print(f"Restored champion model at step {global_step}")
-            
-            return {
-                'model': model, 'optimizer': optimizer,
-                'train_dataloader': train_dataloader,
-                'train_dataloder_iter':train_dataloder_iter,
-                'val_dataloader': val_dataloader,
-                'rngs': rngs, 'global_step': global_step,
-            }
-        else:
-            raise FileNotFoundError(f"No checkpoint found at {checkpoint_uri}")
+    #restore config, then rngs, so can restore model and dataloaders from them
+    _ = mngr.restore(
+        epoch,
+        args=ocp.args.Composite(
+            config=ocp.args.JsonRestore(),
+        )
+    )
+    config = _['config']
+    rngs = nnx.Rngs(config['seed'])
+    _ = mngr.restore(
+        epoch,
+        args=ocp.args.Composite(
+            rngs=ocp.args.StandardRestore(nnx.state(rngs)),
+        )
+    )
+    nnx.update(rngs, _['rngs'])
+    
+    _dict = build_model_optimizer_and_dataloaders(config, rngs=rngs)
+    model = _dict['model']
+    optimizer = _dict['optimizer']
+    train_dataloader = _dict['train_dataloader']
+    val_dataloader = _dict['val_dataloader']
+    
+    #restore state to those objects:
+    _, model_state = nnx.split(model)
+    _, opt_state = nnx.split(optimizer)
+    restored = mngr.restore(
+        epoch,
+        args=ocp.args.Composite(
+            model=ocp.args.StandardRestore(model_state),
+            opt=ocp.args.StandardRestore(opt_state),
+            global_step=ocp.args.StandardRestore({'global_step': 0}),
+            # Grain requires the actual iterator object to restore state in-place
+            train_dataloader=grain.checkpoint.CheckpointRestore( iter(train_dataloader)),
+        )
+    )
+    
+    train_dataloader_iter = restored['train_dataloader']
+    nnx.update(optimizer, restored['opt'])
+    nnx.update(model, restored['model'])
+    global_step = restored['global_step']['global_step']
+    
+    print(f"Restored model at step {global_step}")
+    
+    return {
+        'model': model, 'optimizer': optimizer,
+        'train_dataloader': train_dataloader,
+        'train_dataloader_iter':train_dataloader_iter,
+        'val_dataloader': val_dataloader,
+        'rngs': rngs,
+        'global_step': global_step,
+        'config': config
+    }
 
 def test_fn(config: dict):
-    env_resources = get_env_resources()
     
     worker_rank = jax.process_index()
     
-    load_checkpoint = f"{config['best_checkpoint_dir']}/trial_{config['load_checkpoint_id']}"
+    restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_dir'])
     
+    model = restore_dict['model']
     
-    if worker_rank == 0:
-        mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
-        mlflow.set_experiment(config['mlflow_experiment_name'])
-        mlflow.set_registry_uri(config['mlflow_artifact_location'])
-        mlflow.set_tag("phase", config["phase"])
-        # Start a run specifically for this Optuna trial
-        mlflow.start_run(run_name=f"trial_{config.get('trial_id', 0)}")
-        mlflow.log_params(config)
+    config['phase'] = 'test'
+    
+    mlflow_run = None
+    try:
+        if worker_rank == 0:
+            mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
+            mlflow.set_registry_uri(config['mlflow_registry_uri'])
+            # Start a run specifically for this Optuna trial
+            # don't use nested=True because the parent isn't in the same thread in production
+            run_id = config.get('mlflow_run_id',None)  # is not None for a "restore, resume training"
+            #in production, there may be ACL to solve for this:
+            mlflow_run = mlflow.start_run(
+                run_id=run_id,
+                run_name=f"trial_{config.get('trial_id', 0)}",
+                # tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
+                tags={"mlflow.parentRunId": config['mlflow_parent_run_id']}
+            )
+            config['mlflow_run_id'] = mlflow_run.info.run_id
+            mlflow.set_tag("phase", config["phase"])  # do not move this before start_run
+            #mlflow.log_params(config)
+            
+            #these uris are all in config too, excepting test_ratings
+            test_dataloader = create_test_dataloader(
+                movies_uri = restore_dict['config']['movies_uri'],
+                recommendations_uri = restore_dict['config']['recommendations_uri'],
+                recommendations_ts_uri = restore_dict['config']['recommendations_ts_uri'],
+                ratings_uri = config['ratings_test_uri'],
+                negatives_uri = config['train_negatives_uri'],
+                max_history = restore_dict['config']['max_history'],
+                num_candidates = restore_dict['config']['num_candidates'],
+                batch_size = restore_dict['config']['batch_size'],
+                seed = config['seed'])
+            
+            if not isinstance(test_dataloader._sampler, BatchSampler):
+                raise ValueError(
+                    "test_dataloader sampler must be an instance of BatchSampler")
+                    
+            test_metrics = _epoch_validation(model, test_dataloader, restore_dict['config']['top_k'])
+            
+            out_dict = {f'test_{key}_{config['top_k']}' : value for key, value in test_metrics.items()}
         
-    editing
+            if mlflow_run is not None:
+                for key, value in out_dict.items():
+                    mlflow.log_metric(key, float(value))
+        
+            return out_dict
+        
+    finally:
+        if mlflow_run is not None:
+            mlflow.end_run()
+
+def resume_train_fn(config: dict, trial:Optional[Trial]):
     
-def _test_fn(model, test_dataloader: grain.DataLoader, top_k:int):
-    """
-    calculate loss and metrics for the data in test_dataloader. this method expects that test_dataloader
-    was constructed for 1 epoch, but also has a stop at end of first epoch.
-    :param model:
-    :param test_dataloader:
-    :param top_k:
-    :return:
-    """
+    worker_rank = jax.process_index()
     
-    if not isinstance(test_dataloader._sampler, BatchSampler):
-        raise ValueError("test_dataloader sampler must be an instance of BatchSampler")
+    restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_dir'])
     
-    TEST_BATCH_SIZE = test_dataloader._sampler.batch_size
-    TOTAL_RECORDS = test_dataloader._sampler.total_records
-    STEPS_PER_EPOCH = TOTAL_RECORDS // TEST_BATCH_SIZE  # = 7234
-    
-    test_metrics = _epoch_validation(model, test_dataloader, top_k)
-    
-    return test_metrics
+    best_val_ndcg_k = -1.0
+    mlflow_run = None
+    try:
+        if worker_rank == 0:
+            mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
+            mlflow.set_registry_uri(config['mlflow_registry_uri'])
+            # Start a run specifically for this Optuna trial
+            # don't use nested=True because the parent isn't in the same thread in production
+            run_id = config.get('mlflow_run_id',
+                None)  # is not None for a "restore, resume training"
+            # in production, there may be ACL to solve for this:
+            mlflow_run = mlflow.start_run(
+                run_id=run_id,
+                run_name=f"trial_{config.get('trial_id', 0)}",
+                # tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
+                tags={"mlflow.parentRunId": config['mlflow_parent_run_id']}
+            )
+            config['mlflow_run_id'] = mlflow_run.info.run_id
+            
+        best_val_ndcg_k, STATE = _train_fn(model=restore_dict['model'],
+            train_dataloader=restore_dict['train_dataloader'],
+            val_dataloader=restore_dict['val_dataloader'],
+            optimizer=restore_dict['optimizer'],
+            top_k=config['top_k'],
+            latest_checkpoint_dir=config['latest_checkpoint_dir'],
+            best_checkpoint_dir=config['best_checkpoint_dir'],
+            rngs=restore_dict['rngs'],
+            config_dict=config,
+            trial=trial,
+            restored_train_dataloader_iter=restore_dict['train_dataloader_iter'],
+            restored_global_step=restore_dict['global_step'],
+        )
+        return best_val_ndcg_k, STATE
+        
+    finally:
+        if mlflow_run is not None:
+            mlflow.log_metric(f"final_ndcg_{config['top_k']}",
+                float(best_val_ndcg_k))
+            mlflow.end_run()

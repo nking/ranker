@@ -53,6 +53,6 @@ def main(_):
     best_val_ndcg_k, STATE = train_fn(config, trial)
     
     study.tell(trial, values=float(best_val_ndcg_k), state=STATE)
-
+    
 if __name__ == '__main__':
     app.run(main)
