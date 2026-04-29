@@ -341,7 +341,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     
     TRAIN_BATCH_SIZE = train_dataloader._sampler.batch_size
     TOTAL_RECORDS = train_dataloader._sampler.total_records
-    STEPS_PER_EPOCH_GLOBAL = train_dataloader._sampler.num_batches  # = 7234
+    STEPS_PER_EPOCH_GLOBAL = train_dataloader._sampler.num_batches_per_epoch  # = 7234
     NUM_TRAIN_SHARDS = train_dataloader._sampler._shard_options.shard_count
     STEPS_PER_EPOCH_LOCAL = STEPS_PER_EPOCH_GLOBAL//NUM_TRAIN_SHARDS
     
@@ -352,7 +352,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     
     VAL_BATCH_SIZE = train_dataloader._sampler.batch_size
     TOTAL_RECORDS_VAL = val_dataloader._sampler.total_records
-    STEPS_PER_EPOCH_GLOBAL_VAL = val_dataloader._sampler.num_batches # 903
+    STEPS_PER_EPOCH_GLOBAL_VAL = val_dataloader._sampler.num_batches_per_epoch # 903
     NUM_VAL_SHARDS = val_dataloader._sampler._shard_options.shard_count
     STEPS_PER_EPOCH_LOCAL_VAL = STEPS_PER_EPOCH_GLOBAL_VAL // NUM_VAL_SHARDS
     
@@ -398,20 +398,17 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     
     if restored_train_dataloader_iter is None:
         train_dataloader_iter = iter(train_dataloader)
-        start_step = 0
     else:
         train_dataloader_iter = restored_train_dataloader_iter
         if restored_global_step is None:
             raise RuntimeError('globalrestored_global_step_step cannot be None if restored_train_dataloader_iter because restore is implicit')
         #global_step = batch_idx * NUM_TRAIN_SHARDS
-        start_step = restored_global_step // NUM_TRAIN_SHARDS
     
     #NOTE: cannot improve efficiency for this outer loop because gradient loss needs to
     # be calculated and updated for each iteration.
     
     #for batch_idx, padded_super_graph in enumerate(train_dataloader):
-    for batch_idx, padded_super_graph in enumerate(train_dataloader_iter, start=start_step):
-    #for batch_idx, padded_super_graph in enumerate(train_dataloader_iter):
+    for batch_idx, padded_super_graph in enumerate(train_dataloader_iter):
         local_step = batch_idx * TRAIN_BATCH_SIZE
         global_step = local_step * NUM_TRAIN_SHARDS
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL

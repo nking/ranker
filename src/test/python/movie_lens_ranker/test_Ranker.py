@@ -367,7 +367,7 @@ class TestRanker(unittest.TestCase):
         ## load train_ for use in stats
         TRAIN_BATCH_SIZE = restore_dict['train_dataloader']._sampler.batch_size
         TOTAL_RECORDS = restore_dict['train_dataloader']._sampler.total_records
-        STEPS_PER_EPOCH_GLOBAL = restore_dict['train_dataloader']._sampler.num_batches  # = 7234
+        STEPS_PER_EPOCH_GLOBAL = restore_dict['train_dataloader']._sampler.num_batches_per_epoch  # = 7234
         NUM_TRAIN_SHARDS = restore_dict['train_dataloader']._sampler._shard_options.shard_count
         STEPS_PER_EPOCH_LOCAL = STEPS_PER_EPOCH_GLOBAL // NUM_TRAIN_SHARDS
         
@@ -383,7 +383,7 @@ class TestRanker(unittest.TestCase):
         n_iter = 0
         #TODO: follow up.  something is wrong here because it iterates over 4 epochs
         try:
-            for batch_idx, padded_super_graph in enumerate(earlier_restore_dict['train_dataloader_iter']):#, start=start_step):
+            for batch_idx, padded_super_graph in enumerate(earlier_restore_dict['train_dataloader_iter']):
                 n_iter += 1
         except StopIteration:
             pass
@@ -401,7 +401,7 @@ class TestRanker(unittest.TestCase):
         n_iter = 0
         try:
             for batch_idx, padded_super_graph in enumerate(
-                    last_restored_dict['train_dataloader_iter']):#, start=start_step):
+                    last_restored_dict['train_dataloader_iter']):
                 n_iter += 1
         except StopIteration:
             pass
