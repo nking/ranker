@@ -1,9 +1,11 @@
+- use a CliffordNet layer instead of the GATv2.
+  - requires a change in the bi-encoder to make embeddings
+    that include the cross product term in addition to the dot product.
+
 - install podman for container images
 - install minikube for a local mini kubernetes cluster
-
 see notes on kfp
 -> ingest can be dat to pyarrow
-
 - look into whether can modify datagrain transforms
   starting with first in order to make batch operations
   possible...numpy equiv of vectorized ops...
