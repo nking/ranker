@@ -1,11 +1,20 @@
 #see https://github.com/google-deepmind/xmanager/tree/v0.7.1/examples/vizier
 # see gemini notes https://gemini.google.com/app/d3df1bcf5a80bc26
 # see https://github.com/google-deepmind/xmanager/tree/v0.7.1/examples/dockerfile
-import socket
+#
+# to run: xmanager launch ./orchestrator_xmngr/launcher.py
+#
 from typing import Dict, Tuple, Sequence
 from absl import app
 
 import xmanager as xm
+from xmanager import xm_local
+from xmanager.xm import python_container
+from xmanager.xm import ModuleName
+from xmanager.xm import Packageable
+
+import pprint
+
 from optuna import create_study, load_study
 from absl import flags
 import os
@@ -121,38 +130,49 @@ def main(argv: Sequence[str]):
     
     xm_exp_name = 'gatv2_search'
     print(f'create XManager experiment {xm_exp_name}', flush=True)
-
+    
     # Tell XManager to launch N parallel trials
     # Each trial is a separate Docker container instance
-    with xm.create_experiment(experiment_name=xm_exp_name) as experiment:
-        # Define your JAX training executable
-        executable, = experiment.package([
-            xm.python_executable(
-                path='.',
-                entrypoint=xm.ModuleName('optuna_trial_run'), # Points to optuna_trial_run.py
-                docker_instructions=[
-                    'FROM python:3.11-slim AS builder',
-                    'WORKDIR /app',
-                    'RUN apt-get update && apt-get install -y --no-install-recommends gcc build-essential',
-                    'COPY --from=builder /root/.local /root/.local',
-                    'ENV PATH=/root/.local/bin:$PATH',
-                    'COPY ../src/main/python/movie_lens_ranker ./src/main/python/movie_lens_ranker',
-                    'COPY ../pyproject.toml ./',
-                    'RUN pip install --user --no-cache-dir -e .',
-                ]
-            )
-        ])
+    with xm_local.create_experiment(experiment_title=xm_exp_name) as experiment:
+        spec = python_container(
+            path='.',
+            entrypoint=ModuleName('optuna_trial_run'),
+            # Points to optuna_trial_run.py
+            docker_instructions=[
+                'FROM python:3.11-slim AS builder',
+                'WORKDIR /app',
+                'RUN apt-get update && apt-get install -y --no-install-recommends gcc build-essential',
+                'COPY --from=builder /root/.local /root/.local',
+                'ENV PATH=/root/.local/bin:$PATH',
+                'COPY ./src/main/python/movie_lens_ranker ./src/main/python/movie_lens_ranker',
+                'COPY ./pyproject.toml ./',
+                'RUN pip install --user --no-cache-dir -e .',
+            ],
+            # executor_spec=xm_local.Vertex.Spec(),
+            #executor_spec=xm_local.Local.Spec(),
+            executor_spec=xm_local.Docker.Spec(),
+        )
+        [executable] = experiment.package(
+            [
+                Packageable(
+                    executable_spec=spec,
+                    #executor_spec=xm_local.Kubernetes.Spec(),
+                    # executor_spec=xm_local.Vertex.Spec(),
+                    #executor_spec=xm_local.Local.Spec(),
+                    executor_spec=xm_local.Docker.Spec(),
+                ),
+            ]
+        )
         
         job_args = get_args_dict()
         
         num_trials = 2 #20
         
-        print(f'add HPO jobs to XManager experiment', flush=True)
-        
         # Launch num_trial parallel trials
         hpo_jobs = [experiment.add(
             experiment.add(xm.Job(
                 executable=executable,
+                executor=xm_local.Docker(),
                 # args are read as FLAGs by optuna_trial_run
                 args={
                     'study_name': STUDY_NAME,
