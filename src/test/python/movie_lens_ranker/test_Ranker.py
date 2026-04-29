@@ -373,7 +373,7 @@ class TestRanker(unittest.TestCase):
         
         ## ================ get the 2nd to last latest checkpoint and assert can continue training from it. ====
         earlier_restore_dict = restore_items_from_checkpoint(config['latest_checkpoint_dir'], get_earliest=True)
-        print(f'global_step={earlier_restore_dict["global_step"]}')
+        print(f'global_step next to last={earlier_restore_dict["global_step"]}')
         self.assertTrue(earlier_restore_dict['global_step'] > 0)
         epoch = (earlier_restore_dict['global_step']//TRAIN_BATCH_SIZE)//STEPS_PER_EPOCH_GLOBAL
         self.assertEqual(epoch, (num_epochs-2))
@@ -383,20 +383,16 @@ class TestRanker(unittest.TestCase):
         n_iter = 0
         #TODO: follow up.  something is wrong here because it iterates over 4 epochs
         try:
-            for batch_idx, padded_super_graph in enumerate(
-                earlier_restore_dict['train_dataloader_iter'], start=start_step):
+            for batch_idx, padded_super_graph in enumerate(earlier_restore_dict['train_dataloader_iter']):#, start=start_step):
                 n_iter += 1
         except StopIteration:
             pass
         print(f"n_iter={n_iter}")
         #self.assertEqual(n_iter, 1)
         
-        ## ====== assert that training continues ======
-        best_val_ndcg_k_2 = resume_train_fn(config=restore_dict['config'], trial=None)
-        print(f'best_val_ndcg_k from resume 2nd to last chkpt training={best_val_ndcg_k_2}')
-        
         ## ==== get the last latest checkpoint and assert that doesn't continue training from it because number of epochs is reached. ====
         last_restored_dict = restore_items_from_checkpoint(config['latest_checkpoint_dir'], get_earliest=False)
+        print(f'global_step last epoch={last_restored_dict["global_step"]}')
         self.assertTrue(earlier_restore_dict['global_step'] > 0)
         epoch = (last_restored_dict['global_step'] // TRAIN_BATCH_SIZE) // STEPS_PER_EPOCH_GLOBAL
         self.assertEqual(epoch, (num_epochs - 1))
@@ -405,12 +401,17 @@ class TestRanker(unittest.TestCase):
         n_iter = 0
         try:
             for batch_idx, padded_super_graph in enumerate(
-                    last_restored_dict['train_dataloader_iter'], start=start_step):
+                    last_restored_dict['train_dataloader_iter']):#, start=start_step):
                 n_iter += 1
         except StopIteration:
             pass
         print(f"n_iter2={n_iter}")
         # self.assertEqual(n_iter, 0)
-
+        
+        ## ====== assert that training continues ======
+        best_val_ndcg_k_2 = resume_train_fn(config=restore_dict['config'],
+            trial=None)
+        print(f'best_val_ndcg_k from resume 2nd to last chkpt training={best_val_ndcg_k_2}')
+    
     if __name__ == '__main__':
         unittest.main()

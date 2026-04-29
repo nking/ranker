@@ -411,6 +411,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     
     #for batch_idx, padded_super_graph in enumerate(train_dataloader):
     for batch_idx, padded_super_graph in enumerate(train_dataloader_iter, start=start_step):
+    #for batch_idx, padded_super_graph in enumerate(train_dataloader_iter):
         local_step = batch_idx * TRAIN_BATCH_SIZE
         global_step = local_step * NUM_TRAIN_SHARDS
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
@@ -466,7 +467,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                     # NNX RNGs need to be converted to state (dictionary of arrays)
                     rngs=ocp.args.StandardSave(nnx.state(rngs)),
                     # Include your dataloader from before
-                    train_dataloader=grain.checkpoint.CheckpointSave(iter(train_dataloader)),
+                    train_dataloader=grain.checkpoint.CheckpointSave(train_dataloader_iter),
                     config=ocp.args.JsonSave(config_dict)
                 )
             )
@@ -489,7 +490,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                         # NNX RNGs need to be converted to state (dictionary of arrays)
                         rngs=ocp.args.StandardSave(nnx.state(rngs)),
                         # Include your dataloader from before
-                        train_dataloader=grain.checkpoint.CheckpointSave(iter(train_dataloader)),
+                        train_dataloader=grain.checkpoint.CheckpointSave(train_dataloader_iter),
                         config=ocp.args.JsonSave(config_dict)
                     )
                 )
