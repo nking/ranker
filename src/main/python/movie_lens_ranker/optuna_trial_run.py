@@ -28,6 +28,28 @@ def main(_):
     if FLAGS.phase == 'test':
         return test_fn(config)
     
+    #create an ML-Flow parent study if it does not exist
+    experiment = mlflow.get_experiment_by_name(config['study_name'])
+    if experiment is None:
+        experiment = mlflow.set_experiment(config['study_name'])
+        # Create the parent run and immediately get its ID
+        parent_run = mlflow.start_run(run_name="Optuna_HPO")
+        mlflow_parent_run_id = parent_run.info.run_id
+        mlflow.end_run()
+    else:
+        #get parent run id:
+        runs = mlflow.search_runs(
+            experiment_names=[config['study_name']],
+            filter_string="attributes.run_name = 'Optuna_HPO'",
+            output_format="list"
+        )
+        if runs:
+            mlflow_parent_run_id = runs[0].info.run_id
+        else:
+            raise ValueError("ERROR: No matching run found.")
+    config['mlflow_experiment_id'] = experiment.experiment_id
+    config['mlflow_parent_run_id'] = mlflow_parent_run_id
+    
     # Connect to the study created by the launcher
     study = optuna.load_study(
         study_name=config['study_name'],

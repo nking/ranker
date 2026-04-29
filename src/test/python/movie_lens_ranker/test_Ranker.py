@@ -26,7 +26,7 @@ from movie_lens_ranker.optuna_trial_run import main as run_optuna_main
 class TestRanker(unittest.TestCase):
     def setUp(self):
         
-        # user recommendations with each user history subtacted already:
+        # user recommendations with each user history subtracted already:
         # (user id, (movie_ids))
         self.recommendations_uri = os.path.join(get_project_dir(),
             "src/test/resources/recommended_movies.array_record")
@@ -277,11 +277,6 @@ class TestRanker(unittest.TestCase):
                 mlflow.delete_experiment(STUDY_NAME)
         except Exception as e:
             print(f'error while deleting experiment: {e}')
-        mlflow.set_experiment(STUDY_NAME)
-        # Create the parent run and immediately get its ID
-        parent_run = mlflow.start_run(run_name="Optuna_HPO")
-        mlflow_parent_run_id = parent_run.info.run_id
-        mlflow.end_run()
         
         set_flags_from_dict({
             'movies_uri': self.movies_uri,
@@ -303,7 +298,7 @@ class TestRanker(unittest.TestCase):
             'mlflow_experiment_id': self.get_or_create_mlflow_experiment(STUDY_NAME),
             'mlflow_experiment_name': STUDY_NAME,
             # 'mlflow_tracking_token': None,
-            'mlflow_parent_run_id': mlflow_parent_run_id
+            #'mlflow_parent_run_id': mlflow_parent_run_id -> set in optuna_trial_run now
         })
         
         run_optuna_main(None)

@@ -18,7 +18,7 @@ class TestJraphPaddedGraphTupleTransform(unittest.TestCase):
         self.ratings_train_uri, self.ratings_val_uri, self.ratings_test_uri \
             = get_train_val_test_liked_uris(use_small=True)
         
-        # user recommendations with each user history subtacted already:
+        # user recommendations with each user history subtracted already:
         # (user id, (movie_ids))
         self.recommendations_uri = os.path.join(get_project_dir(),
             "src/test/resources/recommended_movies.array_record")
