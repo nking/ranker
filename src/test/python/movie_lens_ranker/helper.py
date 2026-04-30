@@ -1,6 +1,10 @@
 import os
 from typing import List, Tuple
+import requests
 
+def fake_gcs_server_is_alive():
+    resp = requests.get("http://127.0.0.1:4443/storage/v1/b")
+    return (resp.status_code == 200)
 
 def get_kaggle() -> bool:
   cwd = os.getcwd()

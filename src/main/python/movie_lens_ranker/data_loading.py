@@ -1,5 +1,6 @@
-from typing import Tuple, List
 
+from typing import Tuple, List
+import tensorstore as ts
 import grain.sharding
 from array_record.python import array_record_module
 from grain import DataLoader

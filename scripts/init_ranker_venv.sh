@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 conda create -q --name ranker_py312 python=3.12 -y
 
 conda activate ranker_py312

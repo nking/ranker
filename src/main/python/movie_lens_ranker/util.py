@@ -1,13 +1,15 @@
 import argparse
 from collections import defaultdict
 from typing import Tuple, Dict, List, Union, Set
-
+import tensorstore as ts
 import jax
 import jax.numpy as jnp
 from array_record.python import array_record_module
 import msgpack
 import numpy as np
 from absl import flags
+
+import gcsfs
 
 from jax.sharding import PartitionSpec as P
 # In JAX 0.8+, shard_map is typically in the main namespace
@@ -21,8 +23,8 @@ data_params_nontrainable_keys = {'movies_uri', 'recommendations_uri',
     'val_negatives_uri',
     'seed'
 }
-model_params_nontrainable_keys = {'latest_checkpoint_dir',
-    'best_checkpoint_dir', 'movie_embeddings_uri', 'user_embeddings_uri',
+model_params_nontrainable_keys = {'latest_checkpoint_uri',
+    'best_checkpoint_uri', 'movie_embeddings_uri', 'user_embeddings_uri',
     'mlflow_config'}
 mlflow_config_keys = {
     'mlflow_tracking_uri',
@@ -157,10 +159,10 @@ def get_args_parser():
     parser.add_argument("--movie_embeddings_uri", type=str,
         help="uri to read the retrieval written movie embeddings. each row holds [movie_id] [embeddings]]"
     )
-    parser.add_argument("--latest_checkpoint_dir", type=str,
+    parser.add_argument("--latest_checkpoint_uri", type=str,
         help="uri to write latest checkpoints too.  model, data, optimizer and seed state are saved"
     )
-    parser.add_argument("--best_checkpoint_dir", type=str,
+    parser.add_argument("--best_checkpoint_uri", type=str,
         help="uri to write checkpoints to for best model.  model, data, optimizer and seed state are saved"
     )
     parser.add_argument("--mlflow_tracking_uri", type=str,
@@ -222,6 +224,7 @@ def read_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_siz
     emb = jnp.concatenate([zero_row, user_emb, movie_emb])
     return emb
 
+    
 def _read_embeddings(embeddings_uri:str, batch_size:int=1024) ->  jnp.ndarray:
     """
     given the embedding uri return and the embeddings

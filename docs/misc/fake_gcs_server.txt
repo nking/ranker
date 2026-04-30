@@ -1,0 +1,80 @@
+install:
+
+run in docker engine:
+docker run -d --name fake-gcs-server -p 127.0.0.1:4443:4443 fsouza/fake-gcs-server
+
+#to preload data: (downloads image fsouza/fake-gcs-server if needed):
+# cd to base of project and:
+mkdir -p fake_gcs_server_buckets/data
+cp -rf src/test/resources/data/* fake_gcs_server_buckets/data/
+docker run -d --name fake-gcs-server \
+  -u $(id -u):$(id -g) \
+  -p 127.0.0.1:4443:4443 \
+  -v ${PWD}/fake_gcs_server_buckets:/storage \
+  fsouza/fake-gcs-server \
+  -scheme http \
+  -backend filesystem \
+  -data /storage \
+  -public-host 127.0.0.1:4443
+#Note, wasn't successful making readable softlinks to fake_gcs_server_buckets
+
+# if see error about permissions, make sure you are part of the
+# docker group and that the group associated with
+# fake_gcs_server_buckets and its contents is docker
+# and that the permissions are 775 (might be possible to use 770)
+
+# to check fake-gcs-server:
+curl -v http://127.0.0.1:4443/storage/v1/b
+
+# to list a bucket"
+curl -v http://127.0.0.1:4443/storage/v1/b/data/o
+
+# to access something in the data directory:
+curl -o local_ratings.array_record "http://127.0.0.1:4443/download/storage/v1/b/data/o/movie_emb-00000-of-00001.array_record?alt=media"
+
+# to access something in the data/small directory:
+# use %2F for the slash after small
+curl -o local_ratings.array_record "http://127.0.0.1:4443/download/storage/v1/b/data/o/small%2Fratings.array_record?alt=media"
+
+# to access something in the data/small directory:
+# the gcs URI will be:
+gs://data/small/ratings.array_record
+
+# but To list only the files in that subfolder via curl:
+curl [http://127.0.0.1:4443/storage/v1/b/data/o?prefix=small/](http://127.0.0.1:4443/storage/v1/b/data/o?prefix=small/)
+
+
+# to list containers:
+docker ps -a 
+
+# if see Exited in STATUS, see logs:
+docker logs fake-gcs-server
+
+# to remove existing container:
+docker rm -f fake-gcs-server
+
+#to remove the image:
+docker rmi fsouza/fake-gcs-server
+
+#if need to clear everything from docker:
+#WARNING! This will remove:
+#  - all stopped containers
+#  - all networks not used by at least one container
+#  - all dangling images
+#  - unused build cache
+docker system prune
+
+#more debugging:
+docker exec fake-gcs-server ls -R /storage/data
+
+#List all buckets: [http://127.0.0.1:4443/storage/v1/b](http://127.0.0.1:4443/storage/v1/b)
+
+List all files in bucket 'small': [http://127.0.0.1:4443/storage/v1/b/small/o](http://127.0.0.1:4443/storage/v1/b/small/o)
+
+Download a specific file: [http://127.0.0.1:4443/download/storage/v1/b/](http://127.0.0.1:4443/download/storage/v1/b/)[BUCKET]/o/[FILE]?alt=media
+
+# to list all open ports:
+sudo ss -tuln
+
+#to look for 4443 only:
+sudo lsof -Pi | grep 4443

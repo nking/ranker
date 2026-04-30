@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 conda create -q --name xmanager_py311 python=3.11 -y
 
 conda activate xmanager_py311

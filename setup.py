@@ -13,6 +13,7 @@ setup(
      'rax==0.4.0', 
      'mlflow-skinny==3.11.1',
      'optuna==2.10.1',
+      'gcsfs-2026.2.0',
   ],
   extras_require={"test": ["pytest"]},
   classifiers=[ 'Natural Language :: English',

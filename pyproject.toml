@@ -17,6 +17,7 @@ dependencies = [
   'jraphx==0.0.4',
   'mlflow-skinny==3.11.1',
   'optuna==2.10.1',
+  'gcsfs-2026.2.0'
 ]
 readme = "README.md"
 license = "MIT"

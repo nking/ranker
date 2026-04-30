@@ -1,3 +1,21 @@
+import os
+#=== these are so that grain dataloader can read data from fake gcs server running in docker ====
+os.environ["STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
+os.environ["GOOGLE_CLOUD_PROJECT"] = "local-dev"
+os.environ["GOOGLE_AUTH_EXTERNAL_ACCOUNT_TOKEN_PROHIBIT"] = "true"
+
+# ==== these in addtion to above, are for orbax to read and write to fake_gcs_Server running in docker ====
+# For the C++ GCS client (crucial for performance-heavy libs)
+os.environ["CLOUD_STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
+# For TensorStore (Orbax uses this for sharded JAX arrays)
+# Some versions of the C++ lib look for this specifically
+os.environ["CLOUD_STORAGE_EMULATOR_ENDPOINT"] = "http://127.0.0.1:4443"
+# Force the library to use HTTP instead of HTTPS
+os.environ["STORAGE_EMULATOR_HOST_HTTP"] = "true"
+# 4. Disable authentication checks that cause the 'wait'
+os.environ["NO_GCE_CHECK"] = "true"
+os.environ["GCS_LAMBDA_TOKEN"] = "none"
+
 import os.path
 import unittest
 import time
@@ -36,8 +54,15 @@ class TestDataLoading(unittest.TestCase):
         
         self.movie_ids_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")
-        
+
     def test_read_embeddings(self):
+        
+        if fake_gcs_server_is_alive():
+            gs_uri = "gs://data/movie_emb-00000-of-00001.array_record"
+            emb = _read_embeddings(gs_uri, batch_size=1024)
+            self.assertTrue(emb is not None)
+            self.assertEqual(3883, len(emb))
+            self.assertTrue(isinstance(emb, jnp.ndarray))
         
         emb = _read_embeddings(self.user_embeddings_uri, batch_size=1024)
         self.assertTrue(emb is not None)

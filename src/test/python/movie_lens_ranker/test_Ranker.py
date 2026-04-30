@@ -1,3 +1,21 @@
+import os
+#=== these are so that grain dataloader can read data from fake gcs server running in docker ====
+os.environ["STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
+os.environ["GOOGLE_CLOUD_PROJECT"] = "local-dev"
+os.environ["GOOGLE_AUTH_EXTERNAL_ACCOUNT_TOKEN_PROHIBIT"] = "true"
+
+# ==== these in addtion to above, are for orbax to read and write to fake_gcs_Server running in docker ====
+# For the C++ GCS client (crucial for performance-heavy libs)
+os.environ["CLOUD_STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
+# For TensorStore (Orbax uses this for sharded JAX arrays)
+# Some versions of the C++ lib look for this specifically
+os.environ["CLOUD_STORAGE_EMULATOR_ENDPOINT"] = "http://127.0.0.1:4443"
+# Force the library to use HTTP instead of HTTPS
+os.environ["STORAGE_EMULATOR_HOST_HTTP"] = "true"
+# 4. Disable authentication checks that cause the 'wait'
+os.environ["NO_GCE_CHECK"] = "true"
+os.environ["GCS_LAMBDA_TOKEN"] = "none"
+
 import glob
 import os.path
 import pathlib
@@ -72,6 +90,11 @@ class TestRanker(unittest.TestCase):
         self.train_val_test_negatives_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/train_val_test_negatives.array_record")
     
+    def transform_to_gs_uri(self, file_path:str):
+        idx = file_path.find("/data/")
+        tr = f'gs://{file_path[idx+1:]}'
+        return tr
+        
     def test_local_info(self):
         print(f'local_devices={jax.local_devices()}') #[CpuDevice(id=0)]
         print(f'local device count={jax.local_device_count()}')
@@ -111,12 +134,12 @@ class TestRanker(unittest.TestCase):
         dropout_rate = 0.1
         
         checkpoint_dir = os.path.join(get_bin_dir(), "checkpoints")
-        latest_checkpoint_dir = os.path.join(checkpoint_dir, "latest")
-        best_checkpoint_dir = os.path.join(checkpoint_dir, "best")
+        latest_checkpoint_uri = os.path.join(checkpoint_dir, "latest")
+        best_checkpoint_uri = os.path.join(checkpoint_dir, "best")
         mlflow_dir = os.path.join(get_bin_dir(), "mlflow")
         mlflow_registry_dir = os.path.join(get_bin_dir(), "mlflow_registry")
-        os.makedirs(latest_checkpoint_dir, exist_ok=True)
-        os.makedirs(best_checkpoint_dir, exist_ok=True)
+        os.makedirs(latest_checkpoint_uri, exist_ok=True)
+        os.makedirs(best_checkpoint_uri, exist_ok=True)
         os.makedirs(mlflow_dir, exist_ok=True)
         os.makedirs(mlflow_registry_dir, exist_ok=True)
         
@@ -128,8 +151,8 @@ class TestRanker(unittest.TestCase):
             ratings_val_uri=self.ratings_val_uri,
             train_negatives_uri=self.train_negatives_uri,
             val_negatives_uri=self.val_negatives_uri,
-            latest_checkpoint_dir =latest_checkpoint_dir,
-            best_checkpoint_dir = best_checkpoint_dir,
+            latest_checkpoint_uri =latest_checkpoint_uri,
+            best_checkpoint_uri = best_checkpoint_uri,
             movie_embeddings_uri = self.movie_embeddings_uri,
             user_embeddings_uri = self.user_embeddings_uri,
             num_epochs=num_epochs, batch_size=batch_size, seed=seed
@@ -173,11 +196,11 @@ class TestRanker(unittest.TestCase):
         config["trial_id"] = 1
         config['phase'] = 'train'
         
-        config['best_checkpoint_dir'] = f"{config['best_checkpoint_dir']}/{config['study_name']}/trial_{config['trial_id']}"
-        config['latest_checkpoint_dir'] = f"{config['latest_checkpoint_dir']}/{config['study_name']}/trial_{config['trial_id']}"
+        config['best_checkpoint_uri'] = f"{config['best_checkpoint_uri']}/{config['study_name']}/trial_{config['trial_id']}"
+        config['latest_checkpoint_uri'] = f"{config['latest_checkpoint_uri']}/{config['study_name']}/trial_{config['trial_id']}"
 
-        os.makedirs(config['latest_checkpoint_dir'], exist_ok=True)
-        os.makedirs(config['best_checkpoint_dir'], exist_ok=True)
+        os.makedirs(config['latest_checkpoint_uri'], exist_ok=True)
+        os.makedirs(config['best_checkpoint_uri'], exist_ok=True)
 
         set_flags_from_dict(config)
         
@@ -237,18 +260,22 @@ class TestRanker(unittest.TestCase):
             pass
         
     def test_run_train_with_optuna(self):
+        """
+        this uses the docker container fake-gcs-server
+        and so all uris are gs:// and are transformed by the local google software to
+        http://127.0.0.1:4443/ ... depending upon context
+        :return:
+        """
         
         num_epochs = 4 #keep this to > 2 and < 10 for the restore tests at end of this method
         batch_size = 64
         seed = 234
         
-        checkpoint_dir = os.path.join(get_bin_dir(), "checkpoints")
-        latest_checkpoint_dir = os.path.join(checkpoint_dir, "latest")
-        best_checkpoint_dir = os.path.join(checkpoint_dir, "best")
+        checkpoint_dir = 'gs://my-bucket/checkpoints'
+        latest_checkpoint_uri = f'{checkpoint_dir}/latest'
+        best_checkpoint_uri = f'{checkpoint_dir}/best'
         mlflow_dir = os.path.join(get_bin_dir(), "mlflow")
         mlflow_registry_dir = os.path.join(get_bin_dir(), "mlflow_registry")
-        os.makedirs(latest_checkpoint_dir, exist_ok=True)
-        os.makedirs(best_checkpoint_dir, exist_ok=True)
         os.makedirs(mlflow_dir, exist_ok=True)
         os.makedirs(mlflow_registry_dir, exist_ok=True)
         
@@ -279,15 +306,17 @@ class TestRanker(unittest.TestCase):
             print(f'error while deleting experiment: {e}')
         
         set_flags_from_dict({
-            'movies_uri': self.movies_uri,
-            'recommendations_uri': self.recommendations_uri,
-            'recommendations_ts_uri' : self.recommendations_ts_uri,
-            'ratings_train_uri' : self.ratings_train_uri, 'ratings_val_uri' :self.ratings_val_uri,
-            'train_negatives_uri': self.train_negatives_uri, 'val_negatives_uri': self.val_negatives_uri,
-            'latest_checkpoint_dir':latest_checkpoint_dir,
-            'best_checkpoint_dir': best_checkpoint_dir,
-            'movie_embeddings_uri' : self.movie_embeddings_uri,
-            'user_embeddings_uri': self.user_embeddings_uri,
+            'movies_uri': self.transform_to_gs_uri(self.movies_uri),
+            'recommendations_uri': self.transform_to_gs_uri(self.recommendations_uri),
+            'recommendations_ts_uri' : self.transform_to_gs_uri(self.recommendations_ts_uri),
+            'ratings_train_uri' : self.transform_to_gs_uri(self.ratings_train_uri),
+            'ratings_val_uri' :self.transform_to_gs_uri(self.ratings_val_uri),
+            'train_negatives_uri': self.transform_to_gs_uri(self.train_negatives_uri),
+            'val_negatives_uri': self.transform_to_gs_uri(self.val_negatives_uri),
+            'latest_checkpoint_uri':latest_checkpoint_uri,
+            'best_checkpoint_uri': best_checkpoint_uri,
+            'movie_embeddings_uri' : self.transform_to_gs_uri(self.movie_embeddings_uri),
+            'user_embeddings_uri': self.transform_to_gs_uri(self.user_embeddings_uri),
             'num_epochs' : num_epochs, 'batch_size':batch_size, 'seed':seed,
             'study_name' : STUDY_NAME,
             "trial_id" : 1,
@@ -333,7 +362,7 @@ class TestRanker(unittest.TestCase):
         self.assertIsNotNone(config)
         
         #===========================  assert checkpoints and restore and resme training ==============================
-        restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_dir'])
+        restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
         
         expected_keys = {'model', 'optimizer', 'train_dataloader', 'train_dataloader_iter',
             'val_dataloader', 'rngs', 'global_step', 'config'}
@@ -352,8 +381,8 @@ class TestRanker(unittest.TestCase):
         '''
         
         ## =============== add test uris to config and run tests.  also tests that restore works================
-        restore_dict['config']['ratings_test_uri'] = self.ratings_test_uri
-        restore_dict['config']['train_negatives_uri'] = self.test_negatives_uri
+        restore_dict['config']['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
+        restore_dict['config']['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
         
         test_metrics = test_fn(config=restore_dict['config'])
         
@@ -367,7 +396,7 @@ class TestRanker(unittest.TestCase):
         STEPS_PER_EPOCH_LOCAL = STEPS_PER_EPOCH_GLOBAL // NUM_TRAIN_SHARDS
         
         ## ================ get the 2nd to last latest checkpoint and assert can continue training from it. ====
-        earlier_restore_dict = restore_items_from_checkpoint(config['latest_checkpoint_dir'], get_earliest=True)
+        earlier_restore_dict = restore_items_from_checkpoint(config['latest_checkpoint_uri'], get_earliest=True)
         print(f'global_step next to last={earlier_restore_dict["global_step"]}')
         self.assertTrue(earlier_restore_dict['global_step'] > 0)
         epoch = (earlier_restore_dict['global_step']//TRAIN_BATCH_SIZE)//STEPS_PER_EPOCH_GLOBAL
@@ -386,7 +415,7 @@ class TestRanker(unittest.TestCase):
         #self.assertEqual(n_iter, 1)
         
         ## ==== get the last latest checkpoint and assert that doesn't continue training from it because number of epochs is reached. ====
-        last_restored_dict = restore_items_from_checkpoint(config['latest_checkpoint_dir'], get_earliest=False)
+        last_restored_dict = restore_items_from_checkpoint(config['latest_checkpoint_uri'], get_earliest=False)
         print(f'global_step last epoch={last_restored_dict["global_step"]}')
         self.assertTrue(earlier_restore_dict['global_step'] > 0)
         epoch = (last_restored_dict['global_step'] // TRAIN_BATCH_SIZE) // STEPS_PER_EPOCH_GLOBAL

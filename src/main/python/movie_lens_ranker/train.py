@@ -44,7 +44,7 @@ def get_nontrainable_train_config(movies_uri:str,
         recommendations_uri:str, recommendations_ts_uri:str,
         ratings_train_uri:str, ratings_val_uri:str,
         train_negatives_uri:str, val_negatives_uri:str,
-        latest_checkpoint_dir:str, best_checkpoint_dir:str,
+        latest_checkpoint_uri:str, best_checkpoint_uri:str,
         movie_embeddings_uri:str, user_embeddings_uri:str,
         num_epochs:int=120, batch_size:int=64, seed:int=0) -> Dict[str, Union[str, int, float]]:
     
@@ -56,8 +56,8 @@ def get_nontrainable_train_config(movies_uri:str,
     config['ratings_val_uri'] = ratings_val_uri
     config['train_negatives_uri'] = train_negatives_uri
     config['val_negatives_uri'] = val_negatives_uri
-    config['latest_checkpoint_dir']= latest_checkpoint_dir
-    config['best_checkpoint_dir']= best_checkpoint_dir
+    config['latest_checkpoint_uri']= latest_checkpoint_uri
+    config['best_checkpoint_uri']= best_checkpoint_uri
     config['movie_embeddings_uri']= movie_embeddings_uri
     config['user_embeddings_uri']= user_embeddings_uri
     config['seed'] = seed
@@ -313,7 +313,7 @@ def _epoch_validation_simplest(model: GraphRanker, val_dataloader: DataLoader, t
 def _train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer,
-        top_k:int, latest_checkpoint_dir: str, best_checkpoint_dir:str,
+        top_k:int, latest_checkpoint_uri: str, best_checkpoint_uri:str,
         rngs:nnx.Rngs, config_dict:Dict[str, Union[str, int, float]],
         trial:Trial=None,
         restored_train_dataloader_iter=None, restored_global_step:int=None) -> Tuple[float, Union[optuna.trial.TrialState, None]]:
@@ -324,7 +324,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     :param val_dataloader:
     :param optimizer:
     :param top_k:
-    :param latest_checkpoint_dir:
+    :param latest_checkpoint_uri:
     :param rngs:
     :return:
     """
@@ -360,7 +360,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     print(f'STEPS_PER_EPOCH_GLOBAL_VAL={STEPS_PER_EPOCH_GLOBAL_VAL}')
     print(f'STEPS_PER_EPOCH_LOCAL_VAL={STEPS_PER_EPOCH_LOCAL_VAL}')
     
-    mngr_latest = ocp.CheckpointManager(latest_checkpoint_dir,
+    mngr_latest = ocp.CheckpointManager(latest_checkpoint_uri,
         item_handlers={
             'model': ocp.StandardCheckpointHandler(),
             'opt': ocp.StandardCheckpointHandler(),
@@ -371,7 +371,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         },
         options=ocp.CheckpointManagerOptions(max_to_keep=2)
     )
-    mngr_best = ocp.CheckpointManager(best_checkpoint_dir,
+    mngr_best = ocp.CheckpointManager(best_checkpoint_uri,
         item_handlers={
             'model': ocp.StandardCheckpointHandler(),
             'opt': ocp.StandardCheckpointHandler(),
@@ -597,8 +597,8 @@ def train_fn(config: dict, trial: Trial = None, rngs:nnx.Rngs=None):
                 print( f"VERIFY: Trial attr: {trial.user_attrs.get('mlflow_run_id')}", flush=True)
 
             mlflow.log_text(str(model), "model_summary.txt")
-            mlflow.log_param("best_checkpoint_uri", config['best_checkpoint_dir'])
-            mlflow.log_param("latest_checkpoint_dir", config['latest_checkpoint_dir'])
+            mlflow.log_param("best_checkpoint_uri", config['best_checkpoint_uri'])
+            mlflow.log_param("latest_checkpoint_uri", config['latest_checkpoint_uri'])
         
         print(
             f"expect the model training to start w/ loss = {-log(1. / config['num_candidates'])}")
@@ -606,8 +606,8 @@ def train_fn(config: dict, trial: Trial = None, rngs:nnx.Rngs=None):
         best_val_ndcg_k, STATE = _train_fn(model=model, train_dataloader=train_dataloader,
             val_dataloader=val_dataloader,
             optimizer=optimizer, top_k=config['top_k'],
-            latest_checkpoint_dir=config['latest_checkpoint_dir'],
-            best_checkpoint_dir=config['best_checkpoint_dir'],
+            latest_checkpoint_uri=config['latest_checkpoint_uri'],
+            best_checkpoint_uri=config['best_checkpoint_uri'],
             rngs=rngs, config_dict=config,
             trial=trial)
         return best_val_ndcg_k, STATE
@@ -751,7 +751,7 @@ def test_fn(config: dict):
     
     worker_rank = jax.process_index()
     
-    restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_dir'])
+    restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
     
     model = restore_dict['model']
     
@@ -810,7 +810,7 @@ def resume_train_fn(config: dict, trial:Optional[Trial]):
     
     worker_rank = jax.process_index()
     
-    restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_dir'])
+    restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
     
     best_val_ndcg_k = -1.0
     mlflow_run = None
@@ -836,8 +836,8 @@ def resume_train_fn(config: dict, trial:Optional[Trial]):
             val_dataloader=restore_dict['val_dataloader'],
             optimizer=restore_dict['optimizer'],
             top_k=config['top_k'],
-            latest_checkpoint_dir=config['latest_checkpoint_dir'],
-            best_checkpoint_dir=config['best_checkpoint_dir'],
+            latest_checkpoint_uri=config['latest_checkpoint_uri'],
+            best_checkpoint_uri=config['best_checkpoint_uri'],
             rngs=restore_dict['rngs'],
             config_dict=config,
             trial=trial,

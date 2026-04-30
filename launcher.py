@@ -12,6 +12,7 @@ from xmanager import xm_local
 from xmanager.xm import python_container
 from xmanager.xm import ModuleName
 from xmanager.xm import Packageable
+from xmanager.xm import utils
 
 import pprint
 
@@ -33,16 +34,8 @@ def get_best_config(study_name, storage_url):
     return study.best_trial.params, study.best_trial.number
 
 def get_project_dir() -> str:
-  cwd = os.getcwd()
-  head = cwd
-  proj_dir = ""
-  while head and head != os.sep:
-    head, tail = os.path.split(head)
-    if tail:  # Add only if not an empty string (e.g., from root or multiple separators)
-      if tail == "ranker":
-        proj_dir = os.path.join(head, tail)
-        break
-  return proj_dir
+    #relative to launcher.py and path='.' below
+    return "./"
 
 def get_bin_dir() -> str:
   return os.path.join(get_project_dir(), "bin")
@@ -112,6 +105,8 @@ def main(argv: Sequence[str]):
     
     print(f'xmanager for {STUDY_NAME} HPO')
     
+    print(f'xm_local attrs={dir(xm_local)}')
+    
     if os.path.exists(optuna_db_path):
         os.remove(optuna_db_path)
         print(f"Deleted old database at {optuna_db_path}")
@@ -137,9 +132,10 @@ def main(argv: Sequence[str]):
         spec = python_container(
             path='.',
             entrypoint=ModuleName('optuna_trial_run'),
-            # Points to optuna_trial_run.py
             docker_instructions=[
                 'FROM python:3.11-slim AS builder',
+                'RUN groupadd -r myuser && useradd -r -g myuser myuser',
+                'USER myuse',
                 'WORKDIR /app',
                 'RUN apt-get update && apt-get install -y --no-install-recommends gcc build-essential',
                 'COPY --from=builder /root/.local /root/.local',
@@ -148,9 +144,10 @@ def main(argv: Sequence[str]):
                 'COPY ./pyproject.toml ./',
                 'RUN pip install --user --no-cache-dir -e .',
             ],
+            use_deep_module=True,
             # executor_spec=xm_local.Vertex.Spec(),
-            #executor_spec=xm_local.Local.Spec(),
-            executor_spec=xm_local.Docker.Spec(),
+            executor_spec=xm_local.Local.Spec(),
+            #executor_spec=xm_local.Docker.Spec(),
         )
         [executable] = experiment.package(
             [
@@ -158,8 +155,8 @@ def main(argv: Sequence[str]):
                     executable_spec=spec,
                     #executor_spec=xm_local.Kubernetes.Spec(),
                     # executor_spec=xm_local.Vertex.Spec(),
-                    #executor_spec=xm_local.Local.Spec(),
-                    executor_spec=xm_local.Docker.Spec(),
+                    executor_spec=xm_local.Local.Spec(),
+                    #executor_spec=xm_local.Docker.Spec(),
                 ),
             ]
         )
@@ -168,9 +165,11 @@ def main(argv: Sequence[str]):
         
         num_trials = 2 #20
         
+        print(f'add HPO jobs', flush=True)
+        
         # Launch num_trial parallel trials
         hpo_jobs = [experiment.add(
-            experiment.add(xm.Job(
+            xm.Job(
                 executable=executable,
                 executor=xm_local.Docker(),
                 # args are read as FLAGs by optuna_trial_run
@@ -185,8 +184,8 @@ def main(argv: Sequence[str]):
                     'ratings_val_uri': job_args['ratings_val_uri'],
                     'train_negatives_uri': job_args['train_negatives_uri'],
                     'val_negatives_uri': job_args['val_negatives_uri,'],
-                    'latest_checkpoint_dir': job_args['latest_checkpoint_dir'],
-                    'best_checkpoint_dir': job_args['best_checkpoint_dir'],
+                    'latest_checkpoint_uri': job_args['latest_checkpoint_uri'],
+                    'best_checkpoint_uri': job_args['best_checkpoint_uri'],
                     'movie_embeddings_uri': job_args['movie_embeddings_uri'],
                     'user_embeddings_uri': job_args['user_embeddings_uri'],
                     'num_epochs': job_args['num_epochs'],
@@ -198,7 +197,7 @@ def main(argv: Sequence[str]):
                     'mlflow_experiment_name': STUDY_NAME,
                     # 'mlflow_tracking_token': None,
                 }
-            ))) for _ in range(num_trials)]
+            )) for _ in range(num_trials)]
         
         # blocks launcher.py until all HPO trial workers exit
         experiment.wait_for_jobs(*hpo_jobs)

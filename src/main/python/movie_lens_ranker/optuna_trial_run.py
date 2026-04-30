@@ -1,4 +1,20 @@
-import threading
+import os
+#=== these are so that grain dataloader can read data from fake gcs server running in docker ====
+os.environ["STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
+os.environ["GOOGLE_CLOUD_PROJECT"] = "local-dev"
+os.environ["GOOGLE_AUTH_EXTERNAL_ACCOUNT_TOKEN_PROHIBIT"] = "true"
+
+# ==== these in addtion to above, are for orbax to read and write to fake_gcs_Server running in docker ====
+# For the C++ GCS client (crucial for performance-heavy libs)
+os.environ["CLOUD_STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
+# For TensorStore (Orbax uses this for sharded JAX arrays)
+# Some versions of the C++ lib look for this specifically
+os.environ["CLOUD_STORAGE_EMULATOR_ENDPOINT"] = "http://127.0.0.1:4443"
+# Force the library to use HTTP instead of HTTPS
+os.environ["STORAGE_EMULATOR_HOST_HTTP"] = "true"
+# 4. Disable authentication checks that cause the 'wait'
+os.environ["NO_GCE_CHECK"] = "true"
+os.environ["GCS_LAMBDA_TOKEN"] = "none"
 
 import mlflow
 from absl import flags
@@ -65,12 +81,14 @@ def main(_):
     
     #NOTE: this is specific to disks and assumes have permission to mkdir...wold be different for cloud storage
     #append trial id to uris:
-    config['best_checkpoint_dir'] = f"{config['best_checkpoint_dir']}/{config['study_name']}/trial_{config['trial_id']}"
-    config['latest_checkpoint_dir'] = f"{config['latest_checkpoint_dir']}/{config['study_name']}/trial_{config['trial_id']}"
+    config['best_checkpoint_uri'] = f"{config['best_checkpoint_uri']}/{config['study_name']}/trial_{config['trial_id']}"
+    config['latest_checkpoint_uri'] = f"{config['latest_checkpoint_uri']}/{config['study_name']}/trial_{config['trial_id']}"
     
     # get trial suggestions
     optuna_params = get_optuna_suggestions(trial)
     config.update(optuna_params)
+    
+    print(f'begin train_fn')
     
     best_val_ndcg_k, STATE = train_fn(config, trial)
     
