@@ -12,28 +12,36 @@ It will use a kubeflow pipeline for an MlOps pipeline
 
 part 1 can be found at:
 https://github.com/nking/recommender_systems.git
+and
+https://github.com/nking/retrieval.git
 
 part 3 can be found at:
 https://github.com/nking/reranker.git
 
 instructions:
   set up a virtual environment using conda or virtualenv
-  with a python version that is 3.12 
+  with python version 3.12 
      e.g. conda create --name ranker_py312 python=3.12
   
   activate the virtual environment
      e.g. conda activate ranker_py312
 
-  to install the dependencies, the easiest way is to
-  install this project:
-    pip install --editable .
-  else you can find the required libraries in pyproject.toml
-  or setup.py or requirements.txt
-
-  the unit tests show how to run the code.
-  The data are only present as DVC commits because some are
-  large files.  The files can be recreated following notes
-  in src/test/resources/README.txt
+to run the unit tests:
+(1) generate the data:
+    The data are only present as DVC commits because some are
+    large files.  The files can be recreated following notes
+    in src/test/resources/README.txt
+    TODO: reconsider committing them in this project
+(2) install the dependencies
+    the easiest way is to install this project:
+        pip install --editable .
+    else you can find the required libraries in pyproject.toml
+    or setup.py or requirements.txt
+(3) install docker or equivalent and start it
+    see https://download.docker.com and instructions
+(4) install fake gcs server after preparing data for it:
+    cd scripts
+    sh < prep_for_tests.sh
 
 Local testing:
 
@@ -65,3 +73,8 @@ some details about the model
     features.
   - e(h_i, h_j) = a^T * leaky_relu(W * (h_i concat h_j))
     where a is the attention vector.
+  TODO: finish details here...
+
+  TODO: considering a CliffordNet version, but it needs
+        a bi-encoder that uses geometric algebra
+        and the retrieval needs adaptations.

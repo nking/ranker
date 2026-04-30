@@ -41,7 +41,8 @@ from helper import *
 from movie_lens_ranker.data_loading import *
 from movie_lens_ranker.train import *
 from movie_lens_ranker.util import set_flags_from_dict
-from movie_lens_ranker.util_plots import plot_mlflow_metrics
+from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
+    get_mlflow_metrics_by_exp_name, _read_mlflow_metrics
 
 from movie_lens_ranker.optuna_trial_run import main as run_optuna_main
 
@@ -252,7 +253,8 @@ class TestRanker(unittest.TestCase):
         subdirs.sort(key=os.path.getctime, reverse=True)
         metrics_dir = f'{subdirs[0]}/metrics'
         self.assertTrue(os.path.exists(metrics_dir))
-        plot_mlflow_metrics(metrics_dir)
+        metrics_dict = _read_mlflow_metrics(metrics_dir)
+        plot_mlflow_metrics(metrics_dict)
         for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
             self.assertTrue(os.path.exists(os.path.join(get_bin_dir(), f"{key}.png")))
         
@@ -446,6 +448,48 @@ class TestRanker(unittest.TestCase):
         best_val_ndcg_k_2 = resume_train_fn(config=restore_dict['config'],
             trial=None)
         print(f'best_val_ndcg_k from resume 2nd to last chkpt training={best_val_ndcg_k_2}')
+        
+        # ===== read mlflow db metrics ======
+        #experiments: name, experiment_id
+        #run: run_uuid|name|source_type|source_name|entry_point_name|user_id|status|start_time|end_time|source_version|lifecycle_stage|artifact_uri|experiment_id|deleted_time
+        # metrics:  key|value|timestamp|run_uuid|step|is_nan
+        '''
+        with cte1 as (
+            SELECT experiment_id from experiments
+            where name = "GraphRanker_tuning_unittest"
+        ), cte2 as (
+            select run_uuid from runs
+            join cte1 on runs.experiment_id=cte1.experiment_id
+        ) select key, value, timestamp, step from metrics
+          join cte2 on metrics.run_uuid==cte2.run_uuid
+          order by key,timestamp;
+        '''
+        runs = mlflow.search_runs(
+            experiment_names=[config['study_name']],
+            filter_string="attributes.run_name = 'Optuna_HPO'",
+            output_format="list"
+        )
+        expected_keys = {'loss', 'ndcg_20', 'mrr_20', 'recall_20'}
+        for mlflow_run in runs:
+            run_id = mlflow_run.info.run_id
+            for key in expected_keys:
+                m_dict = mlflow_run.data.metrics
+                key1 = f'train_{key}'
+                key2 = f'val_{key}'
+                self.assertTrue(key1 in m_dict)
+                self.assertIsNotNone(m_dict[key1])
+                self.assertTrue(key2 in m_dict)
+                self.assertIsNotNone(m_dict[key2])
+        
+        metrics_dict = get_mlflow_metrics_by_exp_name(
+            mlflow_tracking_uri=mflow_uri,
+            experiment_name=STUDY_NAME)
+        plot_mlflow_metrics(metrics_dict)
+        pngs = glob.glob(os.path.join(get_bin_dir(), "*.png"))
+        self.assertIsNotNone(pngs)
+        self.assertTrue(len(pngs) > 0)
+        for png_file in pngs:
+            self.assertTrue(os.path.exists(png_file))
     
     if __name__ == '__main__':
         unittest.main()

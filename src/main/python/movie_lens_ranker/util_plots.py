@@ -8,6 +8,7 @@ from pathlib import Path
 import optuna.visualization as vis
 from optuna import Study
 
+from mlflow.tracking import MlflowClient
 
 def get_project_dir() -> str:
   cwd = os.getcwd()
@@ -36,9 +37,25 @@ def _read_mlflow_metrics(metrics_dir):
                 metrics_dict[metric_name]['x'].append(float(epoch))
                 metrics_dict[metric_name]['y'].append(float(value))
     return metrics_dict
-        
-def plot_mlflow_metrics(metrics_dir:str):
-    metrics_dict = _read_mlflow_metrics(metrics_dir)
+
+def get_mlflow_metrics_by_exp_name(mlflow_tracking_uri:str,
+        experiment_name:str):
+    client = MlflowClient(tracking_uri=mlflow_tracking_uri)
+    experiment = client.get_experiment_by_name(experiment_name)
+    #the first in runs is the latest
+    runs = client.search_runs(experiment_ids=[experiment.experiment_id])
+    run_id = runs[0].info.run_id
+    metrics_dict = {}
+    for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
+        for key_t in (f"train_{key}", f"val_{key}"):
+            metrics_dict[key_t] = {'x': [], 'y': []}
+            m_dict = client.get_metric_history(run_id, key=key_t)
+            for m in m_dict:
+                metrics_dict[key_t]['x'].append(int(m.step))
+                metrics_dict[key_t]['y'].append(float(m.value))
+    return metrics_dict
+
+def plot_mlflow_metrics(metrics_dict:dict):
    
     for key in ["loss", 'ndcg_20', 'recall_20', 'mrr_20']:
         df = pl.DataFrame({
@@ -48,12 +65,13 @@ def plot_mlflow_metrics(metrics_dir:str):
         })
         
         df_long = df.unpivot(index="epoch", on=["train", "val"])
+        df_long = df_long.rename({"value": key})
         print(f'df_long: {df_long}')
         chart = df_long.plot.line(
             x="epoch",
-            y="value",
+            y=key,
             color="variable"  # This creates the legend automatically
-        ).encode(tooltip=["epoch", "variable", "value"] )
+        ).encode(tooltip=["epoch", "variable", key] )
         chart.save(os.path.join(get_bin_dir(), f"{key}.png"), ppi=200)
         
 def plot_learning_rate_vs_weight_decays(study: Study):
