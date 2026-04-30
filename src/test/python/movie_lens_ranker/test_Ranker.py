@@ -15,6 +15,10 @@ os.environ["STORAGE_EMULATOR_HOST_HTTP"] = "true"
 # 4. Disable authentication checks that cause the 'wait'
 os.environ["NO_GCE_CHECK"] = "true"
 os.environ["GCS_LAMBDA_TOKEN"] = "none"
+os.environ["GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS"] = "true"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = ""
+os.environ["TENSORSTORE_GCS_HTTP_ENDPOINT"] = "http://127.0.0.1:4443"
+os.environ["TENSORSTORE_GCS_NO_AUTH"] = "1"
 
 import glob
 import os.path
@@ -136,12 +140,10 @@ class TestRanker(unittest.TestCase):
         checkpoint_dir = os.path.join(get_bin_dir(), "checkpoints")
         latest_checkpoint_uri = os.path.join(checkpoint_dir, "latest")
         best_checkpoint_uri = os.path.join(checkpoint_dir, "best")
-        mlflow_dir = os.path.join(get_bin_dir(), "mlflow")
-        mlflow_registry_dir = os.path.join(get_bin_dir(), "mlflow_registry")
+        mlflow_uri = os.path.join(get_bin_dir(), "mlflow")
         os.makedirs(latest_checkpoint_uri, exist_ok=True)
         os.makedirs(best_checkpoint_uri, exist_ok=True)
-        os.makedirs(mlflow_dir, exist_ok=True)
-        os.makedirs(mlflow_registry_dir, exist_ok=True)
+        os.makedirs(mlflow_uri, exist_ok=True)
         
         non_trainable_params = get_nontrainable_train_config(
             movies_uri=self.movies_uri,
@@ -181,8 +183,7 @@ class TestRanker(unittest.TestCase):
         mlflow.end_run()
     
         mlflow_config = {
-            'mlflow_tracking_uri': mlflow_dir,
-            'mlflow_registry_uri': mlflow_registry_dir,
+            'mlflow_tracking_uri': mlflow_uri,
             'mlflow_experiment_id': self.get_or_create_mlflow_experiment(STUDY_NAME),
             'mlflow_experiment_name': STUDY_NAME,
             #'mlflow_tracking_token': None,
@@ -209,7 +210,7 @@ class TestRanker(unittest.TestCase):
         print(f'final best val ndcg@k={best_val_ndcg_k}')
         
         ## ======== validate mlflow and checkpoints ==========
-        root = pathlib.Path(mlflow_dir)
+        root = pathlib.Path(mlflow_uri)
         dirs = {'metrics':[], 'params':[], 'artifacts':[]}
         for srch_dir in dirs.keys():
             for dir_path in root.rglob(srch_dir):
@@ -267,24 +268,34 @@ class TestRanker(unittest.TestCase):
         :return:
         """
         
+        STUDY_NAME = "GraphRanker_tuning_unittest"
+        
         num_epochs = 4 #keep this to > 2 and < 10 for the restore tests at end of this method
         batch_size = 64
         seed = 234
         
-        checkpoint_dir = 'gs://my-bucket/checkpoints'
+        # tensorstore keeps trying to authenticate with google so for tests we'll use the abs path to checkpoint dir
+        # checkpoint_dir = 'gs://checkpoint_bucket'
+        checkpoint_dir = os.path.join(get_project_dir(),
+            "fake_gcs_server_buckets/checkpoint_bucket")
         latest_checkpoint_uri = f'{checkpoint_dir}/latest'
         best_checkpoint_uri = f'{checkpoint_dir}/best'
-        mlflow_dir = os.path.join(get_bin_dir(), "mlflow")
-        mlflow_registry_dir = os.path.join(get_bin_dir(), "mlflow_registry")
-        os.makedirs(mlflow_dir, exist_ok=True)
-        os.makedirs(mlflow_registry_dir, exist_ok=True)
         
-        STUDY_NAME = "GraphRanker_tuning_unittest"
-        optuna_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}.db")
+        mflow_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}_mlflow.db")
+        mflow_uri = f"sqlite:///{mflow_db_path}?mode=memory&cache=shared"
+        
+        optuna_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}_optuna.db")
         optuna_storage_uri = f"sqlite:///{optuna_db_path}?mode=memory&cache=shared"
+        
         if os.path.exists(optuna_db_path):
             os.remove(optuna_db_path)
             print(f"Deleted old database at {optuna_db_path}")
+            
+        if os.path.exists(mflow_db_path):
+            os.remove(mflow_db_path)
+            print(f"Deleted old database at {mflow_db_path}")
+        
+        mlflow.set_tracking_uri(mflow_uri)
         
         # Initialize the optuna study in the database
         # This just "reserves the name" in your Postgres/MySQL DB
@@ -322,8 +333,7 @@ class TestRanker(unittest.TestCase):
             "trial_id" : 1,
             'phase' : 'train',
             'optuna_storage_uri':optuna_storage_uri,
-            'mlflow_tracking_uri': mlflow_dir,
-            'mlflow_registry_uri': mlflow_registry_dir,
+            'mlflow_tracking_uri': mflow_uri,
             'mlflow_experiment_id': self.get_or_create_mlflow_experiment(STUDY_NAME),
             'mlflow_experiment_name': STUDY_NAME,
             # 'mlflow_tracking_token': None,

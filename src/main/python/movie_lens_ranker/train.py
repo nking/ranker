@@ -1,4 +1,25 @@
 import os
+#=== these are so that grain dataloader can read data from fake gcs server running in docker ====
+os.environ["STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
+os.environ["GOOGLE_CLOUD_PROJECT"] = "local-dev"
+os.environ["GOOGLE_AUTH_EXTERNAL_ACCOUNT_TOKEN_PROHIBIT"] = "true"
+
+# ==== these in addtion to above, are for orbax to read and write to fake_gcs_Server running in docker ====
+# For the C++ GCS client (crucial for performance-heavy libs)
+os.environ["CLOUD_STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
+# For TensorStore (Orbax uses this for sharded JAX arrays)
+# Some versions of the C++ lib look for this specifically
+os.environ["CLOUD_STORAGE_EMULATOR_ENDPOINT"] = "http://127.0.0.1:4443"
+# Force the library to use HTTP instead of HTTPS
+os.environ["STORAGE_EMULATOR_HOST_HTTP"] = "true"
+# 4. Disable authentication checks that cause the 'wait'
+os.environ["NO_GCE_CHECK"] = "true"
+os.environ["GCS_LAMBDA_TOKEN"] = "none"
+os.environ["GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS"] = "true"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = ""
+os.environ["TENSORSTORE_GCS_HTTP_ENDPOINT"] = "http://127.0.0.1:4443"
+os.environ["TENSORSTORE_GCS_NO_AUTH"] = "1"
+
 from functools import partial
 from typing import Dict, Tuple, Union, Any, Optional
 
@@ -577,7 +598,6 @@ def train_fn(config: dict, trial: Trial = None, rngs:nnx.Rngs=None):
             mlflow.set_experiment(
                 experiment_name=config['mlflow_experiment_name'],
             )
-            mlflow.set_registry_uri(config['mlflow_registry_uri'])
             # Start a run specifically for this Optuna trial
             # don't use nested=True because the parent isn't in the same thread in production
             run_id = config.get('mlflow_run_id', None) #is not None for a "restore, resume training"
@@ -761,7 +781,6 @@ def test_fn(config: dict):
     try:
         if worker_rank == 0:
             mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
-            mlflow.set_registry_uri(config['mlflow_registry_uri'])
             # Start a run specifically for this Optuna trial
             # don't use nested=True because the parent isn't in the same thread in production
             run_id = config.get('mlflow_run_id',None)  # is not None for a "restore, resume training"
@@ -817,7 +836,6 @@ def resume_train_fn(config: dict, trial:Optional[Trial]):
     try:
         if worker_rank == 0:
             mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
-            mlflow.set_registry_uri(config['mlflow_registry_uri'])
             # Start a run specifically for this Optuna trial
             # don't use nested=True because the parent isn't in the same thread in production
             run_id = config.get('mlflow_run_id',

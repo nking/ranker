@@ -23,8 +23,6 @@ import os
 from optuna.pruners import MedianPruner
 from optuna.samplers import RandomSampler
 
-MLFLOW_DIR = os.path.join(os.getcwd(), "bin", "mlflow")
-
 def get_best_config(study_name, storage_url):
     # Re-connect to the existing study
     study = load_study(study_name=study_name, storage=storage_url)
@@ -39,6 +37,13 @@ def get_project_dir() -> str:
 
 def get_bin_dir() -> str:
   return os.path.join(get_project_dir(), "bin")
+
+STUDY_NAME = "GraphRanker_tuning_xmngr"
+optuna_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}_optuna.db")
+optuna_storage_uri = f"sqlite:///{optuna_db_path}"
+
+mflow_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}_mlflow.db")
+mflow_uri = f"sqlite:///{mflow_db_path}?mode=memory&cache=shared"
 
 def get_train_val_test_liked_uris(use_small: bool = True) -> Tuple[str, str, str]:
     base_dir = os.path.join(get_project_dir(), "src/test/resources/data/")
@@ -92,16 +97,11 @@ def get_args_dict() -> Dict:
         'num_epochs' : 100,
         'batch_size' : 64,
         'seed' : 1234,
-        'mlflow_dir' : os.path.join(get_bin_dir(), "mlflow"),
-        'mlflow_registry_dir': os.path.join(get_bin_dir(), "mlflow_registry"),
+        'mlflow_uri' : mflow_uri,
     }
 
 def main(argv: Sequence[str]):
     del argv
-    
-    STUDY_NAME = "GraphRanker_tuning_xmngr"
-    optuna_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}.db")
-    optuna_storage_uri = f"sqlite:///{optuna_db_path}"
     
     print(f'xmanager for {STUDY_NAME} HPO')
     
@@ -192,8 +192,7 @@ def main(argv: Sequence[str]):
                     'batch_size': job_args['batch_size'],
                     'seed': job_args['seed'],
                     "trial_id": 1,
-                    'mlflow_tracking_uri': job_args['mlflow_dir'],
-                    'mlflow_registry_uri': job_args['mlflow_registry_dir'],
+                    'mlflow_tracking_uri': job_args['mlflow_uri'],
                     'mlflow_experiment_name': STUDY_NAME,
                     # 'mlflow_tracking_token': None,
                 }

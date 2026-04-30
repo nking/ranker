@@ -28,7 +28,6 @@ model_params_nontrainable_keys = {'latest_checkpoint_uri',
     'mlflow_config'}
 mlflow_config_keys = {
     'mlflow_tracking_uri',
-    'mlflow_registry_uri',
     'mlflow_experiment_id',
     'mlflow_experiment_name',
     # 'mlflow_tracking_token': None,
@@ -167,9 +166,6 @@ def get_args_parser():
     )
     parser.add_argument("--mlflow_tracking_uri", type=str,
         help="MLFlow tracking uri"
-    )
-    parser.add_argument("--mlflow_registry_uri", type=str,
-        help="MLFlow registry uri"
     )
     parser.add_argument("--mlflow_experiment_name", type=str,
         help="MLFlow experiment name"

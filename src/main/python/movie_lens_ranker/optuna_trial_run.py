@@ -15,6 +15,10 @@ os.environ["STORAGE_EMULATOR_HOST_HTTP"] = "true"
 # 4. Disable authentication checks that cause the 'wait'
 os.environ["NO_GCE_CHECK"] = "true"
 os.environ["GCS_LAMBDA_TOKEN"] = "none"
+os.environ["GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS"] = "true"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = ""
+os.environ["TENSORSTORE_GCS_HTTP_ENDPOINT"] = "http://127.0.0.1:4443"
+os.environ["TENSORSTORE_GCS_NO_AUTH"] = "1"
 
 import mlflow
 from absl import flags
@@ -62,7 +66,9 @@ def main(_):
         if runs:
             mlflow_parent_run_id = runs[0].info.run_id
         else:
-            raise ValueError("ERROR: No matching run found.")
+            parent_run = mlflow.start_run(run_name="Optuna_HPO")
+            mlflow_parent_run_id = parent_run.info.run_id
+            mlflow.end_run()
     config['mlflow_experiment_id'] = experiment.experiment_id
     config['mlflow_parent_run_id'] = mlflow_parent_run_id
     
