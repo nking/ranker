@@ -15,7 +15,7 @@ setup(
      'optuna==2.10.1',
       'gcsfs-2026.2.0',
   ],
-  extras_require={"test": ["pytest"]},
+  #extras_require={"test": ["pytest"]},
   classifiers=[ 'Natural Language :: English',
                'Programming Language :: Python :: 3.12',
                'Development Status :: 1 - Development/Unstable'

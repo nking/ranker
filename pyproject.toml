@@ -9,7 +9,7 @@ authors = [
     { name = "Nichole King" },
 ]
 #readme = "README.md"
-requires-python = ">=3.12.0,<3.13"
+requires-python = ">=3.11.0,<3.12"
 dependencies = [
   'jax-ai-stack==2025.10.28', 
   'rax==0.4.0', 
@@ -17,7 +17,7 @@ dependencies = [
   'jraphx==0.0.4',
   'mlflow-skinny==3.11.1',
   'optuna==2.10.1',
-  'gcsfs-2026.2.0'
+  #'gcsfs-2026.2.0'
 ]
 readme = "README.md"
 license = "MIT"
@@ -42,4 +42,4 @@ Homepage = "https://www.kaggle.com/code/nicholeasuniquename/ranker/"
 Repository = "https://github.com/nking/ranker.git"
 
 [project.optional-dependencies]
-test = ["pytest", ]
+#test = ["pytest", ]

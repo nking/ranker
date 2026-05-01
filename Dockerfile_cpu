@@ -1,0 +1,27 @@
+FROM python:3.11-slim AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -r myuser && \
+    useradd -r -g myuser myuser && \
+    mkdir -p /home/myuser /app
+
+WORKDIR /app
+
+COPY ./src/main/python/movie_lens_ranker ./src/main/python/movie_lens_ranker
+
+COPY ./pyproject.toml ./
+COPY ./requirements2.txt ./
+COPY constraints.txt ./
+
+RUN chown -R myuser:myuser /app /home/myuser
+USER myuser
+#TODO: slim down the installs where possible
+RUN pip install --user --no-cache-dir -c requirements2.txt .
+
+ENV PATH="/home/myuser/.local/bin:${PATH}"
+
+ENTRYPOINT ["python", "src/main/python/movie_lens_ranker/optuna_trial_run"]
