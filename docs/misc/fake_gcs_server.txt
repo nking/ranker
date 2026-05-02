@@ -1,5 +1,17 @@
 install:
 
+(1) either thru docker-compose-all.yaml in project directory
+    preferred... what works best now
+
+    test outside of container with:
+        curl -v http://127.0.0.1:4443/storage/v1/b
+        curl -v http://127.0.0.1:4443/storage/v1/b/data/o
+    code running inside container should use this for fake gcs server:
+         http://gcs:4443.
+
+(2) or use these steps below to have it running in its
+    own docker container
+
 run in docker engine:
 docker run -d --name fake-gcs-server -p 127.0.0.1:4443:4443 fsouza/fake-gcs-server
 

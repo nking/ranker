@@ -39,9 +39,16 @@ to run the unit tests:
     or setup.py or requirements.txt
 (3) install docker or equivalent and start it
     see https://download.docker.com and instructions
-(4) install fake gcs server after preparing data for it:
+(4) prepare input data from step (1) for reading by local blob storage:
     cd scripts
     sh < prep_for_tests.sh
+(5) ... docker-compose.yaml...
+
+-- currently just testing integration of all services
+- for xmanager,
+   will need to have docker-compose-data.yaml run before the
+   piepline, already existing,
+  and it won't include the train_fn app.
 
 Local testing:
 
@@ -59,6 +66,16 @@ Local testing:
 
     python and pytest can be used from the project's base
     directory
+
+to build the docker image and run the container locally:
+.. in progress
+  docker compose up
+
+and when done:
+#stop process, but keep containers using:
+  docker compose stop
+#stop process, remove containers, keep volumne safe
+  docker compose down
 
 --------------------------------------------------
 some details about the model

@@ -1,4 +1,7 @@
 import os
+
+from mlflow import MlflowClient
+
 #=== these are so that grain dataloader can read data from fake gcs server running in docker ====
 os.environ["STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
 os.environ["GOOGLE_CLOUD_PROJECT"] = "local-dev"
@@ -25,6 +28,7 @@ import os.path
 import pathlib
 import threading
 import unittest
+import requests
 
 import jax.distributed
 from array_record.python import array_record_module
@@ -99,7 +103,7 @@ class TestRanker(unittest.TestCase):
         idx = file_path.find("/data/")
         tr = f'gs://{file_path[idx+1:]}'
         return tr
-        
+    
     def test_local_info(self):
         print(f'local_devices={jax.local_devices()}') #[CpuDevice(id=0)]
         print(f'local device count={jax.local_device_count()}')
@@ -119,6 +123,10 @@ class TestRanker(unittest.TestCase):
             return mlflow.create_experiment(experiment_name)
         
     def test_run_train_without_optuna(self):
+        """
+        this test uses only file directories for storage and does not need docker containers running
+        :return:
+        """
         
         os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=4'
         
@@ -170,7 +178,9 @@ class TestRanker(unittest.TestCase):
             'num_heads':num_heads, 'edge_embed_dim':edge_embed_dim, 'dropout_rate':dropout_rate,
         }
         
-        STUDY_NAME = "GraphRanker_tuning_unittest"
+        STUDY_NAME = "GraphRanker_unittest"
+        
+        mlflow.set_tracking_uri(mlflow_uri)
         
         try:
             mlflow.delete_experiment(STUDY_NAME)
@@ -267,8 +277,34 @@ class TestRanker(unittest.TestCase):
         this uses the docker container fake-gcs-server
         and so all uris are gs:// and are transformed by the local google software to
         http://127.0.0.1:4443/ ... depending upon context
-        :return:
+        
+        to start the fake_gcs_server.  cd to base of project directory and:
+        docker run -d --name fake-gcs-server \
+          -u $(id -u):$(id -g) \
+          -p 127.0.0.1:4443:4443 \
+          -v ${PWD}/fake_gcs_server_buckets:/storage \
+          fsouza/fake-gcs-server \
+          -scheme http \
+          -backend filesystem \
+          -data /storage \
+          -public-host 127.0.0.1:4443
         """
+        
+        # check that docker fake gcs server is running
+        try:
+            response = requests.get("http://127.0.0.1:4443/storage/v1/b/data/o")
+            if response.status_code == 200:
+                data = response.json()
+                print(data)
+                self.assertTrue(len(data['items']) > 0)
+            else:
+                print(f"Failed with status code: {response.status_code}")
+                print(f"Response: {response.text}")
+                print(f'is the fake_gcs_server container not running?')
+                return
+        except requests.exceptions.RequestException as e:
+            print(f"An error occurred: {e}")
+            return
         
         STUDY_NAME = "GraphRanker_tuning_unittest"
         
@@ -456,10 +492,11 @@ class TestRanker(unittest.TestCase):
         '''
         with cte1 as (
             SELECT experiment_id from experiments
-            where name = "GraphRanker_tuning_unittest"
+            where name = 'GraphRanker_tuning_unittest'
         ), cte2 as (
             select run_uuid from runs
             join cte1 on runs.experiment_id=cte1.experiment_id
+            order by start_time desc limit 1
         ) select key, value, timestamp, step from metrics
           join cte2 on metrics.run_uuid==cte2.run_uuid
           order by key,timestamp;

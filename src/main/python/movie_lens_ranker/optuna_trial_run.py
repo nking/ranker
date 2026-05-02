@@ -1,25 +1,6 @@
 import os
-#=== these are so that grain dataloader can read data from fake gcs server running in docker ====
-os.environ["STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
-os.environ["GOOGLE_CLOUD_PROJECT"] = "local-dev"
-os.environ["GOOGLE_AUTH_EXTERNAL_ACCOUNT_TOKEN_PROHIBIT"] = "true"
 
-# ==== these in addtion to above, are for orbax to read and write to fake_gcs_Server running in docker ====
-# For the C++ GCS client (crucial for performance-heavy libs)
-os.environ["CLOUD_STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
-# For TensorStore (Orbax uses this for sharded JAX arrays)
-# Some versions of the C++ lib look for this specifically
-os.environ["CLOUD_STORAGE_EMULATOR_ENDPOINT"] = "http://127.0.0.1:4443"
-# Force the library to use HTTP instead of HTTPS
-os.environ["STORAGE_EMULATOR_HOST_HTTP"] = "true"
-# 4. Disable authentication checks that cause the 'wait'
-os.environ["NO_GCE_CHECK"] = "true"
-os.environ["GCS_LAMBDA_TOKEN"] = "none"
-os.environ["GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS"] = "true"
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = ""
-os.environ["TENSORSTORE_GCS_HTTP_ENDPOINT"] = "http://127.0.0.1:4443"
-os.environ["TENSORSTORE_GCS_NO_AUTH"] = "1"
-
+import jax
 import mlflow
 from absl import flags
 from movie_lens_ranker.train import train_fn, test_fn, get_optuna_suggestions
@@ -48,29 +29,33 @@ def main(_):
     if FLAGS.phase == 'test':
         return test_fn(config)
     
-    #create an ML-Flow parent study if it does not exist
-    experiment = mlflow.get_experiment_by_name(config['study_name'])
-    if experiment is None:
-        experiment = mlflow.set_experiment(config['study_name'])
-        # Create the parent run and immediately get its ID
-        parent_run = mlflow.start_run(run_name="Optuna_HPO")
-        mlflow_parent_run_id = parent_run.info.run_id
-        mlflow.end_run()
-    else:
-        #get parent run id:
-        runs = mlflow.search_runs(
-            experiment_names=[config['study_name']],
-            filter_string="attributes.run_name = 'Optuna_HPO'",
-            output_format="list"
-        )
-        if runs:
-            mlflow_parent_run_id = runs[0].info.run_id
-        else:
+    worker_rank = jax.process_index()
+    
+    if worker_rank == 0:
+        mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
+        #create an ML-Flow parent study if it does not exist
+        experiment = mlflow.get_experiment_by_name(config['study_name'])
+        if experiment is None:
+            experiment = mlflow.set_experiment(config['study_name'])
+            # Create the parent run and immediately get its ID
             parent_run = mlflow.start_run(run_name="Optuna_HPO")
             mlflow_parent_run_id = parent_run.info.run_id
             mlflow.end_run()
-    config['mlflow_experiment_id'] = experiment.experiment_id
-    config['mlflow_parent_run_id'] = mlflow_parent_run_id
+        else:
+            #get parent run id:
+            runs = mlflow.search_runs(
+                experiment_names=[config['study_name']],
+                filter_string="attributes.run_name = 'Optuna_HPO'",
+                output_format="list"
+            )
+            if runs:
+                mlflow_parent_run_id = runs[0].info.run_id
+            else:
+                parent_run = mlflow.start_run(run_name="Optuna_HPO")
+                mlflow_parent_run_id = parent_run.info.run_id
+                mlflow.end_run()
+        config['mlflow_experiment_id'] = experiment.experiment_id
+        config['mlflow_parent_run_id'] = mlflow_parent_run_id
     
     # Connect to the study created by the launcher
     study = optuna.load_study(

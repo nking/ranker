@@ -1,0 +1,5 @@
+.env
+src/drafts
+src/tests
+src/main/resources
+src/main/python/movie_lens_ranker.egg-info
