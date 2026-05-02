@@ -11,6 +11,24 @@ import optuna
 from absl import app
 from optuna import Trial
 
+import urllib.request
+import time
+import sys
+
+def wait_for_gcs(fake_gcs_uri, timeout=30):
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            with urllib.request.urlopen(fake_gcs_uri) as response:
+                if response.getcode() == 200:
+                    print("Successfully connected to GCS emulator!")
+                    return True
+        except Exception:
+            print("Waiting for GCS emulator...")
+            time.sleep(2)
+    print("GCS emulator connection timed out.")
+    sys.exit(1)
+
 def get_or_create_mlflow_experiment(experiment_name:str):
     if experiment := mlflow.get_experiment_by_name(experiment_name):
         return experiment.experiment_id
@@ -32,6 +50,9 @@ def main(_):
     worker_rank = jax.process_index()
     
     if worker_rank == 0:
+        
+        wait_for_gcs("http://gcs:4443/storage/v1/b")
+        
         mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
         #create an ML-Flow parent study if it does not exist
         experiment = mlflow.get_experiment_by_name(config['study_name'])

@@ -17,7 +17,7 @@ dependencies = [
   'jraphx==0.0.4',
   'mlflow-skinny==3.11.1',
   'optuna==2.10.1',
-  'psycopg2-binary-2.9.12'
+  'psycopg2-binary==2.9.12'
 ]
 readme = "README.md"
 license = "MIT"

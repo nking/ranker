@@ -11,7 +11,8 @@ RUN groupadd -r myuser && \
 
 WORKDIR /app
 
-COPY ./src/main/python/movie_lens_ranker ./src/main/python/movie_lens_ranker
+#only copying src/main/python/movie_lens_ranker.  see .dockerignore
+COPY ./src ./src
 
 COPY ./pyproject.toml ./
 COPY ./requirements2.txt ./
@@ -24,4 +25,6 @@ RUN pip install --user --no-cache-dir -c requirements2.txt .
 
 ENV PATH="/home/myuser/.local/bin:${PATH}"
 
-ENTRYPOINT ["python", "src/main/python/movie_lens_ranker/optuna_trial_run"]
+ENTRYPOINT ["python", "src/main/python/movie_lens_ranker/optuna_trial_run.py"]
+#default flags go here:
+#CMD ["param1","param2"] ...
