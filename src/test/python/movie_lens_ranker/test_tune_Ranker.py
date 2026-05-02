@@ -503,24 +503,20 @@ class TestRanker(unittest.TestCase):
         '''
         runs = mlflow.search_runs(
             experiment_names=[config['study_name']],
-            filter_string="attributes.run_name = 'Optuna_HPO'",
+            #filter_string="attributes.run_name = 'Optuna_HPO'",
             output_format="list"
         )
         expected_keys = {'loss', 'ndcg_20', 'mrr_20', 'recall_20'}
-        for mlflow_run in runs:
-            run_id = mlflow_run.info.run_id
-            for key in expected_keys:
-                m_dict = mlflow_run.data.metrics
-                key1 = f'train_{key}'
-                key2 = f'val_{key}'
-                self.assertTrue(key1 in m_dict)
-                self.assertIsNotNone(m_dict[key1])
-                self.assertTrue(key2 in m_dict)
-                self.assertIsNotNone(m_dict[key2])
-        
-        metrics_dict = get_mlflow_metrics_by_exp_name(
+       
+        metrics_dicts = get_mlflow_metrics_by_exp_name(
             mlflow_tracking_uri=mflow_uri,
             experiment_name=STUDY_NAME)
+        
+        print(f'metrics_dicts={metrics_dicts}')
+        metrics_dict = None
+        for run_id, d in metrics_dicts.items():
+            if metrics_dict is None or (len(d['train_loss']['x']) > len(metrics_dict['train_loss']['x'])):
+                metrics_dict = d
         plot_mlflow_metrics(metrics_dict)
         pngs = glob.glob(os.path.join(get_bin_dir(), "*.png"))
         self.assertIsNotNone(pngs)

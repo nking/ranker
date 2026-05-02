@@ -1,5 +1,6 @@
 import glob
 import os
+from typing import Dict
 
 import polars as pl
 from urllib.parse import urlparse
@@ -38,22 +39,25 @@ def _read_mlflow_metrics(metrics_dir):
                 metrics_dict[metric_name]['y'].append(float(value))
     return metrics_dict
 
-def get_mlflow_metrics_by_exp_name(mlflow_tracking_uri:str,
-        experiment_name:str):
+def get_mlflow_metrics_by_exp_name(mlflow_tracking_uri: str,
+        experiment_name: str) -> Dict[str, Dict]:
+    dict_of_dicts = {}
     client = MlflowClient(tracking_uri=mlflow_tracking_uri)
     experiment = client.get_experiment_by_name(experiment_name)
-    #the first in runs is the latest
+    # the first in runs is the latest
     runs = client.search_runs(experiment_ids=[experiment.experiment_id])
-    run_id = runs[0].info.run_id
-    metrics_dict = {}
-    for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
-        for key_t in (f"train_{key}", f"val_{key}"):
-            metrics_dict[key_t] = {'x': [], 'y': []}
-            m_dict = client.get_metric_history(run_id, key=key_t)
-            for m in m_dict:
-                metrics_dict[key_t]['x'].append(int(m.step))
-                metrics_dict[key_t]['y'].append(float(m.value))
-    return metrics_dict
+    for run in runs:
+        run_id = run.info.run_id
+        metrics_dict = {}
+        for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
+            for key_t in (f"train_{key}", f"val_{key}"):
+                metrics_dict[key_t] = {'x': [], 'y': []}
+                m_dict = client.get_metric_history(run_id, key=key_t)
+                for m in m_dict:
+                    metrics_dict[key_t]['x'].append(int(m.step))
+                    metrics_dict[key_t]['y'].append(float(m.value))
+        dict_of_dicts[run_id] = metrics_dict
+    return dict_of_dicts
 
 def plot_mlflow_metrics(metrics_dict:dict):
    

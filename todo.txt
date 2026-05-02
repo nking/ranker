@@ -1,6 +1,7 @@
 - use a CliffordNet layer instead of the GATv2.
   - requires a change in the bi-encoder to make embeddings
-    that include the cross product term in addition to the dot product.
+    that are multivectors and replaces the dot product
+    with inner and outer product.
 
 - install podman for container images
 - install minikube for a local mini kubernetes cluster
