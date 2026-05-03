@@ -561,6 +561,9 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs=None) -> Di
 
 def train_fn(config: dict, trial: Trial = None, rngs:nnx.Rngs=None):
     
+    #hard wiring top_k for consistent stats with retrieval and reranker
+    config['top_k'] = 20
+    
     worker_rank = jax.process_index()
     
     _dict = build_model_optimizer_and_dataloaders(config, rngs=rngs)
@@ -746,6 +749,9 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
 
 def test_fn(config: dict):
     
+    #hard wiring as is done in train_fn:
+    config['top_k'] = 20
+    
     worker_rank = jax.process_index()
     
     restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
@@ -788,7 +794,7 @@ def test_fn(config: dict):
                     
             test_metrics = _epoch_validation(model, test_dataloader, restore_dict['config']['top_k'])
             
-            out_dict = {f'test_{key}_{config['top_k']}' : value for key, value in test_metrics.items()}
+            out_dict = {f"test_{key}_{config['top_k']}" : value for key, value in test_metrics.items()}
         
             if mlflow_run is not None:
                 for key, value in out_dict.items():

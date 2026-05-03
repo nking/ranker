@@ -43,8 +43,9 @@ to run the unit tests:
     cd scripts
     sh < prep_for_tests.sh
 (5) ... docker-compose.yaml...
-   docker compose -f docker-compose.yaml build app
-   docker compose -f docker-compose.yaml run --rm app
+    docker compose -f docker-compose.yaml build app
+    # note, if developing the app still, add --no-cache after build
+    sh < check_can_run.sh
 
 -- currently just testing integration of all services
 - for xmanager,
