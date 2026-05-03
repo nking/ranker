@@ -1,7 +1,6 @@
 import argparse
 from collections import defaultdict
 from typing import Tuple, Dict, List, Union, Set
-import tensorstore as ts
 import jax
 import jax.numpy as jnp
 from array_record.python import array_record_module
@@ -9,11 +8,7 @@ import msgpack
 import numpy as np
 from absl import flags
 
-import gcsfs
-
-from jax.sharding import PartitionSpec as P
 # In JAX 0.8+, shard_map is typically in the main namespace
-from jax import shard_map
 
 FLAGS = flags.FLAGS
 
@@ -79,11 +74,11 @@ def parse_args_into_dict_with_exists_check():
     parser = get_args_parser()
     args = parser.parse_args()
     args_dict = vars(args)
-    for key in {**data_params_nontrainable_keys, **data_params_trainable_keys,
-        **model_params_nontrainable_keys, **model_params_trainable_keys,
-        **optuna_config_keys}:
-        if key not in args_dict:
-            raise ValueError("missing required argument: {}".format(key))
+    #for key in {**data_params_nontrainable_keys, **data_params_trainable_keys,
+    #    **model_params_nontrainable_keys, **model_params_trainable_keys,
+    #    **optuna_config_keys}:
+    #    if key not in args_dict:
+    #        raise ValueError("missing required argument: {}".format(key))
     return args_dict
 
 def set_flags_from_dict(params_dict):
@@ -104,12 +99,121 @@ def set_flags_from_dict(params_dict):
                 elif isinstance(value, float):
                     flags.DEFINE_float(key, value, f"{key}={value}")
                 elif isinstance(value, bool):
-                    flags.DEFINE_bool(key, value, f"{key}={value}");
+                    flags.DEFINE_bool(key, value, f"{key}={value}")
             setattr(FLAGS, key, value)
     # Crucial for unit tests: tells absl it's safe to read these values
     if not FLAGS.is_parsed():
         FLAGS.mark_as_parsed()
 
+
+def define_flags():
+    """
+    define global flags.  they are received in main method from command line arguments, xmanager arguments, kaic params etc.
+    Note: if using this in a jupyter notebook, it might need to be enclosed by a try/except to avoid errors when a cell contianing
+    this is reinvoked.
+    :return:
+    """
+    if 'movies_uri' in FLAGS:
+        return
+    
+    flags.DEFINE_string('movies_uri', None, 'uri for array_record containing movie ids')
+    
+    flags.DEFINE_string("recommendations_uri", default=None,
+        help="uri for array_record containing, each row being [user_id, [movie_ids]]"
+    )
+    flags.DEFINE_string("recommendations_ts_uri", default=None,
+        help="uri for array_record containing the timestamps for recommendations_uri, each row being [user_id, [timestamps]]"
+    )
+    flags.DEFINE_string("ratings_train_uri", default=None,
+        help="uri for array_record containing the ratings train dataset, each row being [user_id, movie_id, rating, timestamp]. for this project the dataset should contain only positives"
+    )
+    flags.DEFINE_string("ratings_val_uri", default=None,
+        help="uri for array_record containing the ratings val dataset, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
+    )
+    flags.DEFINE_string("train_negatives_uri", default=None,
+        help="uri for array_record containing the ratings train dataset negatives, each row being [user_id, movie_id, rating, timestamp]"
+    )
+    flags.DEFINE_string("val_negatives_uri", default=None,
+        help="uri for array_record containing the ratings val dataset negatives, each row being [user_id, movie_id, rating, timestamp]"
+    )
+    flags.DEFINE_integer("seed", default=0,
+        help="seed used for pseudo random number generator"
+    )
+    # ====== TRAINABLE DATA PARAMS ======
+    flags.DEFINE_integer("max_history", default=200,
+        help="maximum number per user of positive ratings to use for their graph"
+    )
+    flags.DEFINE_integer("num_candidates", default=40,
+        help="number per user of negatives + positive to use for their final graph"
+    )
+    flags.DEFINE_integer("num_epochs", default=40,
+        help="number of epochs to train"
+    )
+    flags.DEFINE_integer("batch_size", default=64,
+        help="number of data examples to use at a time for training"
+    )
+    # ====== NON-TRAINABLE MODEL PARAMS ======
+    flags.DEFINE_string("user_embeddings_uri", default=None,
+        help="uri to read the retrieval written user embeddings. each row holds [user_id] [embeddings]]")
+        
+    flags.DEFINE_string("movie_embeddings_uri", default=None,
+        help="uri to read the retrieval written movie embeddings. each row holds [movie_id] [embeddings]]"
+    )
+    flags.DEFINE_string("latest_checkpoint_uri", default=None,
+        help="uri to write latest checkpoints too.  model, data, optimizer and seed state are saved"
+    )
+    flags.DEFINE_string("best_checkpoint_uri", default=None,
+        help="uri to write checkpoints to for best model.  model, data, optimizer and seed state are saved"
+    )
+    flags.DEFINE_string("study_name", default=None,
+        help="study name for use in optuna study and mflow experiment name"
+    )
+    flags.DEFINE_string("optuna_storage_uri", default=None,
+        help="uri for optuna db"
+    )
+    flags.DEFINE_integer("trial_id", default=1,
+        help="trial id for use with optuna, and orbax checkpoints"
+    )
+    flags.DEFINE_string("phase", default=None,
+        help="tag used with mlflow run.  e.g. train, e.g. test"
+    )
+    flags.DEFINE_string("mlflow_tracking_uri", default=None,
+        help="MLFlow tracking uri"
+    )
+    flags.DEFINE_string("mlflow_experiment_name", default=None,
+        help="MLFlow experiment name"
+    )
+    # ====== TRAINABLE MODEL PARAMS ======
+    flags.DEFINE_integer("top_k", default=20,
+        help="used when calculating metrics NDCG@k, recal@k, MRR@k"
+    )
+    flags.DEFINE_float("learning_rate", default=5e-4,
+        help="learning_rate for the AdamW optimizer"
+    )
+    flags.DEFINE_float("weight_decay", default=1e-4,
+        help="weight_decay for the AdamW optimizer"
+    )
+    flags.DEFINE_integer("out_dim", default=32,
+        help="output dimension of the score head dense layer in GraphRanker"
+    )
+    flags.DEFINE_integer("hidden_dim", default=64,
+        help="size of hidden layers per head in the GATv2 layer of GraphPranker"
+    )
+    flags.DEFINE_integer("num_layers", default=2,
+        help="number of layers in the GATv2 layer of the GraphRanker"
+    )
+    flags.DEFINE_integer("num_heads", default=4,
+        help="number of attention heads in the GATv2 layer of the GraphRanker"
+    )
+    flags.DEFINE_integer("edge_embed_dim", default=8,
+        help="size of output of the GATv2 layer of GraphPranker"
+    )
+    flags.DEFINE_float("dropout_rate", default=0.1,
+        help="the dropout probability of a layer in the GATv2 layer of the GraphRanker"
+    )
+    flags.DEFINE_bool("debug", default=False,
+        help="prints debug statements"
+    )
 
 def get_args_parser():
     parser = argparse.ArgumentParser(description="parse for training run", )
@@ -164,6 +268,18 @@ def get_args_parser():
     parser.add_argument("--best_checkpoint_uri", type=str,
         help="uri to write checkpoints to for best model.  model, data, optimizer and seed state are saved"
     )
+    parser.add_argument("--study_name", type=str,
+        help="study name for use in optuna study and mflow experiment name"
+    )
+    parser.add_argument("--optuna_storage_uri", type=str,
+        help="uri for optuna db"
+    )
+    parser.add_argument("--trial_id", type=int,
+        help="trial id for use with optuna, and orbax checkpoints"
+    )
+    parser.add_argument("--phase", type=int,
+        help="tag used with mlflow run.  e.g. train, e.g. test"
+    )
     parser.add_argument("--mlflow_tracking_uri", type=str,
         help="MLFlow tracking uri"
     )
@@ -174,13 +290,10 @@ def get_args_parser():
     parser.add_argument("--top_k", type=int,
         help="used when calculating metrics NDCG@k, recal@k, MRR@k"
     )
-    parser.add_argument("--learning_rate", type=int,
+    parser.add_argument("--learning_rate", type=float,
         help="learning_rate for the AdamW optimizer"
     )
-    parser.add_argument("--weight_decay", type=int,
-        help="weight_decay for the AdamW optimizer"
-    )
-    parser.add_argument("--weight_decay", type=int,
+    parser.add_argument("--weight_decay", type=float,
         help="weight_decay for the AdamW optimizer"
     )
     parser.add_argument("--out_dim", type=int,
@@ -200,6 +313,9 @@ def get_args_parser():
     )
     parser.add_argument("--dropout_rate", type=float,
         help="the dropout probability of a layer in the GATv2 layer of the GraphRanker"
+    )
+    parser.add_argument("--debug", type=bool,
+        help="prints debug statements"
     )
     return parser
 

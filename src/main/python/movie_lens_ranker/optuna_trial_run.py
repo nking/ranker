@@ -1,9 +1,8 @@
-import os
-
 import jax
 import mlflow
 from absl import flags
 from movie_lens_ranker.train import train_fn, test_fn, get_optuna_suggestions
+from movie_lens_ranker.util import get_args_parser, define_flags
 
 FLAGS = flags.FLAGS
 
@@ -41,10 +40,12 @@ def main(_):
     :param _:
     :return:
     """
-    #contains same keys as get_nontrainable_train_config() and
     config = FLAGS.flag_values_dict()
     
-    if FLAGS.phase == 'test':
+    if config['debug']:
+        print(f'args received: {config}', flush=True)
+    
+    if config['phase'] == 'test':
         return test_fn(config)
     
     worker_rank = jax.process_index()
@@ -107,4 +108,6 @@ def main(_):
     study.tell(trial, values=float(best_val_ndcg_k), state=STATE)
     
 if __name__ == '__main__':
+    define_flags()
     app.run(main)
+    

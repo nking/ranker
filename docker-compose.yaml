@@ -7,9 +7,10 @@ services:
       dockerfile: Dockerfile_cpu
     container_name: run_optuna_trial_train_fn
     depends_on:
-      #TODO: in production, use a health check that db server is ready
-      - db
-      - gcs
+      db:
+        condition: service_healthy
+      gcs:
+        condition: service_healthy
     env_file:
       - .env
     environment:

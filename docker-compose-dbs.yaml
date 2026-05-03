@@ -1,0 +1,60 @@
+services:
+  gcs:
+    image: fsouza/fake-gcs-server
+    container_name: gcs_emulator
+    env_file:
+      - .env
+    user: "${UID}:${GID}" # Passes your host user ID to avoid permission issues
+    ports:
+      - "127.0.0.1:4443:4443"
+    volumes:
+      - ./fake_gcs_server_buckets:/storage
+    # We use -external-url to ensure TensorStore/Orbax get the right redirect address
+    command: >
+      -scheme http 
+      -backend filesystem 
+      -data /storage 
+      -public-host gcs:4443
+      -external-url http://gcs:4443
+    #-filesystem-root: FAKE_GCS_FILESYSTEM_ROOT
+    healthcheck:
+      #image doesn't have curl, so use nc which works.  wget is better if it works
+      #test: [ "CMD", "curl", "-f", "http://localhost:4443/storage/v1/b" ]
+      #test: ["CMD-SHELL", "nc -z 127.0.0.1 4443 || exit 1"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:4443/storage/v1/b"]
+      #test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:4443/storage/v1/b/data || exit 1"]
+      #test: ["CMD-SHELL", "bash -c '< /dev/tcp/127.0.0.1/4443' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10  # Give it more time to boot
+
+  db:
+    #12-alpine should be compatible with SQLAlchemy==1.2.19 and 2.0.49
+    image: postgres:12-alpine
+    container_name: local_db_store
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=mlflow_db
+      - POSTGRES_MULTIPLE_DATABASES=optuna_db
+    ports:
+      - "127.0.0.1:5432:5432" # Bind to localhost ONLY (secures it from external world)
+    command: >
+      postgres
+      -c shared_buffers=128MB 
+      -c max_connections=20
+      -c work_mem=4MB
+    volumes:
+      #host:container
+      - ./bin/postgres_data:/var/lib/postgresql/data
+      # Mount the init script into the special entrypoint directory
+      - ./init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d mlflow_db" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
