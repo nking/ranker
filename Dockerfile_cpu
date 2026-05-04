@@ -19,8 +19,9 @@ RUN chown -R 1000:1000 /app
 RUN python3 -m pip install --no-cache-dir -c requirements2.txt . --prefix=/usr/local
 
 #check:
-RUN python3 -c "import jax; print('JAX version:', jax.__version__)"
-RUN python3 -c "import sys; print('SYS PATH:', sys.path); import site; print('SITE PACKAGES:', site.getsitepackages())"
+#RUN python3 -c "import jax; print('JAX version:', jax.__version__)"
+#RUN python3 -c "import sys; print('SYS PATH:', sys.path); import site; print('SITE PACKAGES:', site.getsitepackages())"
+#['', '/usr/local/lib/python312.zip', '/usr/local/lib/python3.12', '/usr/local/lib/python3.12/lib-dynload', '/usr/local/lib/python3.12/site-packages']
 
 #ENTRYPOINT ["python3", "src/main/python/movie_lens_ranker/optuna_trial_run.py"]
 ENTRYPOINT ["python3", "-m", "movie_lens_ranker.optuna_trial_run"]

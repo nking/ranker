@@ -174,7 +174,7 @@ def define_flags():
     flags.DEFINE_integer("trial_id", default=1,
         help="trial id for use with optuna, and orbax checkpoints"
     )
-    flags.DEFINE_string("phase", default=None,
+    flags.DEFINE_string("phase", default="train",
         help="tag used with mlflow run.  e.g. train, e.g. test"
     )
     flags.DEFINE_string("mlflow_tracking_uri", default=None,

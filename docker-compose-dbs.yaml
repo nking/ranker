@@ -1,6 +1,6 @@
 services:
   gcs:
-    image: fsouza/fake-gcs-server
+    image: fsouza/fake-gcs-server:1.54.0
     container_name: gcs_emulator
     env_file:
       - .env_db
