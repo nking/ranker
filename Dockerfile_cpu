@@ -10,13 +10,13 @@ WORKDIR /app
 #only copying src/main/python/movie_lens_ranker.  see .dockerignore
 COPY ./src ./src
 COPY ./pyproject.toml ./
-COPY ./requirements2.txt ./
+COPY ./requirements.txt ./
 
 RUN chown -R 1000:1000 /app
 
 #TODO: slim down the installs where possible
 #RUN pip install --user --no-cache-dir -c requirements2.txt .
-RUN python3 -m pip install --no-cache-dir -c requirements2.txt . --prefix=/usr/local
+RUN python3 -m pip install --no-cache-dir -c requirements.txt . --prefix=/usr/local
 
 #check:
 #RUN python3 -c "import jax; print('JAX version:', jax.__version__)"
