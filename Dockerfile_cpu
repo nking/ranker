@@ -5,26 +5,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd -r myuser && \
-    useradd -r -g myuser myuser && \
-    mkdir -p /home/myuser /app
-
 WORKDIR /app
 
 #only copying src/main/python/movie_lens_ranker.  see .dockerignore
 COPY ./src ./src
-
 COPY ./pyproject.toml ./
 COPY ./requirements2.txt ./
-COPY constraints.txt ./
 
-RUN chown -R myuser:myuser /app /home/myuser
-USER myuser
+RUN chown -R 1000:1000 /app
+
 #TODO: slim down the installs where possible
-RUN pip install --user --no-cache-dir -c requirements2.txt .
+#RUN pip install --user --no-cache-dir -c requirements2.txt .
+RUN python3 -m pip install --no-cache-dir -c requirements2.txt . --prefix=/usr/local
 
-ENV PATH="/home/myuser/.local/bin:${PATH}"
+#check:
+RUN python3 -c "import jax; print('JAX version:', jax.__version__)"
+RUN python3 -c "import sys; print('SYS PATH:', sys.path); import site; print('SITE PACKAGES:', site.getsitepackages())"
 
-ENTRYPOINT ["python", "src/main/python/movie_lens_ranker/optuna_trial_run.py"]
+ENTRYPOINT ["python3", "src/main/python/movie_lens_ranker/optuna_trial_run.py"]
 #default flags go here:
 #CMD ["param1","param2"] ...

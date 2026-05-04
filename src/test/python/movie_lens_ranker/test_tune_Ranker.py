@@ -212,7 +212,7 @@ class TestRanker(unittest.TestCase):
             print(f'Deleted experiment {STUDY_NAME}')
         except Exception as e:
             pass
-        mlflow.set_experiment(STUDY_NAME)
+        mlflow.set_experiment(experiment_name=STUDY_NAME)
         # Create the parent run and immediately get its ID
         parent_run = mlflow.start_run(run_name="unittest_train")
         mlflow_parent_run_id = parent_run.info.run_id

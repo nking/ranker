@@ -62,9 +62,9 @@ def main(_):
         
         mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
         #create an ML-Flow parent study if it does not exist
-        experiment = mlflow.get_experiment_by_name(config['study_name'])
+        experiment = mlflow.get_experiment_by_name(name=config['study_name'])
         if experiment is None:
-            experiment = mlflow.set_experiment(config['study_name'])
+            experiment = mlflow.set_experiment(experiment_name=config['study_name'])
             # Create the parent run and immediately get its ID
             parent_run = mlflow.start_run(run_name="Optuna_HPO")
             mlflow_parent_run_id = parent_run.info.run_id

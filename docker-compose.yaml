@@ -16,6 +16,7 @@ services:
       - .env
     user: "${UID}:${GID}"
     environment:
+      #- PYTHONPATH=/usr/local/lib/python3.11/site-packages
       #these are in .env
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
       - TENSORSTORE_GCS_HTTP_ENDPOINT=${TENSORSTORE_GCS_HTTP_ENDPOINT}
