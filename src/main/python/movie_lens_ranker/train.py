@@ -75,7 +75,7 @@ def get_optuna_suggestions(trial : Trial) -> Dict[str, Any]:
     # Ensure hidden_dim is a multiple of num_heads
     config['hidden_dim'] = trial.suggest_categorical("hidden_dim",
         [h for h in [64, 128, 256] if h % config['num_heads'] == 0])
-    config["num_candidates"] = trial.suggest_int("num_candidates", 2*config['top_k'], 500, 10, log=False)
+    config["num_candidates"] = trial.suggest_int("num_candidates", low=2*config['top_k'], high=500, step=10, log=False)
     config["max_history"] = trial.suggest_int("max_history", 2*config['top_k'], 5*config['hidden_dim'], log=False)
     config['learning_rate'] = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
     config['out_dim'] = trial.suggest_categorical("out_dim", [16, 32])
@@ -589,7 +589,11 @@ def train_fn(config: dict, trial: Trial = None, rngs:nnx.Rngs=None):
             )
             config['mlflow_run_id'] = mlflow_run.info.run_id
             mlflow.set_tag("phase", config["phase"]) #do not move this before start_run
-            mlflow.log_params(config)
+            for k,v in config.items():
+                if k.find('?') > -1:
+                    print(f"problem key: {k}={v}", flush=True)
+            save_dict = {k:v for k,v in config.items() if k.find('?')==-1}
+            mlflow.log_params(save_dict)
             if trial is not None:
                 #store mlflow run_id in optuna, so can get config from mlflows param more easily
                 print(f'mlflow_run.info.run_id={mlflow_run.info.run_id}', flush=True)

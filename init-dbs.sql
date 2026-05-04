@@ -1,0 +1,2 @@
+CREATE DATABASE mlflow_db;
+CREATE DATABASE optuna_db;

@@ -19,6 +19,13 @@ services:
       -public-host gcs:4443
       -external-url http://gcs:4443
     #-filesystem-root: FAKE_GCS_FILESYSTEM_ROOT
+    #adding a wipe of existing checkpoints for fresh starts.  comment this entrypoint block out if wnt to keep checkpoints.
+    entrypoint: >
+      sh -c "
+      echo 'Cleaning old checkpoints...';
+      rm -rf /storage/checkpoint_bucket/*;
+      exec /bin/fake-gcs-server -scheme http -backend filesystem -data /storage -public-host gcs:4443 -external-url http://gcs:4443
+      "
     healthcheck:
       #image doesn't have curl, so use nc which works.  wget is better if it works
       #test: [ "CMD", "curl", "-f", "http://localhost:4443/storage/v1/b" ]

@@ -12,7 +12,7 @@ setup(
      'jraphx==0.0.4',
      'rax==0.4.0', 
      'mlflow-skinny==3.11.1',
-     'optuna==2.10.1',
+     'optuna==4.2.1',
      'psycopg2-binary==2.9.12'
   ],
   #extras_require={"test": ["pytest"]},

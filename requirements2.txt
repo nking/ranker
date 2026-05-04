@@ -120,7 +120,7 @@ opentelemetry-sdk==1.41.1
 opentelemetry-semantic-conventions==0.62b1
 opt_einsum==3.4.0
 optax==0.2.6
-optuna==2.10.1
+optuna==4.2.1
 orbax-checkpoint==0.11.26
 orbax-export==0.0.8
 orjson==3.11.8
@@ -134,8 +134,8 @@ prompt_toolkit==3.0.52
 propcache==0.4.1
 proto-plus==1.27.2
 protobuf==6.33.6
-psycopg2-binary==2.9.12
 psutil==7.2.2
+psycopg2-binary==2.9.12
 pyasn1==0.6.3
 pyasn1_modules==0.4.2
 pycparser==3.0

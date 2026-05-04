@@ -5,7 +5,7 @@ from optuna.pruners import MedianPruner
 from optuna.samplers import RandomSampler
 
 from movie_lens_ranker.train import train_fn, test_fn, get_optuna_suggestions
-from movie_lens_ranker.util import get_args_parser, define_flags
+from movie_lens_ranker.util import define_flags
 
 FLAGS = flags.FLAGS
 
@@ -16,6 +16,15 @@ from optuna import Trial
 import urllib.request
 import time
 import sys
+
+import fsspec
+import os
+#load this globally:
+fsspec.config.conf['gcs'] = {
+    'requester_pays': False,
+    'token': 'anon',
+    'endpoint_url': os.getenv('STORAGE_EMULATOR_HOST')
+}
 
 def wait_for_gcs(fake_gcs_uri, timeout=30):
     start_time = time.time()
@@ -44,6 +53,8 @@ def main(_):
     :return:
     """
     config = FLAGS.flag_values_dict()
+    #removing problem key: '?'
+    config = {k: v for k, v in config.items() if k.find('?') == -1}
     
     if "debug" in config and config['debug']:
         print(f'args received: {config}', flush=True)
@@ -107,6 +118,9 @@ def main(_):
     # Optuna's DB locking ensures each container gets unique params
     trial: Trial = study.ask()
     config.update(trial.params)
+    for k, v in config.items():
+        if k.find('?') > -1:
+            print(f"problem key from trial: {k}={v}", flush=True)
     
     config['mlflow_experiment_name'] = config['study_name']
     config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])

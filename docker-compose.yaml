@@ -18,6 +18,8 @@ services:
     environment:
       #- PYTHONPATH=/usr/local/lib/python3.11/site-packages
       #these are in .env
+      - LOGNAME=${POSTGRES_USER}
+      - USER=${POSTGRES_USER}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
       - TENSORSTORE_GCS_HTTP_ENDPOINT=${TENSORSTORE_GCS_HTTP_ENDPOINT}
       - STORAGE_EMULATOR_HOST=${STORAGE_EMULATOR_HOST}

@@ -9,14 +9,15 @@ authors = [
     { name = "Nichole King" },
 ]
 #readme = "README.md"
-requires-python = ">=3.11.0,<3.12"
+#requires-python = ">=3.11.0,<3.12"
+requires-python = ">=3.12.0,<3.13"
 dependencies = [
   'jax-ai-stack==2025.10.28', 
   'rax==0.4.0', 
   'jraph @ git+https://github.com/deepmind/jraph.git@51f5990104f7374492f8f3ea1cbc47feb411c69c',
   'jraphx==0.0.4',
   'mlflow-skinny==3.11.1',
-  'optuna==2.10.1',
+  'optuna==4.2.1',
   'psycopg2-binary==2.9.12'
 ]
 readme = "README.md"

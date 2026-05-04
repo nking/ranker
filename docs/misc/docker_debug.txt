@@ -1,0 +1,54 @@
+useful docker commands while debugging:
+
+docker exec -it local_db_store psql -U runner -d postgres -c "\l"
+
+docker compose run --rm --entrypoint python3 app -c 'import socket; s = socket.socket(); s.settimeout(5); print("Attempting connection..."); s.connect(("local_db_store", 5432)); print("SUCCESS: Port is open and reachable!")'
+
+--------
+docker compose run --rm --entrypoint python3 app -c "import psycopg2; print('Driver found')"
+
+--------
+docker compose run --rm --entrypoint python3 app -c "
+import optuna
+try:
+    storage = 'postgresql://runner:password123@local_db_store/optuna_db'
+    optuna.storages.RDBStorage(storage).upgrade()
+    print('SUCCESS: Database upgraded')
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+"
+--------
+
+docker exec -it local_db_store psql -U runner -d optuna_db -c "DROP TABLE version_info; DROP TABLE studies CASCADE;"
+
+docker compose run --rm --entrypoint python3 app -c "
+import optuna
+storage = 'postgresql://runner:password123@local_db_store/optuna_db'
+optuna.storages.RDBStorage(storage).upgrade()
+print('SUCCESS: Database upgraded and version stamped')"
+"
+--------
+
+docker exec -it gcs_emulator ls -R /storage/data
+
+docker exec -it gcs_emulator ls -R /storage/checkpoint_bucket
+------------------------------------
+
+docker compose run --rm --entrypoint python3 app -c "
+import requests
+import os
+host = os.getenv('STORAGE_EMULATOR_HOST', 'http://gcs:4443')
+# The internal path for fake-gcs-server to get a file:
+test_url = f'{host}/storage/v1/b/data/o/movies-00000-of-00001.array_record?alt=media'
+print(f'Attempting to reach: {test_url}')
+try:
+    response = requests.get(test_url, timeout=5)
+    if response.status_code == 200:
+        print(f'SUCCESS: Reached file. First 20 bytes: {response.content[:20].hex()}')
+    else:
+        print(f'FAILURE: Server responded with {response.status_code}')
+        print(f'Response body: {response.text}')
+except Exception as e:
+    print(f'NETWORK ERROR: Could not connect to {host}. Error: {e}')
+"
