@@ -1,6 +1,9 @@
 import jax
 import mlflow
 from absl import flags
+from optuna.pruners import MedianPruner
+from optuna.samplers import RandomSampler
+
 from movie_lens_ranker.train import train_fn, test_fn, get_optuna_suggestions
 from movie_lens_ranker.util import get_args_parser, define_flags
 
@@ -42,17 +45,20 @@ def main(_):
     """
     config = FLAGS.flag_values_dict()
     
-    if config['debug']:
+    if "debug" in config and config['debug']:
         print(f'args received: {config}', flush=True)
+    
+    if "phase" not in config:
+        print("ERROR: expecting phase='test' or other such as 'train', 'tune/train'")
+        return
     
     if config['phase'] == 'test':
         return test_fn(config)
     
     worker_rank = jax.process_index()
     
+    study = None
     if worker_rank == 0:
-        
-        wait_for_gcs("http://gcs:4443/storage/v1/b")
         
         mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
         #create an ML-Flow parent study if it does not exist
@@ -78,12 +84,25 @@ def main(_):
                 mlflow.end_run()
         config['mlflow_experiment_id'] = experiment.experiment_id
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
+        
+        # Initialize the optuna study in the database if doesn't already exist
+        study = optuna.create_study(
+            study_name=config['study_name'],
+            storage=config['optuna_storage_uri'],
+            sampler=RandomSampler(),
+            pruner=MedianPruner(),
+            direction="maximize",
+            load_if_exists=True
+        )
     
     # Connect to the study created by the launcher
-    study = optuna.load_study(
-        study_name=config['study_name'],
-        storage=config['optuna_storage_uri'],
-    )
+    if study is None:
+        study = optuna.load_study(
+            study_name=config['study_name'],
+            storage=config['optuna_storage_uri'],
+            sampler=RandomSampler(),
+            pruner=MedianPruner(),
+        )
     
     # Optuna's DB locking ensures each container gets unique params
     trial: Trial = study.ask()

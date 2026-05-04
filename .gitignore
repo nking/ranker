@@ -4,6 +4,8 @@ __pycache__/
 *$py.class
 
 fake_gcs_server_buckets/
+.env
+.env_db
 
 # C extensions
 *.so

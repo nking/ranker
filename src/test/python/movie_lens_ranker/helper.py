@@ -1,10 +1,24 @@
 import os
 from typing import List, Tuple
+from urllib.request import Request
+
 import requests
+from requests import HTTPError, RequestException
+
 
 def fake_gcs_server_is_alive():
-    resp = requests.get("http://127.0.0.1:4443/storage/v1/b")
-    return (resp.status_code == 200)
+    try:
+        resp = requests.get("http://127.0.0.1:4443/storage/v1/b")
+        return (resp.status_code == 200)
+    except ConnectionError:
+        return False
+    except TimeoutError:
+        return False
+    except HTTPError:
+        return False
+    except RequestException:
+        return False
+    
 
 def get_kaggle() -> bool:
   cwd = os.getcwd()

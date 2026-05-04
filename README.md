@@ -42,10 +42,20 @@ to run the unit tests:
 (4) prepare input data from step (1) for reading by local blob storage:
     cd scripts
     sh < prep_for_tests.sh
-(5) ... docker-compose.yaml...
-    docker compose -f docker-compose.yaml build app
-    # note, if developing the app still, add --no-cache after build
-    sh < check_can_run.sh
+(5) there are a couple of ways to start the services depending on what
+    the goal is:
+    (a) to run test_Ranker.py test_run_train_with_optuna
+        you can start the db services alone:
+           docker compose -f docker-compose-dbs.yaml up -d --build
+        then run the tests
+        then when done:
+           docker compose down
+    (b) to start the dbs and the container app:
+            docker compose -f docker-compose.yaml build app
+        or 
+            docker compose -f docker-compose.yaml build --no-cache app
+        then to run a trial train with a small sample over 2 epochs: 
+            sh < check_can_run.sh
 
 -- currently just testing integration of all services
 - for xmanager,

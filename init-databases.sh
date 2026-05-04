@@ -1,20 +1,10 @@
 #!/bin/bash
 set -e
-set -u
 
-function create_user_and_database() {
-	local database=$1
-	echo "  Creating database '$database'"
-	psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
-	    CREATE DATABASE $database;
-	    GRANT ALL PRIVILEGES ON DATABASE $database TO $POSTGRES_USER;
-	EOSQL
-}
-
-if [ -n "$POSTGRES_MULTIPLE_DATABASES" ]; then
-	echo "Multiple database creation requested: $POSTGRES_MULTIPLE_DATABASES"
-	for db in $(echo $POSTGRES_MULTIPLE_DATABASES | tr ',' ' '); do
-		create_user_and_database $db
-	done
-	echo "Multiple databases created"
-fi
+# Connect to the default 'postgres' db to create the others
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
+    SELECT 'CREATE DATABASE mlflow_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'mlflow_db')\gexec
+    SELECT 'CREATE DATABASE optuna_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'optuna_db')\gexec
+    GRANT ALL PRIVILEGES ON DATABASE mlflow_db TO "$POSTGRES_USER";
+    GRANT ALL PRIVILEGES ON DATABASE optuna_db TO "$POSTGRES_USER";
+EOSQL

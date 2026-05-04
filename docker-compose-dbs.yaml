@@ -3,8 +3,10 @@ services:
     image: fsouza/fake-gcs-server
     container_name: gcs_emulator
     env_file:
+      - .env_db
       - .env
-    user: "${UID}:${GID}" # Passes your host user ID to avoid permission issues
+      #.env should have UID and GID in it for docker to find them, else pass them in on command line
+    user: "${UID}:${GID}"
     ports:
       - "127.0.0.1:4443:4443"
     volumes:
@@ -34,12 +36,13 @@ services:
     container_name: local_db_store
     restart: unless-stopped
     env_file:
+      - .env_db
       - .env
+    #user: "${UID}:${GID}"  don't use uir and gid with postgres..
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=mlflow_db
-      - POSTGRES_MULTIPLE_DATABASES=optuna_db
+      - POSTGRES_DB=postgres  # Use the default management DB
     ports:
       - "127.0.0.1:5432:5432" # Bind to localhost ONLY (secures it from external world)
     command: >

@@ -1,7 +1,5 @@
 import os
 
-from mlflow import MlflowClient
-
 #=== these are so that grain dataloader can read data from fake gcs server running in docker ====
 os.environ["STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
 os.environ["GOOGLE_CLOUD_PROJECT"] = "local-dev"
@@ -26,29 +24,56 @@ os.environ["TENSORSTORE_GCS_NO_AUTH"] = "1"
 import glob
 import os.path
 import pathlib
-import threading
-import unittest
-import requests
+
+import psycopg2
+import time
 
 import jax.distributed
 from array_record.python import array_record_module
 
-import shutil
 from absl import flags
-from asyncssh.encryption import get_encryption_algs
-from networkx.algorithms.centrality import information_centrality
-from optuna import create_study, load_study
-from optuna.pruners import MedianPruner
-from optuna.samplers import RandomSampler
+from optuna import load_study
 
 from helper import *
-from movie_lens_ranker.data_loading import *
 from movie_lens_ranker.train import *
 from movie_lens_ranker.util import set_flags_from_dict
 from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
     get_mlflow_metrics_by_exp_name, _read_mlflow_metrics
 
 from movie_lens_ranker.optuna_trial_run import main as run_optuna_main
+
+import os
+import unittest
+
+def load_env_db():
+    filepath = os.path.join(get_project_dir(), ".env_db")
+    if not os.path.exists(filepath):
+        return
+    with open(filepath, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, value = line.split("=", 1)
+            os.environ[key.strip()] = value.strip()
+
+def wait_for_postgres_optuna_mlflow_dbs(retries=5, delay=2):
+    user = os.getenv("POSTGRES_USER")
+    password = os.getenv("POSTGRES_PASSWORD")
+    s = [False, False]
+    for ii, db in enumerate(["mlflow_db", "optuna_db"]):
+        dsn = f"host=localhost user={user} password={password} dbname={db}"
+        for i in range(retries):
+            try:
+                conn = psycopg2.connect(dsn)
+                conn.close()
+                s[ii] = True
+                break
+            except psycopg2.OperationalError:
+                print(
+                    f"Database not ready, retrying in {delay}s... ({i + 1}/{retries})")
+                time.sleep(delay)
+    return s[0]==True and s[1]==True
 
 class TestRanker(unittest.TestCase):
     def setUp(self):
@@ -290,6 +315,8 @@ class TestRanker(unittest.TestCase):
           -public-host 127.0.0.1:4443
         """
         
+        load_env_db()
+        
         # check that docker fake gcs server is running
         try:
             response = requests.get("http://127.0.0.1:4443/storage/v1/b/data/o")
@@ -302,6 +329,7 @@ class TestRanker(unittest.TestCase):
                 print(f"Response: {response.text}")
                 print(f'is the fake_gcs_server container not running?')
                 return
+            wait_for_postgres_optuna_mlflow_dbs()
         except requests.exceptions.RequestException as e:
             print(f"An error occurred: {e}")
             return
@@ -314,8 +342,7 @@ class TestRanker(unittest.TestCase):
         
         # tensorstore keeps trying to authenticate with google so for tests we'll use the abs path to checkpoint dir
         # checkpoint_dir = 'gs://checkpoint_bucket'
-        checkpoint_dir = os.path.join(get_project_dir(),
-            "fake_gcs_server_buckets/checkpoint_bucket")
+        checkpoint_dir = os.path.join(get_project_dir(), "fake_gcs_server_buckets/checkpoint_bucket")
         latest_checkpoint_uri = f'{checkpoint_dir}/latest'
         best_checkpoint_uri = f'{checkpoint_dir}/best'
         
@@ -332,27 +359,6 @@ class TestRanker(unittest.TestCase):
         if os.path.exists(mflow_db_path):
             os.remove(mflow_db_path)
             print(f"Deleted old database at {mflow_db_path}")
-        
-        mlflow.set_tracking_uri(mflow_uri)
-        
-        # Initialize the optuna study in the database
-        # This just "reserves the name" in your Postgres/MySQL DB
-        study = create_study(
-            study_name=STUDY_NAME,
-            storage=optuna_storage_uri,
-            sampler=RandomSampler(),
-            pruner=MedianPruner(),
-            direction="maximize",
-            load_if_exists=False
-        )
-        
-        # init mlflow experiment
-        try:
-            exp_id = mlflow.get_experiment_by_name(STUDY_NAME)
-            if exp_id is not None:
-                mlflow.delete_experiment(STUDY_NAME)
-        except Exception as e:
-            print(f'error while deleting experiment: {e}')
         
         set_flags_from_dict({
             'movies_uri': self.transform_to_gs_uri(self.movies_uri),

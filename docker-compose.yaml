@@ -12,7 +12,9 @@ services:
       gcs:
         condition: service_healthy
     env_file:
+      - .env_db
       - .env
+    user: "${UID}:${GID}"
     environment:
       #these are in .env
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
