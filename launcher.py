@@ -1,226 +1,111 @@
-#see https://github.com/google-deepmind/xmanager/tree/v0.7.1/examples/vizier
-# see gemini notes https://gemini.google.com/app/d3df1bcf5a80bc26
-# see https://github.com/google-deepmind/xmanager/tree/v0.7.1/examples/dockerfile
-#
-# to run: xmanager launch ./orchestrator_xmngr/launcher.py
-#
-from typing import Dict, Tuple, Sequence
-from absl import app
-
-import xmanager as xm
+from xmanager import xm
 from xmanager import xm_local
-from xmanager.xm import python_container
-from xmanager.xm import ModuleName
-from xmanager.xm import Packageable
-from xmanager.xm import utils
+from dotenv import dotenv_values
 
-import pprint
+#import logging
+#from absl import logging as absl_logging
+#absl_logging.set_verbosity(absl_logging.DEBUG)
+#logging.basicConfig(level=logging.DEBUG)
 
-from optuna import create_study, load_study
-from absl import flags
-import os
+"""
+start db services with:
+    ./run_compose_dbs.sh
+or:
+    docker compose -f docker-compose-dbs.yaml up -d
+"""
 
-from optuna.pruners import MedianPruner
-from optuna.samplers import RandomSampler
-
-def get_best_config(study_name, storage_url):
-    # Re-connect to the existing study
-    study = load_study(study_name=study_name, storage=storage_url)
-    print(f"Best trial: {study.best_trial.number}")
-    print(f"Best value (NDCG): {study.best_value}")
-    # Return the winning params
-    return study.best_trial.params, study.best_trial.number
-
-def get_project_dir() -> str:
-    #relative to launcher.py and path='.' below
-    return "./"
-
-def get_bin_dir() -> str:
-  return os.path.join(get_project_dir(), "bin")
-
-STUDY_NAME = "GraphRanker_tuning_xmngr"
-optuna_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}_optuna.db")
-optuna_storage_uri = f"sqlite:///{optuna_db_path}"
-
-mflow_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}_mlflow.db")
-mflow_uri = f"sqlite:///{mflow_db_path}?mode=memory&cache=shared"
-
-def get_train_val_test_liked_uris(use_small: bool = True) -> Tuple[str, str, str]:
-    base_dir = os.path.join(get_project_dir(), "src/test/resources/data/")
-    if use_small:
-        base_dir = os.path.join(base_dir, "small")
-    return (os.path.join(base_dir, "ratings_train_liked.array_record"),
-        os.path.join(base_dir, "ratings_val_liked.array_record"),
-        os.path.join(base_dir, "ratings_test_liked.array_record"))
-
-def get_train_val_test_disliked_uris(use_small: bool = True) -> Tuple[
-    str, str, str]:
-    base_dir = os.path.join(get_project_dir(), "src/test/resources/data/")
-    if use_small:
-        base_dir = os.path.join(base_dir, "small")
-    return (os.path.join(base_dir, "ratings_train_disliked.array_record"),
-        os.path.join(base_dir, "ratings_val_disliked.array_record"),
-        os.path.join(base_dir, "ratings_test_disliked.array_record"))
-
-def get_args_dict() -> Dict:
-    ratings_train_uri, ratings_val_uri, ratings_test_uri \
-        = get_train_val_test_liked_uris(use_small=True)
-    ratings_train_disliked_uri, ratings_val_disliked_uri, ratings_test_disliked_uri \
-        = get_train_val_test_disliked_uris(use_small=True)
-    return {
-        'ratings_train_uri':ratings_train_uri,
-        'ratings_val_uri':ratings_val_uri,
-        'ratings_train_disliked_uri' : ratings_train_disliked_uri,
-        'ratings_val_disliked_uri':ratings_val_disliked_uri,
-        'movie_embeddings_uri' : os.path.join(get_project_dir(),
-            "src/test/resources/data/movie_emb-00000-of-00001.array_record"),
-        'user_embeddings_uri' : os.path.join(get_project_dir(),
-            "src/test/resources/data/user_emb-00000-of-00001.array_record"),
-        'recommendations_uri' :  os.path.join(
-            get_project_dir(),
-            "src/test/resources/data/recommended_movies.array_record"),
-        'recommendations_ts_uri': os.path.join(
-            get_project_dir(),
-            "src/test/resources/data/recommended_movies_timestamps.array_record"),
-        'movies_uri' : os.path.join(get_project_dir(),
-            "src/test/resources/data/movies-00000-of-00001.array_record"),
-        'train_negatives_uri' : os.path.join(get_project_dir(),
-            "src/test/resources/data/train_negatives.array_record"),
-        'val_negatives_uri' : os.path.join(get_project_dir(),
-            "src/test/resources/data/val_negatives.array_record"),
-        'test_negatives_uri' : os.path.join(get_project_dir(),
-            "src/test/resources/data/test_negatives.array_record"),
-        'train_val_negatives_uri' : os.path.join(get_project_dir(),
-            "src/test/resources/data/train_val_negatives.array_record"),
-        'train_val_test_negatives_uri' :  os.path.join(get_project_dir(),
-            "src/test/resources/data/train_val_test_negatives.array_record"),
-        'num_epochs' : 100,
-        'batch_size' : 64,
-        'seed' : 1234,
-        'mlflow_uri' : mflow_uri,
+#TODO: switch to coding for a GCS Secret Manager instead of embedding
+#passwords in uris. see todo.txt for API details
+def main(_):
+    num_trials = 1 #20
+    
+    #default gateway used by docker is 172.17.0.1
+    # can verify that with ip addr show docker0 | grep "inet "
+    docker_bridge_gateway = "172.17.0.1"
+    
+    env_config = {
+        **dotenv_values(".env_unittests"),
+        'PYTHONUNBUFFERED': '1'
     }
-
-def main(argv: Sequence[str]):
-    del argv
     
-    print(f'xmanager for {STUDY_NAME} HPO')
+    # Add the explicit environment overrides from your yaml
+    # We use os.getenv to grab values from your shell (like ${UID})
+    run_config = {
+        'LOGNAME': env_config.get('POSTGRES_USER'),
+        'USER': env_config.get('POSTGRES_USER'),
+        "study_name": "GraphRanker_tuning_xmngr",
+        "mlflow_experiment_name": "GraphRanker_tuning_cli",
+        "optuna_storage_uri": f"postgresql://{env_config.get('POSTGRES_USER')}:{env_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/optuna_db",
+        "mlflow_tracking_uri": f"postgresql://{env_config.get('POSTGRES_USER')}:{env_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db",
+        "latest_checkpoint_uri": "gs://checkpoint_bucket/latest",
+        "best_checkpoint_uri": "gs://checkpoint_bucket/best",
+        "movies_uri": "gs://data/movies-00000-of-00001.array_record",
+        "recommendations_uri": "gs://data/recommended_movies.array_record",
+        "recommendations_ts_uri": "gs://data/recommended_movies_timestamps.array_record",
+        "ratings_train_uri": "gs://data/small/ratings_train_liked.array_record",
+        "ratings_val_uri": "gs://data/small/ratings_val_liked.array_record",
+        "train_negatives_uri": "gs://data/train_negatives.array_record",
+        "val_negatives_uri": "gs://data/val_negatives.array_record",
+        "movie_embeddings_uri": "gs://data/movie_emb-00000-of-00001.array_record",
+        "user_embeddings_uri": "gs://data/user_emb-00000-of-00001.array_record",
+        "num_epochs": 2,
+        "batch_size": 64,
+        "seed": 12345,
+        "phase": "train"
+    }
     
-    print(f'xm_local attrs={dir(xm_local)}')
-    
-    if os.path.exists(optuna_db_path):
-        os.remove(optuna_db_path)
-        print(f"Deleted old database at {optuna_db_path}")
-    
-    # Initialize the optuna study in the database
-    # This just "reserves the name" in your Postgres/MySQL DB
-    print(f'create optuna study {STUDY_NAME}')
-    create_study(
-        study_name=STUDY_NAME,
-        storage=optuna_storage_uri,
-        sampler=RandomSampler(),
-        pruner=MedianPruner(),
-        direction="maximize",
-        load_if_exists=True
-    )
-    
-    xm_exp_name = 'gatv2_search'
-    print(f'create XManager experiment {xm_exp_name}', flush=True)
-    
-    # Tell XManager to launch N parallel trials
-    # Each trial is a separate Docker container instance
-    with xm_local.create_experiment(experiment_title=xm_exp_name) as experiment:
-        spec = python_container(
+    # run the experiment locally w/ xm_local.Local.  also means this is a block and wait context.
+    # also means of xm_local.Vertex or Kubernetes is used, this block does not wait
+    # and any jobs must be stopped from a cluster control plane.
+    # BUT, if for some reason you want this blobk to block an wait after launching to
+    # cloud, then use job_group = experiment.add(...) and at end use job_group.wait_for_completion()
+    with xm_local.create_experiment(experiment_title='optuna_hpo_run') as experiment:
+        docker_packageable = xm.dockerfile_container(
             path='.',
-            entrypoint=ModuleName('optuna_trial_run'),
-            docker_instructions=[
-                'FROM python:3.11-slim AS builder',
-                'RUN groupadd -r myuser && useradd -r -g myuser myuser',
-                'USER myuse',
-                'WORKDIR /app',
-                'RUN apt-get update && apt-get install -y --no-install-recommends gcc build-essential',
-                'COPY --from=builder /root/.local /root/.local',
-                'ENV PATH=/root/.local/bin:$PATH',
-                'COPY ./src/main/python/movie_lens_ranker ./src/main/python/movie_lens_ranker',
-                'COPY ./pyproject.toml ./',
-                'RUN pip install --user --no-cache-dir -e .',
-            ],
-            use_deep_module=True,
-            # executor_spec=xm_local.Vertex.Spec(),
-            executor_spec=xm_local.Local.Spec(),
-            #executor_spec=xm_local.Docker.Spec(),
-        )
-        [executable] = experiment.package(
-            [
-                Packageable(
-                    executable_spec=spec,
-                    #executor_spec=xm_local.Kubernetes.Spec(),
-                    # executor_spec=xm_local.Vertex.Spec(),
-                    executor_spec=xm_local.Local.Spec(),
-                    #executor_spec=xm_local.Docker.Spec(),
-                ),
-            ]
-        )
-        
-        job_args = get_args_dict()
-        
-        num_trials = 2 #20
-        
-        print(f'add HPO jobs', flush=True)
-        
-        # Launch num_trial parallel trials
-        hpo_jobs = [experiment.add(
-            xm.Job(
-                executable=executable,
-                executor=xm_local.Docker(),
-                # args are read as FLAGs by optuna_trial_run
-                args={
-                    'study_name': STUDY_NAME,
-                    'optuna_storage_uri': optuna_storage_uri,
-                    'phase': 'train/tune',
-                    'movies_uri': job_args['movies_uri'],
-                    'recommendations_uri': job_args['recommendations_uri'],
-                    'recommendations_ts_uri': job_args['recommendations_ts_uri'],
-                    'ratings_train_uri': job_args['ratings_train_uri'],
-                    'ratings_val_uri': job_args['ratings_val_uri'],
-                    'train_negatives_uri': job_args['train_negatives_uri'],
-                    'val_negatives_uri': job_args['val_negatives_uri,'],
-                    'latest_checkpoint_uri': job_args['latest_checkpoint_uri'],
-                    'best_checkpoint_uri': job_args['best_checkpoint_uri'],
-                    'movie_embeddings_uri': job_args['movie_embeddings_uri'],
-                    'user_embeddings_uri': job_args['user_embeddings_uri'],
-                    'num_epochs': job_args['num_epochs'],
-                    'batch_size': job_args['batch_size'],
-                    'seed': job_args['seed'],
-                    "trial_id": 1,
-                    'mlflow_tracking_uri': job_args['mlflow_uri'],
-                    'mlflow_experiment_name': STUDY_NAME,
-                    # 'mlflow_tracking_token': None,
-                }
-            )) for _ in range(num_trials)]
-        
-        # blocks launcher.py until all HPO trial workers exit
-        experiment.wait_for_jobs(*hpo_jobs)
-        
-        print(f'HPO done', flush=True)
-
-        FLAGS = flags.FLAGS
-        best_params, best_trial_id = get_best_config(FLAGS.study_name, FLAGS.storage_url)
-        
-        print(f'best config: trial_id={best_trial_id},\nparams=\n{best_params}', flush=True)
-
-        #TODO: edit this
-        '''
-        # We pass 'phase=test' so train.py knows to run test_fn
-        experiment.add(xm.Job(
-            executable=executable,
+            dockerfile='Dockerfile_offline',
+            executor_spec = xm_local.Local.Spec(),
+            env_vars=env_config,
             args={
-                **FLAGS.flag_values_dict(),  # Global defaults
-                **best_params,  # Winning overrides
-                'phase': 'test',  # Signal to run evaluation
-                'load_checkpoint_id': best_trial_id,
-            }
-        ))
-        '''
-        
+                **run_config,
+            },
+        )
+        #docker_packageable = xm.dockerfile_container(
+        #    path='.',
+        #    dockerfile='Dockerfile_cpu',
+        #    executor_spec = xm_local.Local.Spec(),
+        #)
+        #docker_packageable = xm.container(
+        #    image_path='ranker-app:latest',
+        #    executor_spec = xm_local.Local.Spec(),
+        #    env_vars=env_config,
+        #    args={
+        #        **run_config,
+        #    },
+        #)
+        [executable] = experiment.package([docker_packageable])
+
+        # 2. Define the Resource Requirements
+        # Adjust based on whether you need GPUs or specific CPU counts
+        resources = xm.JobRequirements(cpu=1, ram=8 * xm.GiB)
+
+        #can find network name in docker-compose-dbs.yaml
+        for i in range(num_trials):
+            experiment.add(
+                xm.Job(
+                    executable=executable,
+                    executor=xm_local.Local(
+                        requirements=resources,
+                    ),
+                    name=f"{env_config.get('study_name')}_trial_{i}",
+                    env_vars=env_config,
+                    args={
+                        **run_config,
+                        'trial_id': i,
+                    },
+                )
+            )
+            
+    print(f'xmanager is done running {num_trials} trials')
+
 if __name__ == '__main__':
-  app.run(main)
+    xm_local.run(main)

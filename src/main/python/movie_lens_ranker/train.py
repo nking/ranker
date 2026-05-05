@@ -1,27 +1,17 @@
-import os
 
 from functools import partial
 from typing import Dict, Tuple, Union, Any, Optional
 
-from jax.sharding import PartitionSpec as P
-# In JAX 0.8+, shard_map is typically in the main namespace
-from jax import shard_map
-
 import mlflow
-import numpy as np
 import optax
 import optuna
-from humanize import metric
-from mlflow import metrics
 from optuna import Trial
 from math import log
 import jax
 import jax.tree_util as jtu
-
-import simplejson as json
-
-from jax.sharding import Mesh
 from jax.sharding import PartitionSpec as P
+# In JAX 0.8+, shard_map is typically in the main namespace
+from jax import shard_map, Array
 
 import jraph
 import jax.numpy as jnp
@@ -149,7 +139,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     """
     debug_weight_before = jnp.linalg.norm(model.score_head.kernel.value)
     
-    def loss_fn(model, padded_graph) -> float:
+    def loss_fn(model, padded_graph) -> Array:
         scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
         safe_scores = jnp.where(main_mask, scores_2d, -1e9)
         #debug_stats(safe_scores, label="[Scores Statistics]")
@@ -174,7 +164,8 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     return loss
 
 @nnx.jit
-def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) -> Dict[str, float]:
+def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) -> \
+dict[str, Array]:
     """
     train step over a batch, where padded_graph contains super graph of the batch
     :param model:
@@ -294,7 +285,7 @@ def _epoch_validation_simplest(model: GraphRanker, val_dataloader: DataLoader, t
     avg_val_ndcg = jnp.mean(jnp.array(epoch_val_ndcg))
     avg_val_recall = jnp.mean(jnp.array(epoch_val_recall))
     
-    jax.debug.print("avg_val_loss shape={}", jnp.shape(avg_val_loss))
+    #jax.debug.print("avg_val_loss shape={}", jnp.shape(avg_val_loss))
     
     local_metrics = {'loss': avg_val_loss, 'ndcg': avg_val_ndcg, 'mrr': avg_val_mrr, 'recall': avg_val_recall}
     
@@ -634,7 +625,7 @@ def stack_val_batches(dataloader, num_steps):
     return stacked_batches
 
 @nnx.jit
-def validation_epoch_compiled(model: nnx.Module, stacked_batches, top_k):
+def validation_epoch_compiled(model: GraphRanker, stacked_batches, top_k):
     """
     Compiled validation epoch.
     Processes multiple batches on-device without returning to Python.
