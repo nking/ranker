@@ -25,7 +25,7 @@ def main(_):
     docker_bridge_gateway = "172.17.0.1"
     
     env_config = {
-        **dotenv_values(".env"),
+        **dotenv_values(".env_unittests"),
         'PYTHONUNBUFFERED': '1'
     }
     
