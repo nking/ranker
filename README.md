@@ -57,6 +57,15 @@ to run the unit tests:
         then to run a trial train with a small sample over 2 epochs: 
             sh < check_can_run.sh
 
+    NOTE that once the app image is built, no need to rebuild the image.
+    changing parameters in the docker-compose*.yaml can be run with:
+       docker compose up -d
+    if you update code in the app service:
+       docker compose up -d --build
+    if have trouble cleaning up networks use
+       docker compose down
+       docker compose up -d
+
 -- currently just testing integration of all services
 - for xmanager,
    will need to have docker-compose-data.yaml run before the

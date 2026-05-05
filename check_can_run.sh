@@ -20,7 +20,7 @@ docker compose run --rm app \
 --val_negatives_uri="gs://data/val_negatives.array_record" \
 --movie_embeddings_uri="gs://data/movie_emb-00000-of-00001.array_record" \
 --user_embeddings_uri="gs://data/user_emb-00000-of-00001.array_record" \
---trial_id=1 \
+--trial_id=0 \
 --num_epochs=2 \
 --batch_size=64 \
 --seed=12345 \
