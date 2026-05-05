@@ -183,6 +183,12 @@ def define_flags():
     flags.DEFINE_string("mlflow_experiment_name", default=None,
         help="MLFlow experiment name"
     )
+    flags.DEFINE_string("LOGNAME", default=None,
+        help="linux env variable name"
+    )
+    flags.DEFINE_string("USER", default=None,
+        help="linux env variable name"
+    )
     # ====== TRAINABLE MODEL PARAMS ======
     flags.DEFINE_integer("top_k", default=20,
         help="used when calculating metrics NDCG@k, recal@k, MRR@k"

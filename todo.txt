@@ -1,7 +1,32 @@
 - use a CliffordNet layer instead of the GATv2.
   - requires a change in the bi-encoder to make embeddings
     that are multivectors and replaces the dot product
-    with inner and outer product.
+    with inner and external (a.k.a. edge) product.
+
+- replace use of passwords in the .env and uris with
+  a mock service for GCP Secret Manager.
+  e.g. can add this to docker-compose-dbs.yaml:
+
+  with services:
+  secret-manager-mock:
+    image: blackwellsystems/gcp-secret-manager-emulator
+    ports:
+      - "9090:9090" # gRPC
+      - "8080:8080" # REST
+
+  and use it with something like:
+    from google.cloud import secretmanager
+    import grpc
+    if os.getenv("ENV") == "development":
+        channel = grpc.insecure_channel("localhost:9090")
+        client = secretmanager.SecretManagerServiceClient(
+            transport=secretmanager.transports.
+                SecretManagerServiceGrpcTransport(channel=channel))
+    else:
+        client = secretmanager.SecretManagerServiceClient()
+
+    other mock services avail too:
+       https://github.com/blackwell-systems?tab=repositories&q=gcp*&type=&language=&sort=name
 
 - install podman for container images
 - install minikube for a local mini kubernetes cluster
