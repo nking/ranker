@@ -577,11 +577,13 @@ def train_fn(config: dict, trial: Trial = None, rngs:nnx.Rngs=None):
     best_val_ndcg_k = -1.0
     try:
         if worker_rank == 0:
+            print(f"mlflow set experiment: {config['mlflow_experiment_name']}")
             mlflow.set_experiment(
                 experiment_name=config['mlflow_experiment_name'],
             )
             # Start a run specifically for this Optuna trial
             # don't use nested=True because the parent isn't in the same thread in production
+            print(f"mlflow start run: {config['trial_id']}")
             mlflow_run = mlflow.start_run(
                 run_name=f"trial_{config.get('trial_id', 0)}",
                 #tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},

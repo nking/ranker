@@ -10,8 +10,8 @@ services:
     ports:
       # binding to docker0 network to try to allow xmanager access.
       # can find the ipaddress using: ip addr show docker0 | grep inet
-      - "127.0.0.1:4443:4443"
-      #- "172.17.0.1:4443:4443"
+      #- "127.0.0.1:4443:4443"
+      - "172.17.0.1:4443:4443"
     volumes:
       - ./fake_gcs_server_buckets:/storage
     # We use -external-url to ensure TensorStore/Orbax get the right redirect address
@@ -34,7 +34,6 @@ services:
       #test: [ "CMD", "curl", "-f", "http://localhost:4443/storage/v1/b" ]
       #test: ["CMD-SHELL", "nc -z 127.0.0.1 4443 || exit 1"]
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:4443/storage/v1/b"]
-      #test: ["CMD", "wget", "-q", "--spider", "http://172.17.0.1:4443/storage/v1/b"]
       #test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:4443/storage/v1/b/data || exit 1"]
       #test: ["CMD-SHELL", "bash -c '< /dev/tcp/127.0.0.1/4443' || exit 1"]
       interval: 5s
@@ -55,8 +54,8 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=postgres  # Use the default management DB
     ports:
-      - "127.0.0.1:5432:5432" # Bind to localhost ONLY (secures it from external world)
-      #- "172.17.0.1:5432:5432"
+      #- "127.0.0.1:5432:5432" # Bind to localhost ONLY (secures it from external world)
+      - "172.17.0.1:5432:5432"
     command: >
       postgres
       -c shared_buffers=128MB 

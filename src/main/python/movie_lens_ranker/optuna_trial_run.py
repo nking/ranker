@@ -77,9 +77,11 @@ def main(_):
         if experiment is None:
             experiment = mlflow.set_experiment(experiment_name=config['study_name'])
             # Create the parent run and immediately get its ID
-            parent_run = mlflow.start_run(run_name="Optuna_HPO")
-            mlflow_parent_run_id = parent_run.info.run_id
-            mlflow.end_run()
+            try:
+                parent_run = mlflow.start_run(run_name="Optuna_HPO")
+                mlflow_parent_run_id = parent_run.info.run_id
+            finally:
+                mlflow.end_run()
         else:
             #get parent run id:
             runs = mlflow.search_runs(
@@ -90,9 +92,11 @@ def main(_):
             if runs:
                 mlflow_parent_run_id = runs[0].info.run_id
             else:
-                parent_run = mlflow.start_run(run_name="Optuna_HPO")
-                mlflow_parent_run_id = parent_run.info.run_id
-                mlflow.end_run()
+                try:
+                    parent_run = mlflow.start_run(run_name="Optuna_HPO")
+                    mlflow_parent_run_id = parent_run.info.run_id
+                finally:
+                    mlflow.end_run()
         config['mlflow_experiment_id'] = experiment.experiment_id
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
         

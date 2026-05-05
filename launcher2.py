@@ -2,6 +2,12 @@ from xmanager import xm
 from xmanager import xm_local
 from dotenv import dotenv_values
 
+import logging
+from absl import logging as absl_logging
+
+absl_logging.set_verbosity(absl_logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
+
 """
 start db services with:
     ./run_compose_dbs.sh
@@ -20,6 +26,7 @@ def main(_):
     
     env_config = {
         **dotenv_values(".env"),
+        'PYTHONUNBUFFERED': '1'
     }
     
     # Add the explicit environment overrides from your yaml
@@ -51,9 +58,26 @@ def main(_):
     with xm_local.create_experiment(experiment_title='optuna_hpo_run') as experiment:
         docker_packageable = xm.dockerfile_container(
             path='.',
-            dockerfile='Dockerfile_cpu',
+            dockerfile='Dockerfile_offline',
             executor_spec = xm_local.Local.Spec(),
+            env_vars=env_config,
+            args={
+                **run_config,
+            },
         )
+        #docker_packageable = xm.dockerfile_container(
+        #    path='.',
+        #    dockerfile='Dockerfile_cpu',
+        #    executor_spec = xm_local.Local.Spec(),
+        #)
+        #docker_packageable = xm.container(
+        #    image_path='ranker-app:latest',
+        #    executor_spec = xm_local.Local.Spec(),
+        #    env_vars=env_config,
+        #    args={
+        #        **run_config,
+        #    },
+        #)
         [executable] = experiment.package([docker_packageable])
 
         # 2. Define the Resource Requirements
@@ -67,9 +91,6 @@ def main(_):
                     executable=executable,
                     executor=xm_local.Local(
                         requirements=resources,
-                        #docker_options=xm_local.DockerOptions(  #?ports ? volumns
-                        #    network='hpo_shared_network'
-                        #)
                     ),
                     name=f"{env_config.get('study_name')}_trial_{i}",
                     env_vars=env_config,

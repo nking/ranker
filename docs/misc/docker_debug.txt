@@ -52,3 +52,22 @@ try:
 except Exception as e:
     print(f'NETWORK ERROR: Could not connect to {host}. Error: {e}')
 "
+---------------
+
+when mapping the ports in docker-compose-dbs.yaml,
+wanted to use the docker0 ipaddress which is 172.17.0.1 because
+it is reachable by container running in xmanager or katib.
+one the db and gcs services were running, I used this to
+check that something outside of the docker compose created 
+network.
+  docker compose up builds a virtualized network toplogy on
+  the host from linux network spaces and virtual ethernet pairs.o
+
+check that the db service is reachable from outside itws network:
+    docker run --rm -e PGPASSWORD='password123' postgres:15 psql -h 172.17.0.1 -U runner -l
+
+========
+
+docker ps -q --filter "label=com.google.xmanager.experiment_id" | xargs -r docker stop
+docker builder prune -f
+     this cleaned up 75GB

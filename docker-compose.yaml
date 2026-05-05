@@ -12,7 +12,6 @@ services:
       gcs:
         condition: service_healthy
     env_file:
-      - .env_db
       - .env
     user: "${UID}:${GID}"
     environment:
