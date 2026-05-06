@@ -1,10 +1,38 @@
 import os
+import logging
+import jax
+def safe_jax_init():
+    # Check if we are in a distributed environment (e.g., K8s, Vertex, Slurm)
+    # Different orchestrators use different keys, but these are common:
+    is_distributed = any(k in os.environ for k in [
+        'JAX_COORDINATOR_ADDRESS', 'KUBERNETES_SERVICE_HOST',
+        'SLURM_JOB_ID', 'PADDLE_TRAINER_ENDPOINTS'
+    ])
 
+    try:
+        if is_distributed:
+            # Let JAX auto-detect cluster settings
+            jax.distributed.initialize()
+        else:
+            # Force local-only initialization for unit tests
+            jax.distributed.initialize(
+                coordinator_address="localhost:8888",
+                num_processes=1,
+                process_id=0
+            )
+    except RuntimeError as e:
+        # Handle the "already initialized" error gracefully
+        if "already initialized" in str(e).lower():
+            pass
+        else:
+            raise e
+safe_jax_init()
+
+import numpy as np
 from dotenv import dotenv_values
 
 import glob
 import os.path
-import pathlib
 
 import psycopg2
 import time
@@ -19,7 +47,7 @@ from helper import *
 from movie_lens_ranker.train import *
 from movie_lens_ranker.util import set_flags_from_dict
 from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
-    get_mlflow_metrics_by_exp_name, _read_mlflow_metrics
+    get_mlflow_metrics_by_exp_name
 
 from movie_lens_ranker.optuna_trial_run import main as run_optuna_main
 

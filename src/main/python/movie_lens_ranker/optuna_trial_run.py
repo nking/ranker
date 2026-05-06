@@ -1,4 +1,30 @@
+import os
+import logging
 import jax
+def safe_jax_init():
+    # Check if we are in a distributed environment (e.g., K8s, Vertex, Slurm)
+    # Different orchestrators use different keys, but these are common:
+    is_distributed = any(k in os.environ for k in [
+        'JAX_COORDINATOR_ADDRESS', 'KUBERNETES_SERVICE_HOST',
+        'SLURM_JOB_ID', 'PADDLE_TRAINER_ENDPOINTS'
+    ])
+
+    try:
+        if is_distributed:
+            # Let JAX auto-detect cluster settings
+            jax.distributed.initialize()
+        else:
+            # Force local-only initialization for unit tests
+            jax.distributed.initialize(
+                coordinator_address="localhost:8888",
+                num_processes=1,
+                process_id=0
+            )
+    except RuntimeError as e:
+        # Handle the "already initialized" error gracefully
+        print(f'WARNING while trying to iniialize jax distributed: {e}')
+safe_jax_init()
+
 import mlflow
 from absl import flags
 from optuna.pruners import MedianPruner
@@ -18,7 +44,6 @@ import time
 import sys
 
 import fsspec
-import os
 #load this globally:
 fsspec.config.conf['gcs'] = {
     'requester_pays': False,
@@ -52,6 +77,7 @@ def main(_):
     :param _:
     :return:
     """
+    
     config = FLAGS.flag_values_dict()
     #removing problem key: '?'
     config = {k: v for k, v in config.items() if k.find('?') == -1}

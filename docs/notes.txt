@@ -51,13 +51,16 @@ In choosing the model serialization and serving:
 - jax serving format
 - consider Neptune Serving Engine compatibility
 
-In choosing an MLOps pipeline:
-- needs to be compatible with Jax AI Stack, cloud compatible
+In choosing an MLOps pipeline and ML APIs:
+- ML APIs need to be compatible with Jax AI Stack, cloud compatible
   and agnostic where possible.
-- needs data parallel distributed training.
-- needs experiment tracking and logging details such
+- MLOps needs data parallel distributed training.
+  that means jax aware and jax using in order to be
+  able to use grain's data sharding.
+- ML APIs and MLOps need experiment tracking and logging details such
   as metrics.  needs visualization.
-- might need to exist in venv separate from the
+- orchestrator and MLOps in general
+  might need to exist in venv separate from the
   jax ai stack
   - Jax AI stack has jax==0.10.0, which for python 3.12
      has fixed protobuf==7.34.1, but so far all seems well
@@ -69,13 +72,12 @@ In choosing an MLOps pipeline:
   SQLAlchemy doesn't officially support threading and
   memory management of py3.12, so needs py3.11
 - google-vizier==0.1.24 installs  SQL 2.0.49
-  so cannot share same venv as xmanager
+  so cannot share same venv as xmanager,
+  but can co-habitate w/ the jax ai stack.
 ==> an orchestator env w/ google-vizier==v0.0.2-alpha
     and a seperate training container env using
     google-vizier==0.1.24 have schema differences
     and gRPC protocol differences.
-    ==> cannot use google-vizier w/ xmanager as orchestor
-        and latest jax ai stack as api in training container.
 - optuna==4.8.0 says sqlalchemy>=1.4.2
   need to use pip install optuna -c orchestrator_constrants.txt
   to keep it from upgrading SQLAlchemy
@@ -91,6 +93,13 @@ In choosing an MLOps pipeline:
     code when xmanager + optuna are orchestration
     and when kfp + katib are orchestration.
 - most common options that work in local and cloud environments,
+  - KFP + Kubeflow Trainer
+    Kubeflow Trainer injects jax environment into each container
+    - JAX_NUM_PROCESSES: The total number of pods/containers in your distributed run.
+    - JAX_PROCESS_ID: The unique rank of that specific container.
+    - JAX_COORDINATOR_ADDRESS: The IP of the master node (rank 0).
+    KFP launches a new TrainJob for each trial
+
   that don't have version conflicts mentioned above.
   - KFP as the orchestrator running in its own virtual env
     - docker container images holding the code which needs

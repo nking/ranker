@@ -54,13 +54,11 @@ def get_env_resources():
     jax.set_mesh(mesh)
     device_dict = {}
     if backend == "tpu":
-        jax.distributed.initialize()
         device_dict.update({"use_gpu": False, "use_tpu": True,
             "resources_per_worker": {"TPU": num_local_devices}})
     elif backend == "gpu":
         # Usually, Ray handles GPU assignment automatically with use_gpu=True,
         # but specifying 1 GPU per worker ensures strict isolation.
-        jax.distributed.initialize()
         device_dict.update({"use_gpu": True, "use_tpu": False,
             "resources_per_worker": {"GPU": 1}})
     else:
