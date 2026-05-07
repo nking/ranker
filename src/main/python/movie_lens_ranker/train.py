@@ -4,8 +4,6 @@ from typing import Dict, Tuple, Union, Any, Optional
 
 import mlflow
 import optax
-import optuna
-from optuna import Trial
 from math import log
 import jax
 import jax.tree_util as jtu
@@ -55,32 +53,6 @@ def get_nontrainable_train_config(movies_uri:str,
     config['num_epochs'] = num_epochs
     config['batch_size'] = batch_size
    
-    return config
-    
-def get_optuna_suggestions(trial : Trial) -> Dict[str, Any]:
-    config = {}
-    config['top_k'] = 20
-    config['num_layers'] = 2; trial.set_user_attr("num_layers", 2) #2 hop neighborhood.  3 tends to oversmooth
-    config['num_heads'] = trial.suggest_categorical("num_heads", [2, 4, 8])
-    # Ensure hidden_dim is a multiple of num_heads
-    config['hidden_dim'] = trial.suggest_categorical("hidden_dim",
-        [h for h in [64, 128, 256] if h % config['num_heads'] == 0])
-    config["num_candidates"] = trial.suggest_int("num_candidates", low=2*config['top_k'], high=500, step=10, log=False)
-    config["max_history"] = trial.suggest_int("max_history", 2*config['top_k'], 5*config['hidden_dim'], log=False)
-    config['learning_rate'] = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
-    config['out_dim'] = trial.suggest_categorical("out_dim", [16, 32])
-    config['edge_embed_dim'] = trial.suggest_categorical("edge_embed_dim", [8, 16])
-    config['dropout_rate'] = trial.suggest_float("dropout_rate", 0.1, 0.3, step=0.05, log=False)
-    
-    #TODO: plot learning_rate/weight_decay plot_learning_rate_vs_weight_decays() and if they're linear, use these next
-    # 2 lines instead of the 3rd because we want to try to cover the whole space
-    #wd_ratio = trial.suggest_float("wd_ratio", 0.01, 1.0, log=True)
-    #config['weight_decay'] = config['learning_rate'] * wd_ratio
-    config['weight_decay'] = trial.suggest_float("weight_decay", 1e-4, 1e-2, log=True)
-    
-    #if config['hidden_dim'] % config['num_heads'] != 0:
-    #    raise optuna.exceptions.TrialPruned("Incompatible dimensions")
-    
     return config
 
 def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple):
@@ -307,8 +279,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer,
         top_k:int, latest_checkpoint_uri: str, best_checkpoint_uri:str,
         rngs:nnx.Rngs, config_dict:Dict[str, Union[str, int, float]],
-        trial:Trial=None,
-        restored_train_dataloader_iter=None, restored_global_step:int=None) -> Tuple[float, Union[optuna.trial.TrialState, None]]:
+        save_checkpoints: bool=False,
+        restored_train_dataloader_iter=None, restored_global_step:int=None) -> float:
     """
     a shard's portion of the training
     :param model:
@@ -352,28 +324,29 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     print(f'STEPS_PER_EPOCH_GLOBAL_VAL={STEPS_PER_EPOCH_GLOBAL_VAL}')
     print(f'STEPS_PER_EPOCH_LOCAL_VAL={STEPS_PER_EPOCH_LOCAL_VAL}')
     
-    mngr_latest = ocp.CheckpointManager(latest_checkpoint_uri,
-        item_handlers={
-            'model': ocp.StandardCheckpointHandler(),
-            'opt': ocp.StandardCheckpointHandler(),
-            'global_step': ocp.StandardCheckpointHandler(),
-            'rngs': ocp.StandardCheckpointHandler(),
-            'train_dataloader': grain.checkpoint.CheckpointHandler(),
-            'config': ocp.handlers.JsonCheckpointHandler()
-        },
-        options=ocp.CheckpointManagerOptions(max_to_keep=2)
-    )
-    mngr_best = ocp.CheckpointManager(best_checkpoint_uri,
-        item_handlers={
-            'model': ocp.StandardCheckpointHandler(),
-            'opt': ocp.StandardCheckpointHandler(),
-            'global_step': ocp.StandardCheckpointHandler(),
-            'rngs': ocp.StandardCheckpointHandler(),
-            'train_dataloader': grain.checkpoint.CheckpointHandler(),
-            'config': ocp.handlers.JsonCheckpointHandler()
-        },
-        options=ocp.CheckpointManagerOptions(max_to_keep=2)
-    )
+    if save_checkpoints:
+        mngr_latest = ocp.CheckpointManager(latest_checkpoint_uri,
+            item_handlers={
+                'model': ocp.StandardCheckpointHandler(),
+                'opt': ocp.StandardCheckpointHandler(),
+                'global_step': ocp.StandardCheckpointHandler(),
+                'rngs': ocp.StandardCheckpointHandler(),
+                'train_dataloader': grain.checkpoint.CheckpointHandler(),
+                'config': ocp.handlers.JsonCheckpointHandler()
+            },
+            options=ocp.CheckpointManagerOptions(max_to_keep=2)
+        )
+        mngr_best = ocp.CheckpointManager(best_checkpoint_uri,
+            item_handlers={
+                'model': ocp.StandardCheckpointHandler(),
+                'opt': ocp.StandardCheckpointHandler(),
+                'global_step': ocp.StandardCheckpointHandler(),
+                'rngs': ocp.StandardCheckpointHandler(),
+                'train_dataloader': grain.checkpoint.CheckpointHandler(),
+                'config': ocp.handlers.JsonCheckpointHandler()
+            },
+            options=ocp.CheckpointManagerOptions(max_to_keep=2)
+        )
     
     ndcg_text = f'ndcg_{top_k}'
     mrr_text = f'mrr_{top_k}'
@@ -444,38 +417,16 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 f"val_{recall_text}":global_avg_val_recall.item()
             }
             
-            #orbax for checkpointing.  saves latest 2
-            _graphdef, model_state = nnx.split(model)
-            _, opt_state = nnx.split(optimizer)
-            mngr_latest.save(
-                epoch,
-                args=ocp.args.Composite(
-                    model=ocp.args.StandardSave(model_state),
-                    opt=ocp.args.StandardSave(opt_state),
-                    global_step=ocp.args.StandardSave({'global_step':global_step}),
-                    # NNX RNGs need to be converted to state (dictionary of arrays)
-                    rngs=ocp.args.StandardSave(nnx.state(rngs)),
-                    # Include your dataloader from before
-                    train_dataloader=grain.checkpoint.CheckpointSave(train_dataloader_iter),
-                    config=ocp.args.JsonSave(config_dict)
-                )
-            )
-            mngr_latest.wait_until_finished()  # Ensure it's on disk
-            
-            if global_avg_val_ndcg > best_ndcg + 1e-6:
-                best_ndcg = global_avg_val_ndcg.item()
-                epochs_without_improvement = 0
-                if rank == 0:
-                    print(f"  New best val NDCG! ({global_avg_val_ndcg})")
-                #all shards write their best
+            if save_checkpoints:
+                #orbax for checkpointing.  saves latest 2
                 _graphdef, model_state = nnx.split(model)
                 _, opt_state = nnx.split(optimizer)
-                mngr_best.save(
+                mngr_latest.save(
                     epoch,
                     args=ocp.args.Composite(
                         model=ocp.args.StandardSave(model_state),
                         opt=ocp.args.StandardSave(opt_state),
-                        global_step=ocp.args.StandardSave({'global_step': global_step}),
+                        global_step=ocp.args.StandardSave({'global_step':global_step}),
                         # NNX RNGs need to be converted to state (dictionary of arrays)
                         rngs=ocp.args.StandardSave(nnx.state(rngs)),
                         # Include your dataloader from before
@@ -483,7 +434,31 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                         config=ocp.args.JsonSave(config_dict)
                     )
                 )
-                mngr_best.wait_until_finished()  # Ensure it's on disk
+                mngr_latest.wait_until_finished()  # Ensure it's on disk
+            
+            if global_avg_val_ndcg > best_ndcg + 1e-6:
+                best_ndcg = global_avg_val_ndcg.item()
+                epochs_without_improvement = 0
+                if rank == 0:
+                    print(f"  New best val NDCG! ({global_avg_val_ndcg})")
+                if save_checkpoints:
+                    #all shards write their best
+                    _graphdef, model_state = nnx.split(model)
+                    _, opt_state = nnx.split(optimizer)
+                    mngr_best.save(
+                        epoch,
+                        args=ocp.args.Composite(
+                            model=ocp.args.StandardSave(model_state),
+                            opt=ocp.args.StandardSave(opt_state),
+                            global_step=ocp.args.StandardSave({'global_step': global_step}),
+                            # NNX RNGs need to be converted to state (dictionary of arrays)
+                            rngs=ocp.args.StandardSave(nnx.state(rngs)),
+                            # Include your dataloader from before
+                            train_dataloader=grain.checkpoint.CheckpointSave(train_dataloader_iter),
+                            config=ocp.args.JsonSave(config_dict)
+                        )
+                    )
+                    mngr_best.wait_until_finished()  # Ensure it's on disk
             elif epoch >= delay:
                 epochs_without_improvement += 1
                 if rank == 0:
@@ -495,20 +470,12 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 break
             
             if rank == 0:
-                if trial is not None:
-                    trial.report(float(best_ndcg), step=epoch)
                 mlflow.log_metrics(metrics_dict, step=epoch)
                 
         if early_stop_triggered[0]:
             break
-        
-    optuna_STATE = None
-    if early_stop_triggered[0] and trial is not None:
-        optuna_STATE = optuna.trial.TrialState.COMPLETE
-    if trial is not None:
-        optuna_STATE =  optuna.trial.TrialState.PRUNED if trial.should_prune() else optuna.trial.TrialState.COMPLETE
-        
-    return best_ndcg, optuna_STATE
+
+    return best_ndcg
 
 def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs=None) -> Dict[str, Any]:
     train_dataloader, val_dataloader = create_train_and_val_dataloaders(
@@ -550,7 +517,15 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs=None) -> Di
     return {"rngs": rngs, "model": model, "optimizer": optimizer,
         'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader}
 
-def train_fn(config: dict, trial: Trial = None, rngs:nnx.Rngs=None):
+def train_fn(config: dict, save_checkpoints:bool=False, rngs:nnx.Rngs=None) -> Tuple[float, str]:
+    """
+    train the model given data and params specified in config dict and return best validation set ndcg@20 metric and
+    return the mlflow_run_id
+    :param config:
+    :param save_checkpoints:
+    :param rngs:
+    :return: val_ndcg_20, mlflow_run_id
+    """
     
     #hard wiring top_k for consistent stats with retrieval and reranker
     config['top_k'] = 20
@@ -572,11 +547,10 @@ def train_fn(config: dict, trial: Trial = None, rngs:nnx.Rngs=None):
             mlflow.set_experiment(
                 experiment_name=config['mlflow_experiment_name'],
             )
-            # Start a run specifically for this Optuna trial
             # don't use nested=True because the parent isn't in the same thread in production
-            print(f"mlflow start run: {config['trial_id']}")
+            print(f"mlflow start run: {config['train_id']}")
             mlflow_run = mlflow.start_run(
-                run_name=f"trial_{config.get('trial_id', 0)}",
+                run_name=f"train_{config.get('train_id', 0)}",
                 #tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
                 tags = {"mlflow.parentRunId" : config['mlflow_parent_run_id']}
             )
@@ -587,12 +561,7 @@ def train_fn(config: dict, trial: Trial = None, rngs:nnx.Rngs=None):
                     print(f"problem key: {k}={v}", flush=True)
             save_dict = {k:v for k,v in config.items() if k.find('?')==-1}
             mlflow.log_params(save_dict)
-            if trial is not None:
-                #store mlflow run_id in optuna, so can get config from mlflows param more easily
-                print(f'mlflow_run.info.run_id={mlflow_run.info.run_id}', flush=True)
-                trial.set_user_attr("mlflow_run_id", mlflow_run.info.run_id)
-                print( f"VERIFY: Trial attr: {trial.user_attrs.get('mlflow_run_id')}", flush=True)
-
+           
             mlflow.log_text(str(model), "model_summary.txt")
             mlflow.log_param("best_checkpoint_uri", config['best_checkpoint_uri'])
             mlflow.log_param("latest_checkpoint_uri", config['latest_checkpoint_uri'])
@@ -606,8 +575,8 @@ def train_fn(config: dict, trial: Trial = None, rngs:nnx.Rngs=None):
             latest_checkpoint_uri=config['latest_checkpoint_uri'],
             best_checkpoint_uri=config['best_checkpoint_uri'],
             rngs=rngs, config_dict=config,
-            trial=trial)
-        return best_val_ndcg_k, STATE
+            save_checkpoints=save_checkpoints)
+        return best_val_ndcg_k, config['mlflow_run_id']
     finally:
         if mlflow_run is not None:
             mlflow.log_metric(f"final_ndcg_{config['top_k']}", float(best_val_ndcg_k))
@@ -751,7 +720,7 @@ def test_fn(config: dict):
     
     worker_rank = jax.process_index()
     
-    restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
+    restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['test_checkpoint_uri'])
     
     model = restore_dict['model']
     
@@ -761,11 +730,10 @@ def test_fn(config: dict):
     try:
         if worker_rank == 0:
             mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
-            # Start a run specifically for this Optuna trial
             # don't use nested=True because the parent isn't in the same thread in production
             #in production, there may be ACL to solve for this:
             mlflow_run = mlflow.start_run(
-                run_name=f"trial_{config.get('trial_id', 0)}",
+                run_name=f"test_{config.get('test_id', 0)}",
                 # tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
                 tags={"mlflow.parentRunId": config['mlflow_parent_run_id']}
             )
@@ -803,7 +771,7 @@ def test_fn(config: dict):
         if mlflow_run is not None:
             mlflow.end_run()
 
-def resume_train_fn(config: dict, trial:Optional[Trial]):
+def resume_train_fn(config: dict, save_checkpoints: bool=False):
     
     worker_rank = jax.process_index()
     
@@ -814,7 +782,7 @@ def resume_train_fn(config: dict, trial:Optional[Trial]):
     try:
         if worker_rank == 0:
             mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
-            # Start a run specifically for this Optuna trial
+            # Start a run specifically for this HPO trial
             # don't use nested=True because the parent isn't in the same thread in production
             run_id = config.get('mlflow_run_id', None)  # is not None for a "restore, resume training"
             # in production, there may be ACL to solve for this:
@@ -842,9 +810,9 @@ def resume_train_fn(config: dict, trial:Optional[Trial]):
             best_checkpoint_uri=config['best_checkpoint_uri'],
             rngs=restore_dict['rngs'],
             config_dict=config,
-            trial=trial,
             restored_train_dataloader_iter=restore_dict['train_dataloader_iter'],
             restored_global_step=restore_dict['global_step'],
+            save_checkpoints=save_checkpoints
         )
         return best_val_ndcg_k, STATE
         

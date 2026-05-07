@@ -42,9 +42,6 @@ hyper-parameter tuning options:
 - Optuna
 - Ray Tune
 - katib for use with kfp
-summary: below, version conflicts are mentioned
-leaving optuna and katib as best options.
-katib uses optuna internally.
 
 In choosing the model serialization and serving:
 - Orbax for jax checkpointing and serialization
@@ -77,21 +74,15 @@ In choosing an MLOps pipeline and ML APIs:
 ==> an orchestator env w/ google-vizier==v0.0.2-alpha
     and a seperate training container env using
     google-vizier==0.1.24 have schema differences
-    and gRPC protocol differences.
+    and gRPC protocol differences, but vizier doesn't need to live in same venv as orchestrator
 - optuna==4.8.0 says sqlalchemy>=1.4.2
-  need to use pip install optuna -c orchestrator_constrants.txt
-  to keep it from upgrading SQLAlchemy
-- optuna as a tuner does not have the version conflicts
-  - in the orchestrator environment:
-     - use optuna to init a study and define search space
-  - in the training container:
-     - use optuna to get study suggested params w/ study.ask()
-       and report the results using study.tell()
+- using vizier for its compatibility with the google stack and its compartmentalized
+  structure of suggested parameters separated from optimization of them. state is
+  maintained on the vizier server and concurrent workers can ask for suggested HPs.
+  the worker reports back results to the vizier server.  the compartmentalization allows
+  the internal _train_fn to not need to know anything about the HPO because it receives parameters
+  and returns evaluation metrics as a result.
   - can use postgres, mysql,
-    - or a smaller footprint db?
-  - with some coding for it, should be easy to reuse same
-    code when xmanager + optuna are orchestration
-    and when kfp + katib are orchestration.
 - most common options that work in local and cloud environments,
   - KFP + Kubeflow Trainer
     Kubeflow Trainer injects jax environment into each container
@@ -99,28 +90,25 @@ In choosing an MLOps pipeline and ML APIs:
     - JAX_PROCESS_ID: The unique rank of that specific container.
     - JAX_COORDINATOR_ADDRESS: The IP of the master node (rank 0).
     KFP launches a new TrainJob for each trial
-
-  that don't have version conflicts mentioned above.
-  - KFP as the orchestrator running in its own virtual env
     - docker container images holding the code which needs
       the JAX AI stack libraries
-    - katib as tuner, but katib is using optuna
+    - katib could have been chosen instead of vizier but requires changes in code to use
+      and vizier is actively updated and used in Vertex AI
   - KubeRay as a kubernetes operator or ManagedRay
     - docker container images holding the code which needs
       the JAX AI stack libraries
     Ray handles JAX TPU/GPU memory management best, but has
     bugs in incompatiblity of their Tuner with new v2 Train.
-  - xmanager as orchestrator
-    - optuna as tuner
+  - xmanager as an orchestrator
 in summary, am now considering:
   (1) development, tuning, training:
       - xmanager for orchestrator,
         jax ai stack in training container,
-        and optuna in both environments
+        and oss vizier in both environments
   (2) full mlops, only listing tuning, training here:
       - kfp for orchestrator
         jax ai stack in training container,
-        katib for tuning 
+        oss vizier for tuning
 
 Monitoring:
 - system performance monitoring:

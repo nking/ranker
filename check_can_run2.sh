@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#learnable params are handled by optuna internally, but katbi passes them in
-#--max_hisory=200 \
+#learnable params are handled by vizier internally, but katbi passes them in
+#--max_history=200 \
 #--num_candidates=40 \
 #--learning_rate=4e-4 \
 #--weight_decay=1e-4 = \
@@ -17,7 +17,8 @@ export $(grep -v '^#' .env | xargs)
 docker compose run --rm app \
 --study_name="GraphRanker_tuning_cli" \
 --mlflow_experiment_name="GraphRanker_tuning_cli" \
---optuna_storage_uri="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/optuna_db" \
+--vizier_endpoint="db:8000" \
+--vizier_storage_uri="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/vizier_db" \
 --mlflow_tracking_uri="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/mlflow_db" \
 --latest_checkpoint_uri="http://gcs:4443/checkpoint_bucket/latest" \
 --best_checkpoint_uri="http://gcs:4443/checkpoint_bucket/best" \

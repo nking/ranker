@@ -28,7 +28,7 @@ mlflow_config_keys = {
     # 'mlflow_tracking_token': None,
     'mlflow_parent_run_id'
 }
-optuna_config_keys = {'optuna_storage_uri'}
+hpo_config_keys = {'vizier_storage_uri', 'vizier_endpoint'}
 model_params_trainable_keys = {
     'top_k',
     'learning_rate',
@@ -68,17 +68,6 @@ def get_env_resources():
     return device_dict, mesh
 
 
-def parse_args_into_dict_with_exists_check():
-    parser = get_args_parser()
-    args = parser.parse_args()
-    args_dict = vars(args)
-    #for key in {**data_params_nontrainable_keys, **data_params_trainable_keys,
-    #    **model_params_nontrainable_keys, **model_params_trainable_keys,
-    #    **optuna_config_keys}:
-    #    if key not in args_dict:
-    #        raise ValueError("missing required argument: {}".format(key))
-    return args_dict
-
 def set_flags_from_dict(params_dict):
     """Sets absl FLAGS from a dictionary, ensuring they are marked as parsed."""
     for key, value in params_dict.items():
@@ -86,7 +75,7 @@ def set_flags_from_dict(params_dict):
             setattr(FLAGS, key, value)
         else:
             # Optional: Define the flag on the fly if it's missing
-            # This is helpful for dynamic Optuna params
+            # This is helpful for dynamic HPO params
             try:
                 flags.DEFINE_alias(key, key)  # Or use a generic DEFINE
             except Exception:
@@ -161,19 +150,40 @@ def define_flags():
         help="uri to write latest checkpoints too.  model, data, optimizer and seed state are saved"
     )
     flags.DEFINE_string("best_checkpoint_uri", default=None,
-        help="uri to write checkpoints to for best model.  model, data, optimizer and seed state are saved"
+        help="uri to write checkpoints to for best model.  model, data, optimizer and seed state are saved.  it's also the uri to read best model from when phase='test_best'"
+    )
+    flags.DEFINE_string("test_checkpoint_uri", default=None,
+        help="uri to read orbax checkpointed model for tests when phase='test_given'"
     )
     flags.DEFINE_string("study_name", default=None,
-        help="study name for use in optuna study and mflow experiment name"
+        help="study name for use in vizier study and mflow experiment name"
     )
-    flags.DEFINE_string("optuna_storage_uri", default=None,
-        help="uri for optuna db"
+    flags.DEFINE_string("project_id", default=None,
+        help="project_id for use with vizier HPO"
     )
-    flags.DEFINE_integer("trial_id", default=1,
-        help="trial id for use with optuna, and orbax checkpoints"
+    flags.DEFINE_string("vizier_storage_uri", default=None,
+        help="uri for vizier db"
     )
-    flags.DEFINE_string("phase", default="train",
-        help="tag used with mlflow run.  e.g. train, e.g. test"
+    flags.DEFINE_string("vizier_endpoint", default=None,
+        help="endpoint for vizier server"
+    )
+    flags.DEFINE_string("trial_ids", default=1,
+        help="a string serialization of array of integer trial ids for a worker, e.g. '[0, 1]' and 2 trials will be conducted"
+    )
+    flags.DEFINE_integer("test_id", default=0,
+        help="an id to assign to test if phase is 'test_best' or 'test_given'"
+    )
+    flags.DEFINE_integer("train_id", default=0,
+        help="an id to assign to train if phase is 'train_best' or 'train_given'"
+    )
+    flags.DEFINE_enum(
+        'phase', 'train',
+        ['tune', 'train_best', 'train_given', 'test_best', 'test_given'],
+        'mode for running the train_fn.  tune: HPO run; '
+        'train_best: use best HPs from tune; '
+        'train_given: use given HPs; '
+        'test_best: use test_fn for best model for the given study_name and projec_id;'
+        'test_given: use test_fn with test_checkpoint_uri'
     )
     flags.DEFINE_string("mlflow_tracking_uri", default=None,
         help="MLFlow tracking uri"
@@ -187,7 +197,7 @@ def define_flags():
     flags.DEFINE_string("USER", default=None,
         help="linux env variable name"
     )
-    # ====== TRAINABLE MODEL PARAMS ======
+    # ====== TRAINABLE MODEL PARAMS, for tune phase, they're supplied by internal code ======
     flags.DEFINE_integer("top_k", default=20,
         help="used when calculating metrics NDCG@k, recal@k, MRR@k"
     )
@@ -218,111 +228,6 @@ def define_flags():
     flags.DEFINE_bool("debug", default=False,
         help="prints debug statements"
     )
-
-def get_args_parser():
-    parser = argparse.ArgumentParser(description="parse for training run", )
-    # ====== NON-TRAINABLE DATA PARAMS ======
-    parser.add_argument("--movies_uri", type=str,
-        help="uri for array_record containing movie ids"
-    )
-    parser.add_argument("--recommendations_uri", type=str,
-        help="uri for array_record containing, each row being [user_id, [movie_ids]]"
-    )
-    parser.add_argument("--recommendations_ts_uri", type=str,
-        help="uri for array_record containing the timestamps for recommendations_uri, each row being [user_id, [timestamps]]"
-    )
-    parser.add_argument("--ratings_train_uri", type=str,
-        help="uri for array_record containing the ratings train dataset, each row being [user_id, movie_id, rating, timestamp]. for this project the dataset should contain only positives"
-    )
-    parser.add_argument("--ratings_val_uri", type=str,
-        help="uri for array_record containing the ratings val dataset, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
-    )
-    parser.add_argument("--train_negatives_uri", type=str,
-        help="uri for array_record containing the ratings train dataset negatives, each row being [user_id, movie_id, rating, timestamp]"
-    )
-    parser.add_argument("--val_negatives_uri", type=str,
-        help="uri for array_record containing the ratings val dataset negatives, each row being [user_id, movie_id, rating, timestamp]"
-    )
-    parser.add_argument("--seed", type=int, default=0,
-        help="seed used for pseudo random number generator"
-    )
-    # ====== TRAINABLE DATA PARAMS ======
-    parser.add_argument("--max_history", type=int,
-        help="maximum number per user of positive ratings to use for their graph"
-    )
-    parser.add_argument("--num_candidates", type=int,
-        help="number per user of negatives + positive to use for their final graph"
-    )
-    parser.add_argument("--num_epochs", type=int,
-        help="number of epochs to train"
-    )
-    parser.add_argument("--batch_size", type=int,
-        help="number of data examples to use at a time for training"
-    )
-    # ====== NON-TRAINABLE MODEL PARAMS ======
-    parser.add_argument("--user_embeddings_uri", type=str,
-        help="uri to read the retrieval written user embeddings. each row holds [user_id] [embeddings]]"
-    )
-    parser.add_argument("--movie_embeddings_uri", type=str,
-        help="uri to read the retrieval written movie embeddings. each row holds [movie_id] [embeddings]]"
-    )
-    parser.add_argument("--latest_checkpoint_uri", type=str,
-        help="uri to write latest checkpoints too.  model, data, optimizer and seed state are saved"
-    )
-    parser.add_argument("--best_checkpoint_uri", type=str,
-        help="uri to write checkpoints to for best model.  model, data, optimizer and seed state are saved"
-    )
-    parser.add_argument("--study_name", type=str,
-        help="study name for use in optuna study and mflow experiment name"
-    )
-    parser.add_argument("--optuna_storage_uri", type=str,
-        help="uri for optuna db"
-    )
-    parser.add_argument("--trial_id", type=int,
-        help="trial id for use with optuna, and orbax checkpoints"
-    )
-    parser.add_argument("--phase", type=int,
-        help="tag used with mlflow run.  e.g. train, e.g. test"
-    )
-    parser.add_argument("--mlflow_tracking_uri", type=str,
-        help="MLFlow tracking uri"
-    )
-    parser.add_argument("--mlflow_experiment_name", type=str,
-        help="MLFlow experiment name"
-    )
-    # ====== TRAINABLE MODEL PARAMS ======
-    parser.add_argument("--top_k", type=int,
-        help="used when calculating metrics NDCG@k, recal@k, MRR@k"
-    )
-    parser.add_argument("--learning_rate", type=float,
-        help="learning_rate for the AdamW optimizer"
-    )
-    parser.add_argument("--weight_decay", type=float,
-        help="weight_decay for the AdamW optimizer"
-    )
-    parser.add_argument("--out_dim", type=int,
-        help="output dimension of the score head dense layer in GraphRanker"
-    )
-    parser.add_argument("--hidden_dim", type=int,
-        help="size of hidden layers per head in the GATv2 layer of GraphPranker"
-    )
-    parser.add_argument("--num_layers", type=int,
-        help="number of layers in the GATv2 layer of the GraphRanker"
-    )
-    parser.add_argument("--num_heads", type=int,
-        help="number of attention heads in the GATv2 layer of the GraphRanker"
-    )
-    parser.add_argument("--edge_embed_dim", type=int,
-        help="size of output of the GATv2 layer of GraphPranker"
-    )
-    parser.add_argument("--dropout_rate", type=float,
-        help="the dropout probability of a layer in the GATv2 layer of the GraphRanker"
-    )
-    parser.add_argument("--debug", type=bool,
-        help="prints debug statements"
-    )
-    return parser
-
 
 def read_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
     """

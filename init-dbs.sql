@@ -1,2 +1,2 @@
 CREATE DATABASE mlflow_db;
-CREATE DATABASE optuna_db;
+CREATE DATABASE vizier_db;

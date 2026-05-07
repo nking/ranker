@@ -6,9 +6,6 @@ import polars as pl
 from urllib.parse import urlparse
 from pathlib import Path
 
-import optuna.visualization as vis
-from optuna import Study
-
 from mlflow.tracking import MlflowClient
 
 def get_project_dir() -> str:
@@ -78,8 +75,4 @@ def plot_mlflow_metrics(metrics_dict:dict):
         ).encode(tooltip=["epoch", "variable", key] )
         chart.save(os.path.join(get_bin_dir(), f"{key}.png"), ppi=200)
         
-def plot_learning_rate_vs_weight_decays(study: Study):
-    # After study.optimize(...) or after loading the study from DB
-    fig = vis.plot_contour(study, params=["learning_rate", "weight_decay"])
-    fig.write_html("optuna_landscape.html")
     

@@ -67,7 +67,24 @@ services:
       # Mount the init script into the special entrypoint directory
       - ./init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d mlflow_db" ]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d mlflow_db && pg_isready -U ${POSTGRES_USER} -d vizier_db" ]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  vizier_server:
+    build:
+      context: .
+      dockerfile: Dockerfile_vizier
+    container_name: containerized_vizier_server
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    user: "${UID}:${GID}"
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/postgres
+    ports:
+      - "172.17.0.1:8000:8000"
+    restart: unless-stopped

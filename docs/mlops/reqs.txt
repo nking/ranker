@@ -76,8 +76,8 @@ try another framework, that is more stable and or simpler
 if possible.
 options:
 - google's vizier for hypertune training
-   - version compat conflicts. see notes.
-- optuna, katib
+   - version compat conflicts only with xmanager.
+- vizier, optuna, katib
 
 
 Dataloading:  Google Grain
@@ -121,4 +121,5 @@ mlflow-skinny has
 orbax checkpoint has
    ability to store to local disk, GCS, AWS S3, Azure storage blob
 
-optuna needs a database
+mflow and vizier need a multithread capable sql database
+orbax and the input data files need an object store

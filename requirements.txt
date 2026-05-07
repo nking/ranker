@@ -53,6 +53,7 @@ dvc-render==1.0.2
 dvc-studio-client==0.22.0
 dvc-task==0.40.2
 entrypoints==0.4
+equinox==0.11.7
 etils==1.14.0
 fastapi==0.136.1
 filelock==3.29.0
@@ -62,6 +63,7 @@ flufl.lock==9.0.0
 frozenlist==1.8.0
 fsspec==2026.2.0
 funcy==2.0
+gast==0.7.0
 gcsfs==2026.2.0
 gitdb==4.0.12
 GitPython==3.1.47
@@ -73,6 +75,7 @@ google-cloud-storage==3.10.1
 google-cloud-storage-control==1.11.0
 google-crc32c==1.8.0
 google-resumable-media==2.8.2
+google-vizier==0.1.24
 googleapis-common-protos==1.74.0
 grain==0.2.13
 grandalf==0.8
@@ -90,6 +93,7 @@ iterative-telemetry==0.0.10
 jax==0.8.0
 jax-ai-stack==2025.10.28
 jaxlib==0.8.0
+jaxopt==0.8.5
 jaxtyping==0.3.9
 Jinja2==3.1.6
 jraph @ git+https://github.com/deepmind/jraph.git@51f5990104f7374492f8f3ea1cbc47feb411c69c
@@ -120,7 +124,6 @@ opentelemetry-sdk==1.41.1
 opentelemetry-semantic-conventions==0.62b1
 opt_einsum==3.4.0
 optax==0.2.6
-optuna==4.2.1
 orbax-checkpoint==0.11.26
 orbax-export==0.0.8
 orjson==3.11.8
@@ -129,6 +132,7 @@ pathspec==1.1.1
 platformdirs==4.9.6
 polars==1.40.1
 polars-runtime-32==1.40.1
+portpicker==1.6.0
 prettytable==3.17.0
 prompt_toolkit==3.0.52
 propcache==0.4.1
@@ -176,10 +180,12 @@ starlette==1.0.0
 stevedore==5.7.0
 tabulate==0.10.0
 tensorstore==0.1.82
+tfp-nightly==0.26.0.dev20260506
 tomlkit==0.14.0
 toolz==1.1.0
 tqdm==4.67.3
 treescope==0.1.10
+typeguard==2.13.3
 typer==0.25.0
 typing-inspect==0.9.0
 typing-inspection==0.4.2

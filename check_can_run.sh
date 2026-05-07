@@ -7,7 +7,8 @@ rm -rf ./fake_gcs_server_buckets/checkpoint_bucket/*
 docker compose run --rm app \
 --study_name="GraphRanker_tuning_cli" \
 --mlflow_experiment_name="GraphRanker_tuning_cli" \
---optuna_storage_uri="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/optuna_db" \
+--vizier_endpoint="db:8000" \
+--vizier_storage_uri="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:8000/vizier_db" \
 --mlflow_tracking_uri="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/mlflow_db" \
 --latest_checkpoint_uri="gs://checkpoint_bucket/latest" \
 --best_checkpoint_uri="gs://checkpoint_bucket/best" \

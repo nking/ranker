@@ -1,6 +1,7 @@
 from xmanager import xm
 from xmanager import xm_local
 from dotenv import dotenv_values
+from json import dumps
 
 #import logging
 #from absl import logging as absl_logging
@@ -18,6 +19,7 @@ or:
 #passwords in uris. see todo.txt for API details
 def main(_):
     num_trials = 1 #20
+    num_trials_per_worker = 1
     
     #default gateway used by docker is 172.17.0.1
     # can verify that with ip addr show docker0 | grep "inet "
@@ -35,8 +37,9 @@ def main(_):
         'USER': env_config.get('POSTGRES_USER'),
         "study_name": "GraphRanker_tuning_xmngr",
         "mlflow_experiment_name": "GraphRanker_tuning_cli",
-        "optuna_storage_uri": f"postgresql://{env_config.get('POSTGRES_USER')}:{env_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/optuna_db",
         "mlflow_tracking_uri": f"postgresql://{env_config.get('POSTGRES_USER')}:{env_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db",
+        "vizier_storage_uri": f"postgresql://{env_config.get('POSTGRES_USER')}:{env_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:8000/vizier_db",
+        "vizier_endpoint_uri": f"{docker_bridge_gateway}:8000",
         "latest_checkpoint_uri": "gs://checkpoint_bucket/latest",
         "best_checkpoint_uri": "gs://checkpoint_bucket/best",
         "movies_uri": "gs://data/movies-00000-of-00001.array_record",
@@ -51,7 +54,7 @@ def main(_):
         "num_epochs": 2,
         "batch_size": 64,
         "seed": 12345,
-        "phase": "train"
+        "phase": "tune"
     }
     
     # run the experiment locally w/ xm_local.Local.  also means this is a block and wait context.
@@ -59,7 +62,7 @@ def main(_):
     # and any jobs must be stopped from a cluster control plane.
     # BUT, if for some reason you want this blobk to block an wait after launching to
     # cloud, then use job_group = experiment.add(...) and at end use job_group.wait_for_completion()
-    with xm_local.create_experiment(experiment_title='optuna_hpo_run') as experiment:
+    with xm_local.create_experiment(experiment_title='vizier_hpo_run') as experiment:
         docker_packageable = xm.dockerfile_container(
             path='.',
             dockerfile='Dockerfile_offline',
@@ -89,7 +92,8 @@ def main(_):
         resources = xm.JobRequirements(cpu=1, ram=8 * xm.GiB)
 
         #can find network name in docker-compose-dbs.yaml
-        for i in range(num_trials):
+        for i in range(num_trials, num_trials_per_worker):
+            trial_ids = [i for i in range(i, i+num_trials_per_worker)]
             experiment.add(
                 xm.Job(
                     executable=executable,
@@ -100,7 +104,7 @@ def main(_):
                     env_vars=env_config,
                     args={
                         **run_config,
-                        'trial_id': i,
+                        'trial_ida': dumps(trial_ids),
                     },
                 )
             )

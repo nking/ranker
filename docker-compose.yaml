@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile_cpu
-    container_name: run_optuna_trial_train_fn
+    container_name: app_runner
     depends_on:
       db:
         condition: service_healthy

@@ -12,9 +12,9 @@ setup(
      'jraphx==0.0.4',
      'rax==0.4.0', 
      'mlflow-skinny==3.11.1',
-     'optuna==4.2.1',
      'psycopg2-binary==2.9.12',
-     'gcsfs==2026.2.0'
+     'gcsfs==2026.2.0',
+     "google-vizier[jax]==0.1.24"
   ],
   #extras_require={"test": ["pytest"]},
   classifiers=[ 'Natural Language :: English',

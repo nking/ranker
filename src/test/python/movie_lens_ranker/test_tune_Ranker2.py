@@ -1,6 +1,10 @@
+import json
 import os
 import logging
 import jax
+from vizier.service import pyvizier as vz
+from vizier.service import clients as vz_clients
+
 def safe_jax_init():
     # Check if we are in a distributed environment (e.g., K8s, Vertex, Slurm)
     # Different orchestrators use different keys, but these are common:
@@ -41,7 +45,6 @@ import jax.distributed
 from array_record.python import array_record_module
 
 from absl import flags
-from optuna import load_study
 
 from helper import *
 from movie_lens_ranker.train import *
@@ -49,7 +52,7 @@ from movie_lens_ranker.util import set_flags_from_dict
 from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
     get_mlflow_metrics_by_exp_name
 
-from movie_lens_ranker.optuna_trial_run import main as run_optuna_main
+from movie_lens_ranker.vizier_runner import main as run_vizier_main
 
 import unittest
 
@@ -68,11 +71,11 @@ to start the fake gcs server and the postgres db:
     docker compose -f docker-compose-dbs.yaml up -d
 """
 
-def wait_for_postgres_optuna_mlflow_dbs(retries=5, delay=2):
+def wait_for_postgres_vizier_mlflow_dbs(retries=5, delay=2):
     user = os.environ["POSTGRES_USER"]
     password = os.environ["POSTGRES_PASSWORD"]
     s = [False, False]
-    for ii, db in enumerate(["mlflow_db", "optuna_db"]):
+    for ii, db in enumerate(["mlflow_db", "vizier_db"]):
         dsn = f"host={base_url} user={user} password={password} dbname={db}"
         for i in range(retries):
             try:
@@ -85,6 +88,11 @@ def wait_for_postgres_optuna_mlflow_dbs(retries=5, delay=2):
                     f"Database not ready, retrying in {delay}s... ({i + 1}/{retries})")
                 time.sleep(delay)
     return s[0]==True and s[1]==True
+
+def _get_client_and_resource_name(project_id: str, study_name: str, endpoint: str) -> Tuple[str, str]:
+    client = vz_clients.get_client(endpoint=endpoint)
+    resource_name = f"owners/{project_id}/studies/{study_name}"
+    return client, resource_name
 
 class TestRanker(unittest.TestCase):
     def setUp(self):
@@ -163,11 +171,13 @@ class TestRanker(unittest.TestCase):
         else:
             return mlflow.create_experiment(experiment_name)
         
-    def test_run_train_with_optuna(self):
+    def test_run_tune(self):
         """
         this uses the docker container fake-gcs-server
         and so all uris are gs:// and are transformed by the local google software to
         http://172.17.0.1:4443/ ... depending upon context
+        
+        it also uses a vizier service
         
         to start the fake gcs server and the postgres db:
             docker compose -f docker-compose-dbs.yaml up -d
@@ -185,12 +195,12 @@ class TestRanker(unittest.TestCase):
                 print(f"Response: {response.text}")
                 print(f'is the fake_gcs_server container not running?')
                 return
-            wait_for_postgres_optuna_mlflow_dbs()
+            wait_for_postgres_vizier_mlflow_dbs()
         except requests.exceptions.RequestException as e:
             print(f"An error occurred: {e}")
             return
         
-        STUDY_NAME = "GraphRanker_tuning_unittest2"
+        STUDY_NAME = "GraphRanker_tuning_unittest3"
         
         num_epochs = 4 #keep this to > 2 and < 10 for the restore tests at end of this method
         batch_size = 64
@@ -198,17 +208,17 @@ class TestRanker(unittest.TestCase):
         
         # tensorstore keeps trying to authenticate with google so for tests we'll use the abs path to checkpoint dir
         checkpoint_dir = 'gs://checkpoint_bucket'
-        #checkpoint_dir = os.path.join(get_project_dir(), "fake_gcs_server_buckets/checkpoint_bucket")
         latest_checkpoint_uri = f'{checkpoint_dir}/latest'
         best_checkpoint_uri = f'{checkpoint_dir}/best'
         
         #mflow_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}_mlflow.db")
         #mflow_uri = f"sqlite:///{mflow_db_path}?mode=memory&cache=shared"
         ##    postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]
-        optuna_storage_uri = f"postgresql://{os.environ['POSTGRES_USER']}:{os.environ['POSTGRES_PASSWORD']}@{base_url}:5432/optuna_db"
+        vizier_endpoint = f'{base_url}:8000'
+        vizier_storage_uri = f"postgresql://{os.environ['POSTGRES_USER']}:{os.environ['POSTGRES_PASSWORD']}@{vizier_endpoint}/vizier_db"
         mlflow_uri = f"postgresql://{os.environ['POSTGRES_USER']}:{os.environ['POSTGRES_PASSWORD']}@{base_url}:5432/mlflow_db"
         
-        set_flags_from_dict({
+        config = {
             'movies_uri': self.transform_to_gs_uri(self.movies_uri),
             'recommendations_uri': self.transform_to_gs_uri(self.recommendations_uri),
             'recommendations_ts_uri' : self.transform_to_gs_uri(self.recommendations_ts_uri),
@@ -222,40 +232,39 @@ class TestRanker(unittest.TestCase):
             'user_embeddings_uri': self.transform_to_gs_uri(self.user_embeddings_uri),
             'num_epochs' : num_epochs, 'batch_size':batch_size, 'seed':seed,
             'study_name' : STUDY_NAME,
-            "trial_id" : 1,
-            'phase' : 'train',
-            'optuna_storage_uri':optuna_storage_uri,
+            'project_id' : 'tune-unittest-02',
+            "trial_ids" : json.dumps([0, 1]),
+            'phase' : 'tune',
+            'vizier_endpoint': vizier_endpoint,
+            'vizier_storage_uri':vizier_storage_uri,
             'mlflow_tracking_uri': mlflow_uri,
             'mlflow_experiment_id': self.get_or_create_mlflow_experiment(STUDY_NAME),
             'mlflow_experiment_name': STUDY_NAME,
-            # 'mlflow_tracking_token': None,
-            #'mlflow_parent_run_id': mlflow_parent_run_id -> set in optuna_trial_run now
-        })
+        }
+        set_flags_from_dict(config)
         
-        run_optuna_main(None)
+        run_vizier_main(None)
         
-        ##  ====== assert optuna results were stored ======
-        FLAGS = flags.FLAGS
-        study = load_study(study_name=STUDY_NAME, storage=optuna_storage_uri)
+        ##  ====== assert vizier results were stored ======
+        client, resource_name = _get_client_and_resource_name(
+            project_id=config['project_id'],
+            study_name=config['study_name'],
+            endpoint=config['vizier_endpoint'])
+        study = client.load_study(resource_name=resource_name)
         self.assertIsNotNone(study)
-        print(f"Best trial: {study.best_trial.number}")
-        print(f"Best value (NDCG): {study.best_value}")
-        self.assertTrue(study.best_value > 0)
-        # Return the winning params
-        self.assertIsNotNone(study.best_trial.params)
-        self.assertIsNotNone(study.best_trial.number)
-        optuna_params = study.best_trial.params
-        print(f'Best params from optuna: {optuna_params}')
+        optimal_trials = study.optimal_trials()
+        self.assertIsNotNone(optimal_trials)
         
-        #get config from mlflow.  itt was storead as mlflow.log_params(config)
-        mlflow_run_name = f"trial_{study.best_trial.number}"
-        optuna_attrs = study.best_trial.user_attrs
-        self.assertIsNotNone(optuna_attrs)
-        print(f'optuna_attrs={optuna_attrs}')
-        for tr in study.trials:
-            print(f'trial={tr}, user_attrs={tr.user_attrs}', flush=True)
-       
-        mlflow_run_id = optuna_attrs['mlflow_run_id']
+        best_trial = optimal_trials[0]
+        best_trial_data = best_trial.materialize()
+        best_params = dict(best_trial_data.parameters)
+        best_value = best_trial_data.final_measurement.metrics[0].value
+        
+        print(f"Loaded Best Objective: {best_value}")
+        print(f"Loaded Best Parameters: {best_params}")
+        self.assertTrue(study.best_value > 0)
+        
+        mlflow_run_id = best_trial_data.metadata.get_namespace('user').get('mlflow_run_id')
         self.assertIsNotNone(mlflow_run_id)
         
         mlflow_run = mlflow.get_run(mlflow_run_id)
@@ -263,24 +272,40 @@ class TestRanker(unittest.TestCase):
         config = mlflow_run.data.params
         self.assertIsNotNone(config)
         
-        #===========================  assert checkpoints and restore and resme training ==============================
+        #### ====================================================== ####
+        config['phase'] = 'train_best'
+        train_id = 1234567
+        config['train_id'] = train_id
+        set_flags_from_dict(config)
+        run_vizier_main(None)
+        
+        #results will be stored for study_name and run_name='train'
+        run_name = f"train_{train_id}"
+        runs = mlflow.search_runs(
+            experiment_names=[config['study_name']],
+            filter_string=f"attributes.run_name = '{run_name}'",
+            output_format="list"
+        )
+        self.assertIsNotNone(runs)
+        self.assertEqual(len(runs), 1)
+        run_id = runs[0].info.run_id
+        metrics_dict = {}
+        for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
+            for key_t in (f"train_{key}", f"val_{key}"):
+                metrics_dict[key_t] = {'x': [], 'y': []}
+                m_dict = client.get_metric_history(run_id, key=key_t)
+                for m in m_dict:
+                    metrics_dict[key_t]['x'].append(int(m.step))
+                    metrics_dict[key_t]['y'].append(float(m.value))
+        self.assertTrue(len(metrics_dict), 8)
+        
+        #the train method stores checkpoints so assert checkpoints and restore and assert can resume training if not complete ==============================
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
         
         expected_keys = {'model', 'optimizer', 'train_dataloader', 'train_dataloader_iter',
             'val_dataloader', 'rngs', 'global_step', 'config'}
         for key in expected_keys:
             self.assertTrue(key in restore_dict)
-            
-        # assert contents of config and restore_dict['config'] are the same
-        '''
-        # TODO: choose keys to compare.
-        # TODO: consider filtering which flag parameters to save.  there are many not used by this code.
-        for key, value in config.items():
-            if not isinstance(value, float):
-                self.assertEqual(value, restore_dict['config'][key])
-            else:
-                self.assertAlmostEqual(value, restore_dict['config'][key], delta=value/100.)
-        '''
         
         ## =============== add test uris to config and run tests.  also tests that restore works================
         restore_dict['config']['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
@@ -336,7 +361,7 @@ class TestRanker(unittest.TestCase):
         
         ## ====== assert that training continues ======
         best_val_ndcg_k_2 = resume_train_fn(config=restore_dict['config'],
-            trial=None)
+            save_checkpoints=True)
         print(f'best_val_ndcg_k from resume 2nd to last chkpt training={best_val_ndcg_k_2}')
         
         # ===== read mlflow db metrics ======

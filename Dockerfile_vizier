@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+
+RUN pip install --no-cache-dir google-vizier==0.1.24 psycopg2-binary==2.9.12 sqlalchemy==2.0.49
+
+EXPOSE 8080
+
+#ENTRYPOINT ["python", "-m", "vizier.service.vizier_server"]
+#CMD ["--port=8080", "--database_uri=${DATABASE_URL}"]
+CMD python3 -m vizier.service.vizier_server --port=8080 --database_uri=${VIZIER_DATABASE_URL}
