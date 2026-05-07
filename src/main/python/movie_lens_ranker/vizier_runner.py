@@ -133,7 +133,8 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
             root.add_discrete_param("dropout_rate", feasible_values=[i*0.05 for i in range(1, 7)])
     
             problem.metric_information.append(
-                vz.MetricInformation(name=f'ndcg_{top_k}',goal=vz.ObjectiveMetricGoal.MAXIMIZE)
+                vz.MetricInformation(name=f'ndcg_{top_k}',
+                goal=vz.ObjectiveMetricGoal.MAXIMIZE)
             )
             
             study_config = vz.StudyConfig.from_problem(problem)
@@ -142,7 +143,7 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
                 study_config.algorithm = 'GP_UCB_PE'
             else:
                 study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
-            study_config.automated_stopping_config = vz.AutomatedStoppingConfig.median_automated_stopping_config()
+            #study_config.automated_stopping_config = could use custom. see https://github.com/google/vizier/blob/v0.1.24/docs/guides/developer/early_stopping.ipynb
             return client.create_study(study_config, name=study_name, owner=project_id)
     else:
         n_waits = waittime_sec//5
@@ -209,6 +210,7 @@ def tune_run(config):
     suggested_trials = study.suggest(count=len(trial_ids), client_id=worker_rank)
 
     for i, trial in enumerate(suggested_trials):
+        
         hparams = {k: v.value for k, v in trial.parameters.items()}
         config2 = {
             **config,
@@ -217,11 +219,16 @@ def tune_run(config):
         for k, v in config2.items():
             if k.find('?') > -1:
                 print(f"problem key from trial: {k}={v}", flush=True)
-                
-        best_val_ndcg_k, mlflow_run_id = train_fn(config2, save_checkpoints=False)
+        
+        trial_id = trial_ids[i]
+        config2['trial_id'] = trial_id
+        
+        best_val_ndcg_k, mlflow_run_id = train_fn(config2, trial=trial, save_checkpoints=False)
         
         trial.metadata.get_namespace('user')['mlflow_run_id'] = mlflow_run_id
         
+        #NOTE: if have a comb of infeasible params or failure in which trial should not be
+        # repeated, mark the trial using trial.infeasible()
         trial.complete(vz.Measurement(metrics={f'ndcg_{config["top_k"]}': float(best_val_ndcg_k)}))
 
 def train_run(config):
@@ -287,7 +294,7 @@ def train_run(config):
         print(f"Loaded Best Parameters: {best_params}")
         config.update(**best_params)
             
-    best_val_ndcg_k, mlflow_run_id = train_fn(config, save_checkpoints=True)
+    best_val_ndcg_k, mlflow_run_id = train_fn(config, trial=None, save_checkpoints=True)
 
 def test_run(config):
     if "debug" in config and config['debug']:
@@ -356,9 +363,9 @@ def main(_):
     if config['phase'] == 'tune':
         tune_run(config)
     elif config['phase'] == 'test_best' or config['phase'] == 'test_given':
-        test_fn(config)
+        test_run(config)
     else:
-        train_fn(config)
+        train_run(config)
     
 if __name__ == '__main__':
     define_flags()

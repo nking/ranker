@@ -15,7 +15,6 @@ setup(
      'psycopg2-binary==2.9.12',
      'gcsfs==2026.2.0',
      "google-vizier[jax]==0.1.24",
-     "equinox==0.13.2"
   ],
   #extras_require={"test": ["pytest"]},
   classifiers=[ 'Natural Language :: English',

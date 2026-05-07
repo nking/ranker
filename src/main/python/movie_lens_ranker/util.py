@@ -28,7 +28,7 @@ mlflow_config_keys = {
     # 'mlflow_tracking_token': None,
     'mlflow_parent_run_id'
 }
-hpo_config_keys = {'vizier_storage_uri', 'vizier_endpoint'}
+hpo_config_keys = {'vizier_endpoint'}
 model_params_trainable_keys = {
     'top_k',
     'learning_rate',
@@ -147,10 +147,10 @@ def define_flags():
         help="uri to read the retrieval written movie embeddings. each row holds [movie_id] [embeddings]]"
     )
     flags.DEFINE_string("latest_checkpoint_uri", default=None,
-        help="uri to write latest checkpoints too.  model, data, optimizer and seed state are saved"
+        help="uri to write latest checkpoints too.  model, data, optimizer and seed state are saved.   the study_name and trial number will be appended to the given path"
     )
     flags.DEFINE_string("best_checkpoint_uri", default=None,
-        help="uri to write checkpoints to for best model.  model, data, optimizer and seed state are saved.  it's also the uri to read best model from when phase='test_best'"
+        help="uri to write checkpoints to for best model.  model, data, optimizer and seed state are saved.  it's also the uri to read best model from when phase='test_best'. the study_name and trial_id will be appended to the given path"
     )
     flags.DEFINE_string("test_checkpoint_uri", default=None,
         help="uri to read orbax checkpointed model for tests when phase='test_given'"
@@ -160,9 +160,6 @@ def define_flags():
     )
     flags.DEFINE_string("project_id", default=None,
         help="project_id for use with vizier HPO"
-    )
-    flags.DEFINE_string("vizier_storage_uri", default=None,
-        help="uri for vizier db"
     )
     flags.DEFINE_string("vizier_endpoint", default=None,
         help="endpoint for vizier server"

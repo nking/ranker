@@ -38,7 +38,6 @@ def main(_):
         "study_name": "GraphRanker_tuning_xmngr",
         "mlflow_experiment_name": "GraphRanker_tuning_cli",
         "mlflow_tracking_uri": f"postgresql://{env_config.get('POSTGRES_USER')}:{env_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db",
-        "vizier_storage_uri": f"postgresql://{env_config.get('POSTGRES_USER')}:{env_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:8000/vizier_db",
         "vizier_endpoint_uri": f"{docker_bridge_gateway}:8000",
         "latest_checkpoint_uri": "gs://checkpoint_bucket/latest",
         "best_checkpoint_uri": "gs://checkpoint_bucket/best",
@@ -100,7 +99,7 @@ def main(_):
                     executor=xm_local.Local(
                         requirements=resources,
                     ),
-                    name=f"{env_config.get('study_name')}_trial_{i}",
+                    name=f"{env_config.get('study_name')}_trial_{i:04d}",
                     env_vars=env_config,
                     args={
                         **run_config,

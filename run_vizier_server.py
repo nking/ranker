@@ -52,8 +52,10 @@ def main(argv: Sequence[str]) -> None:
   if len(argv) > 1:
     raise app.UsageError('Too many command-line arguments.')
   
+  #local to host:
   #my_local_db = 'sqlite:///sqlite_data/vizier.db'
-  my_local_db = 'sqlite:///data/vizier.db'
+  #local to container:
+  my_local_db = 'sqlite:////app/data/vizier.db'
   
   @event.listens_for(Engine, "connect")
   def set_sqlite_pragma(dbapi_connection, connection_record):

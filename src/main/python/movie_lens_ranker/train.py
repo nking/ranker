@@ -1,6 +1,6 @@
-
+import time
 from functools import partial
-from typing import Dict, Tuple, Union, Any, Optional
+from typing import Dict, Tuple, Union, Any
 
 import mlflow
 import optax
@@ -11,6 +11,8 @@ from jax.sharding import PartitionSpec as P
 # In JAX 0.8+, shard_map is typically in the main namespace
 from jax import shard_map, Array
 
+from vizier.service import pyvizier as vz
+from vizier.service.clients import Trial
 import jraph
 import jax.numpy as jnp
 from flax import nnx
@@ -279,7 +281,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer,
         top_k:int, latest_checkpoint_uri: str, best_checkpoint_uri:str,
         rngs:nnx.Rngs, config_dict:Dict[str, Union[str, int, float]],
-        save_checkpoints: bool=False,
+        trial: Trial = None, save_checkpoints: bool=False,
         restored_train_dataloader_iter=None, restored_global_step:int=None) -> float:
     """
     a shard's portion of the training
@@ -297,6 +299,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         raise ValueError("train_dataloader sampler must be an instance of BatchSampler")
     if not isinstance(val_dataloader._sampler, BatchSampler):
         raise ValueError("val_dataloader sampler must be an instance of BatchSampler")
+    
+    start_time = time.perf_counter()
     
     rank = jax.process_index()
     
@@ -356,7 +360,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     patience = 5
     best_ndcg = -1.0
     epochs_without_improvement = 0
-    delay = 10 # min number of epochs to learn
+    delay = 10 # min number of epochs to learn.  for large graphs, consider using 20
     
     epoch_avg_train_loss = []
     early_stop_triggered = [False]
@@ -471,7 +475,18 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             
             if rank == 0:
                 mlflow.log_metrics(metrics_dict, step=epoch)
-                
+                #check for whether Vizier pruning suggests a stop of this trial
+                if trial is not None:
+                    trial.add_measurement(
+                        vz.Measurement(
+                            metrics={f'ndcg_{top_k}': float(global_avg_val_ndcg.item())},
+                            steps=epoch,
+                            elapsed_secs=(time.perf_counter() - start_time)
+                        ))
+                    if epoch >= delay and trial.check_early_stopping():
+                        early_stop_triggered[0] = True
+                        break
+                        
         if early_stop_triggered[0]:
             break
 
@@ -517,7 +532,7 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs=None) -> Di
     return {"rngs": rngs, "model": model, "optimizer": optimizer,
         'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader}
 
-def train_fn(config: dict, save_checkpoints:bool=False, rngs:nnx.Rngs=None) -> Tuple[float, str]:
+def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False, rngs:nnx.Rngs=None) -> Tuple[float, str]:
     """
     train the model given data and params specified in config dict and return best validation set ndcg@20 metric and
     return the mlflow_run_id
@@ -563,8 +578,18 @@ def train_fn(config: dict, save_checkpoints:bool=False, rngs:nnx.Rngs=None) -> T
             mlflow.log_params(save_dict)
            
             mlflow.log_text(str(model), "model_summary.txt")
-            mlflow.log_param("best_checkpoint_uri", config['best_checkpoint_uri'])
-            mlflow.log_param("latest_checkpoint_uri", config['latest_checkpoint_uri'])
+            
+            if save_checkpoints:
+                sfx = f"{config['study_name']}/trial_{config['trial_id']:04d}"
+                config['best_checkpoint_uri'] = f"{config['best_checkpoint_uri']}/{sfx}"
+                config['latest_checkpoint_uri'] = f"{config['latest_checkpoint_uri']}/{sfx}"
+                mlflow.set_tag('best_checkpoint_uri',
+                    config['best_checkpoint_uri'])
+                mlflow.set_tag('latest_checkpoint_uri',
+                    config['latest_checkpoint_uri'])
+                mlflow.log_param("best_checkpoint_uri", config['best_checkpoint_uri'])
+                mlflow.log_param("latest_checkpoint_uri", config['latest_checkpoint_uri'])
+                #paradigm is that we save checkpoints for "train" phase, but not HPO trial phases
         
         print(
             f"expect the model training to start w/ loss = {-log(1. / config['num_candidates'])}")
@@ -575,7 +600,7 @@ def train_fn(config: dict, save_checkpoints:bool=False, rngs:nnx.Rngs=None) -> T
             latest_checkpoint_uri=config['latest_checkpoint_uri'],
             best_checkpoint_uri=config['best_checkpoint_uri'],
             rngs=rngs, config_dict=config,
-            save_checkpoints=save_checkpoints)
+            trial=trial, save_checkpoints=save_checkpoints)
         return best_val_ndcg_k, config['mlflow_run_id']
     finally:
         if mlflow_run is not None:
@@ -771,7 +796,7 @@ def test_fn(config: dict):
         if mlflow_run is not None:
             mlflow.end_run()
 
-def resume_train_fn(config: dict, save_checkpoints: bool=False):
+def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=False):
     
     worker_rank = jax.process_index()
     
@@ -788,14 +813,14 @@ def resume_train_fn(config: dict, save_checkpoints: bool=False):
             # in production, there may be ACL to solve for this:
             if run_id is None:
                 mlflow_run = mlflow.start_run(
-                    run_name=f"trial_{config.get('trial_id', 0)}",
+                    run_name=f"trial_{config.get('trial_id', 0):04d}",
                     # tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
                     tags={"mlflow.parentRunId": config['mlflow_parent_run_id']}
                 )
             else:
                 mlflow_run = mlflow.start_run(
                     run_id=run_id,
-                    run_name=f"trial_{config.get('trial_id', 0)}",
+                    run_name=f"trial_{config.get('trial_id', 0):04d}",
                     # tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
                     tags={"mlflow.parentRunId": config['mlflow_parent_run_id']}
                 )
@@ -809,6 +834,7 @@ def resume_train_fn(config: dict, save_checkpoints: bool=False):
             latest_checkpoint_uri=config['latest_checkpoint_uri'],
             best_checkpoint_uri=config['best_checkpoint_uri'],
             rngs=restore_dict['rngs'],
+            trial=trial,
             config_dict=config,
             restored_train_dataloader_iter=restore_dict['train_dataloader_iter'],
             restored_global_step=restore_dict['global_step'],

@@ -75,7 +75,7 @@ def wait_for_postgres_vizier_mlflow_dbs(retries=5, delay=2):
     user = os.environ["POSTGRES_USER"]
     password = os.environ["POSTGRES_PASSWORD"]
     s = [False, False]
-    for ii, db in enumerate(["mlflow_db", "vizier_db"]):
+    for ii, db in enumerate(["mlflow_db"]):
         dsn = f"host={base_url} user={user} password={password} dbname={db}"
         for i in range(retries):
             try:
@@ -215,7 +215,6 @@ class TestRanker(unittest.TestCase):
         #mflow_uri = f"sqlite:///{mflow_db_path}?mode=memory&cache=shared"
         ##    postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]
         vizier_endpoint = f'{base_url}:8000'
-        vizier_storage_uri = f"postgresql://{os.environ['POSTGRES_USER']}:{os.environ['POSTGRES_PASSWORD']}@{vizier_endpoint}/vizier_db"
         mlflow_uri = f"postgresql://{os.environ['POSTGRES_USER']}:{os.environ['POSTGRES_PASSWORD']}@{base_url}:5432/mlflow_db"
         
         config = {
@@ -237,7 +236,6 @@ class TestRanker(unittest.TestCase):
             'phase' : 'tune',
             'top_k' : 20,
             'vizier_endpoint': vizier_endpoint,
-            'vizier_storage_uri':vizier_storage_uri,
             'mlflow_tracking_uri': mlflow_uri,
             'mlflow_experiment_id': self.get_or_create_mlflow_experiment(STUDY_NAME),
             'mlflow_experiment_name': STUDY_NAME,
@@ -267,6 +265,8 @@ class TestRanker(unittest.TestCase):
         
         mlflow_run_id = best_trial_data.metadata.get_namespace('user').get('mlflow_run_id')
         self.assertIsNotNone(mlflow_run_id)
+        
+        #phase was tune, so no need to check for checkpoint paths
         
         mlflow_run = mlflow.get_run(mlflow_run_id)
         #caveat: numbers are all strings in this:
@@ -299,6 +299,8 @@ class TestRanker(unittest.TestCase):
                     metrics_dict[key_t]['x'].append(int(m.step))
                     metrics_dict[key_t]['y'].append(float(m.value))
         self.assertTrue(len(metrics_dict), 8)
+        
+        #phase is train, so assert checkpoint paths are in mlflow
         
         #the train method stores checkpoints so assert checkpoints and restore and assert can resume training if not complete ==============================
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
@@ -389,7 +391,8 @@ class TestRanker(unittest.TestCase):
         
         ## ====== assert that training continues ======
         best_val_ndcg_k_2 = resume_train_fn(config=restore_dict['config'],
-            save_checkpoints=True)
+            trial=None, save_checkpoints=True)
+        
         print(f'best_val_ndcg_k from resume 2nd to last chkpt training={best_val_ndcg_k_2}')
         
         # ===== read mlflow db metrics ======
