@@ -83,9 +83,9 @@ def wait_for_postgres_vizier_mlflow_dbs(retries=5, delay=2):
                 conn.close()
                 s[ii] = True
                 break
-            except psycopg2.OperationalError:
+            except psycopg2.OperationalError as ex:
                 print(
-                    f"Database not ready, retrying in {delay}s... ({i + 1}/{retries})")
+                    f"Database {db} not ready, retrying in {delay}s... ({i + 1}/{retries});  ex={ex}")
                 time.sleep(delay)
     return s[0]==True and s[1]==True
 
@@ -171,7 +171,7 @@ class TestRanker(unittest.TestCase):
         else:
             return mlflow.create_experiment(experiment_name)
         
-    def test_run_tune(self):
+    def test_run_tune_train_test(self):
         """
         this uses the docker container fake-gcs-server
         and so all uris are gs:// and are transformed by the local google software to
@@ -179,7 +179,7 @@ class TestRanker(unittest.TestCase):
         
         it also uses a vizier service
         
-        to start the fake gcs server and the postgres db:
+        to start the fake gcs server and the postgres db and vizier server:
             docker compose -f docker-compose-dbs.yaml up -d
         """
         
@@ -235,6 +235,7 @@ class TestRanker(unittest.TestCase):
             'project_id' : 'tune-unittest-02',
             "trial_ids" : json.dumps([0, 1]),
             'phase' : 'tune',
+            'top_k' : 20,
             'vizier_endpoint': vizier_endpoint,
             'vizier_storage_uri':vizier_storage_uri,
             'mlflow_tracking_uri': mlflow_uri,
@@ -315,7 +316,34 @@ class TestRanker(unittest.TestCase):
         
         print(f'TEST METRICS: {test_metrics}', flush=True)
         
-        ## load train_ for use in stats
+        #=== operate test from entrypoint
+        config['test_checkpoint_uri'] = config['best_checkpoint_uri']
+        config['phase'] = 'test_best'
+        test_id = 234567
+        config['test_id'] = test_id
+        set_flags_from_dict(config)
+        run_vizier_main(None)
+        
+        run_name = f'test_{config.get('test_id', 0)}'
+        runs = mlflow.search_runs(
+            experiment_names=[config['study_name']],
+            filter_string=f"attributes.run_name = '{run_name}'",
+            output_format="list"
+        )
+        self.assertIsNotNone(runs)
+        self.assertEqual(len(runs), 1)
+        run_id = runs[0].info.run_id
+        metrics_dict = {}
+        for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
+            for key_t in (f"train_{key}", f"val_{key}"):
+                metrics_dict[key_t] = {'x': [], 'y': []}
+                m_dict = client.get_metric_history(run_id, key=key_t)
+                for m in m_dict:
+                    metrics_dict[key_t]['x'].append(int(m.step))
+                    metrics_dict[key_t]['y'].append(float(m.value))
+        self.assertTrue(len(metrics_dict), 8)
+        
+        ##====== load train_ for use in stats =======
         TRAIN_BATCH_SIZE = restore_dict['train_dataloader']._sampler.batch_size
         TOTAL_RECORDS = restore_dict['train_dataloader']._sampler.total_records
         STEPS_PER_EPOCH_GLOBAL = restore_dict['train_dataloader']._sampler.num_batches_per_epoch  # = 7234

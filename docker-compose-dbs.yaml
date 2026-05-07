@@ -77,14 +77,20 @@ services:
       context: .
       dockerfile: Dockerfile_vizier
     container_name: containerized_vizier_server
+    healthcheck:
+      test: [ "CMD-SHELL", "python3 -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect((\"localhost\", 8080))' || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       db:
         condition: service_healthy
     env_file:
       - .env
-    user: "${UID}:${GID}"
     environment:
-      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/postgres
+      - VIZIER_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/postgres
+    user: "${UID}:${GID}"
     ports:
-      - "172.17.0.1:8000:8000"
+      - "172.17.0.1:8000:8080"
     restart: unless-stopped

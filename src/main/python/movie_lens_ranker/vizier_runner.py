@@ -80,7 +80,7 @@ def _get_client_and_resource_name(project_id: str, study_name: str, endpoint: st
 
 def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
         top_k:int=20, use_batching_alg:bool=False, waittime_sec:int=60)\
-        -> vz.service.vizier_client.VizierStudy:
+        -> vz_clients.Study:
     """
     get or create a vizier study
     :param project_id:

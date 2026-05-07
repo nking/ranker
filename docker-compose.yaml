@@ -11,6 +11,8 @@ services:
         condition: service_healthy
       gcs:
         condition: service_healthy
+      vizier_server:
+        condition: service_healthy
     env_file:
       - .env
     user: "${UID}:${GID}"
