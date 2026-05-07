@@ -71,3 +71,14 @@ check that the db service is reachable from outside itws network:
 docker ps -q --filter "label=com.google.xmanager.experiment_id" | xargs -r docker stop
 docker builder prune -f
      this cleaned up 75GB
+
+==========
+container holding vizier server is listening on 172.17.0.1 at port 8000
+- check that with:
+     nc -zv 172.17.0.1 8000
+     nmap -p 8000 172.17.0.1
+     nmap 172.17.0.1
+     sudo lsof -i :8000
+     # OR (on Linux)
+     ss -tulpn | grep 8000
+

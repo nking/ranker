@@ -1,5 +1,7 @@
 import os
 import logging
+
+import grpc
 import jax
 
 def safe_jax_init():
@@ -73,10 +75,54 @@ def get_or_create_mlflow_experiment(experiment_name:str):
     else:
         return mlflow.create_experiment(experiment_name)
 
-def _get_client_and_resource_name(project_id: str, study_name: str, endpoint: str) -> Tuple[str, str]:
-    client = vz_clients.get_client(endpoint=endpoint)
-    resource_name = f"owners/{project_id}/studies/{study_name}"
-    return client, resource_name
+def _get_study_config(top_k:int=20, use_batching_alg:bool=False):
+    problem = vz.ProblemStatement()
+    root = problem.search_space.select_root()
+    root.add_int_param("top_k", min_value=top_k, max_value=top_k, default_value=top_k)
+    root.add_int_param("num_layers", min_value=2, max_value=2,
+        default_value=2)
+    num_heads_vals = [2, 4, 8]
+    num_heads = root.add_discrete_param("num_heads", feasible_values=num_heads_vals)
+    all_hidden_options = [64, 128, 256]
+    for h_val in num_heads_vals:
+        valid_dims = [d for d in all_hidden_options if d % h_val == 0]
+        # Create a conditional branch for this specific value of num_heads
+        hidden_dim = num_heads.select_values([h_val]).add_discrete_param(name="hidden_dim", feasible_values=valid_dims)
+        # conditional max_history:
+        for d_val in valid_dims:
+            # Grandchild: max_history (Depends on hidden_dim)
+            # We select the specific value of hidden_dim to define the next range
+            hidden_dim.select_values([d_val]).add_int_param(
+                name="max_history",
+                min_value=2 * top_k,
+                max_value=5 * d_val,
+                scale_type=vz.ScaleType.LINEAR)
+    root.add_discrete_param("num_candidates", feasible_values=[i for i in range(2*top_k, 500 + 1, 10)])
+    
+    #if want a linear relationship between lr and wd, setup a dependency:
+    # wd_ratio = trial.suggest_float("wd_ratio", 0.01, 1.0, log=True)
+    # config['weight_decay'] = config['learning_rate'] * wd_ratio
+    root.add_float_param("learning_rate", min_value=1e-4, max_value=1e-2, default_value=1e-3,
+        scale_type=vz.ScaleType.LOG)
+    root.add_float_param("weight_decay", min_value=1e-4, max_value=1e-2,
+        default_value=1e-3,
+        scale_type=vz.ScaleType.LOG)
+    root.add_discrete_param("out_dim", feasible_values=[16, 32])
+    root.add_discrete_param("edge_embed_dim", feasible_values=[8, 16])
+    root.add_discrete_param("dropout_rate", feasible_values=[i*0.05 for i in range(1, 7)])
+
+    problem.metric_information.append(
+        vz.MetricInformation(name=f'ndcg_{top_k}',
+        goal=vz.ObjectiveMetricGoal.MAXIMIZE)
+    )
+    
+    study_config = vz.StudyConfig.from_problem(problem)
+    #if using 4+ GPUs concurrently, choose GP_UCB_PE instead:
+    if use_batching_alg:
+        study_config.algorithm = 'GP_UCB_PE'
+    else:
+        study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
+    return study_config
 
 def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
         top_k:int=20, use_batching_alg:bool=False, waittime_sec:int=60)\
@@ -86,74 +132,38 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
     :param project_id:
     :param study_name:
     :param endpoint:
-    :raises RuntimeException: If a worker who is not jax process id 0 times out waiting for worker 0 to create the study
+    :raises RuntimeException: If a worker who is not jax process id 0 times out waiting for worker 0 to create the study.
+    :raises grpc.RpcError for connection or other serivce errors ike permission errors
     to load
     :return: study owned by project_id and having name study_name
     """
+    vz_clients.environment_variables.server_endpoint = endpoint
+    resource_name = f"owners/{project_id}/studies/{study_name}"
     
-    client, resource_name = _get_client_and_resource_name(project_id, study_name, endpoint)
+    study_config = _get_study_config(top_k=top_k, use_batching_alg=use_batching_alg)
     
     if jax.process_index() == 0:
+        # Now connects to the explicitly created server.
+        #loads existing by owner_id for study_id and study_config, else creates new study
+        study = vz_clients.Study.from_study_config(study_config,
+            owner=project_id,
+            study_id=study_name)
+        return study
+    #else other workers may need to wait for worker 0 to create the study
+    #the other wokers might need to wait
+    n_waits = waittime_sec//5
+    # use the poll-retry pattern to wait until worker 0 creates study
+    for _ in range(n_waits):
         try:
-            return client.load_study(resource_name=resource_name)
-        except Exception as e:
-            problem = vz.ProblemStatement()
-            root = problem.search_space.select_root()
-            root.add_int_param("top_k", min_value=top_k, max_value=top_k, default_value=top_k)
-            root.add_int_param("num_layers", min_value=2, max_value=2,
-                default_value=2)
-            num_heads_vals = [2, 4, 8]
-            num_heads = root.add_discrete_param("num_heads", feasible_values=num_heads_vals)
-            all_hidden_options = [64, 128, 256]
-            for h_val in num_heads_vals:
-                valid_dims = [d for d in all_hidden_options if d % h_val == 0]
-                # Create a conditional branch for this specific value of num_heads
-                hidden_dim = num_heads.select_values([h_val]).add_discrete_param(name="hidden_dim", feasible_values=valid_dims)
-                # conditional max_history:
-                for d_val in valid_dims:
-                    # Grandchild: max_history (Depends on hidden_dim)
-                    # We select the specific value of hidden_dim to define the next range
-                    hidden_dim.select_values([d_val]).add_int_param(
-                        name="max_history",
-                        min_value=2 * top_k,
-                        max_value=5 * d_val,
-                        scale_type=vz.ParameterScalingType.LINEAR)
-            root.add_discrete_param("num_candidates", feasible_values=[i for i in range(2*top_k, 500 + 1, 10)])
-            
-            #if want a linear relationship between lr and wd, setup a dependency:
-            # wd_ratio = trial.suggest_float("wd_ratio", 0.01, 1.0, log=True)
-            # config['weight_decay'] = config['learning_rate'] * wd_ratio
-            root.add_float_param("learning_rate", min_value=1e-4, max_value=1e-2, default_value=1e-3,
-                scale_type=vz.ParameterScalingType.LOG)
-            root.add_float_param("weight_decay", min_value=1e-4, max_value=1e-2,
-                default_value=1e-3,
-                scale_type=vz.ParameterScalingType.LOG)
-            root.add_discrete_param("out_dim", feasible_values=[16, 32])
-            root.add_discrete_param("edge_embed_dim", feasible_values=[8, 16])
-            root.add_discrete_param("dropout_rate", feasible_values=[i*0.05 for i in range(1, 7)])
-    
-            problem.metric_information.append(
-                vz.MetricInformation(name=f'ndcg_{top_k}',
-                goal=vz.ObjectiveMetricGoal.MAXIMIZE)
-            )
-            
-            study_config = vz.StudyConfig.from_problem(problem)
-            #if using 4+ GPUs concurrently, choose GP_UCB_PE instead:
-            if use_batching_alg:
-                study_config.algorithm = 'GP_UCB_PE'
+            return vz_clients.Study.from_owner_and_id(owner=project_id, study_id=study_name)
+        except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                print(f"Worker {jax.process_index()} waiting for study to be created...")
+                time.sleep(5)  # Back off to avoid spamming the gRPC server
             else:
-                study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
-            #study_config.automated_stopping_config = could use custom. see https://github.com/google/vizier/blob/v0.1.24/docs/guides/developer/early_stopping.ipynb
-            return client.create_study(study_config, name=study_name, owner=project_id)
-    else:
-        n_waits = waittime_sec//5
-        # use the poll-retry pattern to wait until worker 0 creates study
-        for _ in range(n_waits):
-            try:
-                return client.load_study(resource_name)
-            except Exception:
-                time.sleep(5)
-        raise RuntimeError(f"Worker {jax.process_index()} timed out waiting for study to be created by worker 0.")
+                # If it's a connection or permission error, crash early
+                raise e
+    raise RuntimeError(f"Worker {jax.process_index()} timed out waiting for study to be created by worker 0.")
 
 def tune_run(config):
     
@@ -279,9 +289,8 @@ def train_run(config):
     
     if config['phase'] == 'train_best':
         #get best hpo results and add to config
-        client, resource_name = _get_client_and_resource_name(project_id=config['project_id'],
-            study_name=config['study_name'], endpoint=config['vizier_endpoint'])
-        study = client.load_study(resource_name=resource_name)
+        vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
+        study = vz_clients.Study.from_owner_and_id(owner=config['project_id'], study_id=config['study_name'])
         optimal_trials = study.optimal_trials()
         if optimal_trials is None:
             raise ValueError(f"No optimal trials found for project_id={config['project_id']}, study_name={config['study_name']}, endpoint={config['vizier_endpoint']}")

@@ -69,7 +69,7 @@ def main(argv: Sequence[str]) -> None:
   #must use sqlite and save the db file to a Docker volume
   #use of sqlite is hard-wired into this..   ?check_same_thread=False errors for postgres
   server = servers.DistributedPythiaVizierServer(
-      #host=FLAGS.host,
+      host='0.0.0.0',
       database_url=my_local_db,
       port=8080
   )
