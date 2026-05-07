@@ -1,0 +1,7 @@
+equinox==0.11.7
+google-vizier==0.1.24
+jax==0.8.0
+jax-ai-stack==2025.10.28
+jaxlib==0.8.0
+jaxopt==0.8.5
+jaxtyping==0.3.9

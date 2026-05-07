@@ -83,14 +83,15 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-    depends_on:
-      db:
-        condition: service_healthy
     env_file:
       - .env
     environment:
-      - VIZIER_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/postgres
+      - VIZIER_DATABASE_URL=sqlite:////data/vizier.db
     user: "${UID}:${GID}"
     ports:
       - "172.17.0.1:8000:8080"
     restart: unless-stopped
+    volumes:
+      #map to a volume to perist data
+      - ./sqlite_data:/data
+      - ./init-sqlite-databases.sh:/docker-entrypoint-initdb.d/init-sqlite-databases.sh:ro
