@@ -1,0 +1,33 @@
+- preprocessing
+    - user and movie embeddings
+      - created as outputs of bi-encoder in rec sys/tfx pipelines project
+        - formats are array_record
+    - user recommendations: ANN search results of movie_ids of movie vectors
+          ranked by highest similarity to uer vector
+      - created as outputs of bi-encoder in rec sys/tfx pipelines project
+        - formats are array_record
+    - ratings and negatives
+      - created rec sys/tfx pipelines project
+        - formats are array_record
+    - movies catalog
+      - created rec sys/tfx pipelines project
+        - formats are array_record
+- ingestion
+    - input array records
+      - grain dataloaders (backend fake gcs server, hosted by a container)
+        - train dataloaders are configured to use SPMD across all jax
+          processes.  the same model and hyperparameters (HP) are trained
+          on data partitioned to the shard.
+- tracking:
+  - HPO (tune) 
+    - metrics per trial and per epoch:
+      - OSS Vizier server (hosted by a docker container)
+      - MLFlow db (backend is postgres, hosted by a container)
+  - train 
+    - metrics per epoch:
+      - MLFlow db (backend is postgres, hosted by a container)
+    - latest 2 checkpoints
+      - Orbax (backend fake gcs server, hosted by a container)
+    - best checkpoint
+      - Orbax (backend fake gcs server, hosted by a container)
+
