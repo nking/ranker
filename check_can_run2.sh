@@ -34,5 +34,5 @@ docker compose run --rm app \
 --num_epochs=2 \
 --batch_size=64 \
 --seed=12345 \
---phase="train" 
+--phase="tune"
 #--debug=True

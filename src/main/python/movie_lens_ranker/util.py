@@ -164,7 +164,7 @@ def define_flags():
     flags.DEFINE_string("vizier_endpoint", default=None,
         help="endpoint for vizier server"
     )
-    flags.DEFINE_string("trial_ids", default=1,
+    flags.DEFINE_string("trial_ids", default="[0]",
         help="a string serialization of array of integer trial ids for a worker, e.g. '[0, 1]' and 2 trials will be conducted"
     )
     flags.DEFINE_integer("test_id", default=0,
@@ -174,7 +174,7 @@ def define_flags():
         help="an id to assign to train if phase is 'train_best' or 'train_given'"
     )
     flags.DEFINE_enum(
-        'phase', 'train',
+        'phase', 'train_best',
         ['tune', 'train_best', 'train_given', 'test_best', 'test_given'],
         'mode for running the train_fn.  tune: HPO run; '
         'train_best: use best HPs from tune; '

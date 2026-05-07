@@ -749,7 +749,7 @@ def test_fn(config: dict):
     
     model = restore_dict['model']
     
-    config['phase'] = 'test'
+    config['phase'] = 'test_best'
     
     mlflow_run = None
     try:
