@@ -14,13 +14,14 @@ FLAGS = flags.FLAGS
 
 data_params_nontrainable_keys = {'movies_uri', 'recommendations_uri',
     'recommendations_ts_uri',
-    'ratings_train_uri', 'ratings_val_uri', 'train_negatives_uri',
-    'val_negatives_uri',
-    'seed'
+    'ratings_train_uri', 'ratings_val_uri', 'ratings_test_uri',
+    'train_negatives_uri', 'val_negatives_uri', 'test_negatives_uri',
+    'seed',
 }
-model_params_nontrainable_keys = {'latest_checkpoint_uri',
-    'best_checkpoint_uri', 'movie_embeddings_uri', 'user_embeddings_uri',
-    'mlflow_config'}
+model_params_nontrainable_keys = {
+    'latest_checkpoint_uri', 'best_checkpoint_uri',
+    'movie_embeddings_uri', 'user_embeddings_uri',
+}
 mlflow_config_keys = {
     'mlflow_tracking_uri',
     'mlflow_experiment_id',
@@ -28,7 +29,10 @@ mlflow_config_keys = {
     # 'mlflow_tracking_token': None,
     'mlflow_parent_run_id'
 }
-hpo_config_keys = {'vizier_endpoint'}
+hpo_config_keys = {'vizier_endpoint', 'trial_ids',
+    'trial_id', 'train_id', 'tune_id','test_id',
+    'phase', 'LOGNAME', 'USER', 'debug', 'study_name', 'project_id'
+}
 model_params_trainable_keys = {
     'top_k',
     'learning_rate',
@@ -37,13 +41,21 @@ model_params_trainable_keys = {
     'hidden_dim',
     'num_layers',
     'num_heads',
+    'max_history',
+    'num_candidates',
     'edge_embed_dim',
     'dropout_rate',
-}
-data_params_trainable_keys = {'max_history',
-    'num_candidates',
     'num_epochs',
-    'batch_size'}
+    'batch_size',
+}
+def get_recognized_keys():
+    return {
+        *data_params_nontrainable_keys,
+        *model_params_nontrainable_keys,
+        *mlflow_config_keys,
+        *model_params_trainable_keys,
+        *hpo_config_keys,
+    }
 
 def get_env_resources():
     # 'cpu', 'gpu', or 'tpu'
@@ -67,12 +79,17 @@ def get_env_resources():
             "resources_per_worker": {"CPU": 1}})
     return device_dict, mesh
 
-
-def set_flags_from_dict(params_dict):
+def set_flags_from_dict(params_dict, store_only_recognized:bool=True):
     """Sets absl FLAGS from a dictionary, ensuring they are marked as parsed."""
+    recognized_keys = get_recognized_keys() if store_only_recognized else None
     for key, value in params_dict.items():
+        if store_only_recognized and key not in recognized_keys:
+            continue
         if hasattr(FLAGS, key):
-            setattr(FLAGS, key, value)
+            try:
+                setattr(FLAGS, key, value)
+            except Exception as e:
+                pass
         else:
             # Optional: Define the flag on the fly if it's missing
             # This is helpful for dynamic HPO params
@@ -91,7 +108,6 @@ def set_flags_from_dict(params_dict):
     # Crucial for unit tests: tells absl it's safe to read these values
     if not FLAGS.is_parsed():
         FLAGS.mark_as_parsed()
-
 
 def define_flags():
     """
@@ -117,11 +133,17 @@ def define_flags():
     flags.DEFINE_string("ratings_val_uri", default=None,
         help="uri for array_record containing the ratings val dataset, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
     )
+    flags.DEFINE_string("ratings_test_uri", default=None,
+        help="uri for array_record containing the ratings test dataset, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
+    )
     flags.DEFINE_string("train_negatives_uri", default=None,
         help="uri for array_record containing the ratings train dataset negatives, each row being [user_id, movie_id, rating, timestamp]"
     )
     flags.DEFINE_string("val_negatives_uri", default=None,
         help="uri for array_record containing the ratings val dataset negatives, each row being [user_id, movie_id, rating, timestamp]"
+    )
+    flags.DEFINE_string("test_negatives_uri", default=None,
+        help="uri for array_record containing the ratings test dataset negatives, each row being [user_id, movie_id, rating, timestamp]"
     )
     flags.DEFINE_integer("seed", default=0,
         help="seed used for pseudo random number generator"

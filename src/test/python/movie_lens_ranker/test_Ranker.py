@@ -1,11 +1,10 @@
 import json
 import os
 import logging
-import jax
-from vizier._src.service.vizier_client import VizierClient
-from vizier.service import pyvizier as vz
-from vizier.service import clients as vz_clients
 
+#to test for multiple devices before using on GPUs or TPUs:
+#os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=4'
+import jax
 def safe_jax_init():
     # Check if we are in a distributed environment (e.g., K8s, Vertex, Slurm)
     # Different orchestrators use different keys, but these are common:
@@ -33,8 +32,11 @@ def safe_jax_init():
             raise e
 safe_jax_init()
 
+from mlflow import MlflowClient
+from vizier.service import clients as vz_clients
 import numpy as np
 from dotenv import dotenv_values
+from absl import flags
 
 import glob
 import os.path
@@ -53,7 +55,7 @@ from movie_lens_ranker.util import set_flags_from_dict
 from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
     get_mlflow_metrics_by_exp_name
 
-from movie_lens_ranker.app_runner import main as run_vizier_main
+from movie_lens_ranker.app_runner import main as app_runner
 
 import unittest
 
@@ -89,11 +91,6 @@ def wait_for_postgres_vizier_mlflow_dbs(retries=5, delay=2):
                     f"Database {db} not ready, retrying in {delay}s... ({i + 1}/{retries});  ex={ex}")
                 time.sleep(delay)
     return s[0]==True and s[1]==True
-
-def _get_client_and_resource_name(project_id: str, study_name: str, endpoint: str) -> Tuple[str, str]:
-    client = vz_clients.get_client(endpoint=endpoint)
-    resource_name = f"owners/{project_id}/studies/{study_name}"
-    return client, resource_name
 
 class TestRanker(unittest.TestCase):
     def setUp(self):
@@ -230,7 +227,8 @@ class TestRanker(unittest.TestCase):
             'best_checkpoint_uri': best_checkpoint_uri,
             'movie_embeddings_uri' : self.transform_to_gs_uri(self.movie_embeddings_uri),
             'user_embeddings_uri': self.transform_to_gs_uri(self.user_embeddings_uri),
-            'num_epochs' : num_epochs, 'batch_size':batch_size, 'seed':seed,
+            'num_epochs' : num_epochs,
+            'batch_size':batch_size, 'seed':seed,
             'study_name' : STUDY_NAME,
             'project_id' : 'tune-unittest-02',
             "trial_ids" : json.dumps([0, 1]),
@@ -252,28 +250,33 @@ class TestRanker(unittest.TestCase):
         except Exception as ex:
             pass
         
-        run_vizier_main(None)
+        app_runner(None)
         
-        ##  ====== assert vizier results were stored ======
-        client, resource_name = _get_client_and_resource_name(
-            project_id=config['project_id'],
-            study_name=config['study_name'],
-            endpoint=config['vizier_endpoint'])
-        study = client.load_study(resource_name=resource_name)
+        vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
+        study = vz_clients.Study.from_owner_and_id(owner=config['project_id'],
+            study_id=config['study_name'])
         self.assertIsNotNone(study)
         optimal_trials = study.optimal_trials()
         self.assertIsNotNone(optimal_trials)
         
-        best_trial = optimal_trials[0]
+        best_trial = None
+        for tr in optimal_trials:
+            best_trial = tr
+            break
+        self.assertIsNotNone(best_trial)
         best_trial_data = best_trial.materialize()
         best_params = dict(best_trial_data.parameters)
-        best_value = best_trial_data.final_measurement.metrics[0].value
+        print("Available metrics:",
+            list(best_trial_data.final_measurement.metrics.keys()), flush=True)
+        bfm = best_trial_data.final_measurement
+        bfm = bfm.metrics.get(f'ndcg_{config["top_k"]}')
+        best_value = bfm.value
         
         print(f"Loaded Best Objective: {best_value}")
         print(f"Loaded Best Parameters: {best_params}")
-        self.assertTrue(study.best_value > 0)
+        self.assertTrue(best_value > 0)
         
-        mlflow_run_id = best_trial_data.metadata.get_namespace('user').get('mlflow_run_id')
+        mlflow_run_id = best_trial_data.metadata.get('mlflow_run_id')
         self.assertIsNotNone(mlflow_run_id)
         
         #phase was tune, so no need to check for checkpoint paths
@@ -287,8 +290,20 @@ class TestRanker(unittest.TestCase):
         config['phase'] = 'train_best'
         train_id = 1234567
         config['train_id'] = train_id
+        
+        for k, v in config.items():
+            if k.find('<=') > -1:
+                print(f"problem key: {k}={v}", flush=True)
+        
         set_flags_from_dict(config)
-        run_vizier_main(None)
+        # more debugging:
+        for name, flag in flags.FLAGS._flags().items():
+            try:
+                flag.value #logger_levels
+            except Exception as ex:
+                pass
+
+        app_runner(None)
         
         #results will be stored for study_name and run_name='train'
         run_name = f"train_{train_id}"
@@ -297,6 +312,9 @@ class TestRanker(unittest.TestCase):
             filter_string=f"attributes.run_name = '{run_name}'",
             output_format="list"
         )
+        
+        mlflow_client = MlflowClient(tracking_uri=config['mlflow_tracking_uri'])
+        
         self.assertIsNotNone(runs)
         self.assertEqual(len(runs), 1)
         run_id = runs[0].info.run_id
@@ -304,7 +322,7 @@ class TestRanker(unittest.TestCase):
         for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
             for key_t in (f"train_{key}", f"val_{key}"):
                 metrics_dict[key_t] = {'x': [], 'y': []}
-                m_dict = client.get_metric_history(run_id, key=key_t)
+                m_dict = mlflow_client.get_metric_history(run_id, key=key_t)
                 for m in m_dict:
                     metrics_dict[key_t]['x'].append(int(m.step))
                     metrics_dict[key_t]['y'].append(float(m.value))
@@ -334,7 +352,7 @@ class TestRanker(unittest.TestCase):
         test_id = 234567
         config['test_id'] = test_id
         set_flags_from_dict(config)
-        run_vizier_main(None)
+        app_runner(None)
         
         run_name = f'test_{config.get('test_id', 0)}'
         runs = mlflow.search_runs(
@@ -349,7 +367,7 @@ class TestRanker(unittest.TestCase):
         for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
             for key_t in (f"train_{key}", f"val_{key}"):
                 metrics_dict[key_t] = {'x': [], 'y': []}
-                m_dict = client.get_metric_history(run_id, key=key_t)
+                m_dict = mlflow_client.get_metric_history(run_id, key=key_t)
                 for m in m_dict:
                     metrics_dict[key_t]['x'].append(int(m.step))
                     metrics_dict[key_t]['y'].append(float(m.value))
