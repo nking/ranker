@@ -1,6 +1,4 @@
 import os
-import logging
-
 import grpc
 import jax
 
@@ -76,27 +74,18 @@ def get_or_create_mlflow_experiment(experiment_name:str):
         return mlflow.create_experiment(experiment_name)
 
 def _get_study_config(top_k:int=20, use_batching_alg:bool=False):
+    
     problem = vz.ProblemStatement()
+    #https://oss-vizier.readthedocs.io/en/latest/guides/user/search_spaces.html#search-spaces
     root = problem.search_space.select_root()
-    root.add_int_param("top_k", min_value=top_k, max_value=top_k, default_value=top_k)
-    root.add_int_param("num_layers", min_value=2, max_value=2,
-        default_value=2)
-    num_heads_vals = [2, 4, 8]
-    num_heads = root.add_discrete_param("num_heads", feasible_values=num_heads_vals)
-    all_hidden_options = [64, 128, 256]
-    for h_val in num_heads_vals:
-        valid_dims = [d for d in all_hidden_options if d % h_val == 0]
-        # Create a conditional branch for this specific value of num_heads
-        hidden_dim = num_heads.select_values([h_val]).add_discrete_param(name="hidden_dim", feasible_values=valid_dims)
-        # conditional max_history:
-        for d_val in valid_dims:
-            # Grandchild: max_history (Depends on hidden_dim)
-            # We select the specific value of hidden_dim to define the next range
-            hidden_dim.select_values([d_val]).add_int_param(
-                name="max_history",
-                min_value=2 * top_k,
-                max_value=5 * d_val,
-                scale_type=vz.ScaleType.LINEAR)
+    
+    root.add_discrete_param("top_k", feasible_values=[top_k])
+    root.add_discrete_param("num_layers", feasible_values=[2])
+    #hidden_dim % num_heads == 0
+    root.add_discrete_param("num_heads", feasible_values=[2, 4, 8])
+    root.add_discrete_param("hidden_dim", feasible_values=[64, 128, 256])
+    root.add_discrete_param("max_history", feasible_values=[i for i in range(2*top_k, 6*256, 248)])
+    
     root.add_discrete_param("num_candidates", feasible_values=[i for i in range(2*top_k, 500 + 1, 10)])
     
     #if want a linear relationship between lr and wd, setup a dependency:
@@ -121,11 +110,10 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False):
     if use_batching_alg:
         study_config.algorithm = 'GP_UCB_PE'
     else:
-        #bandit and eagle cannot support conditional search space:
-        #study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
+        study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
         #study_config.algorithm = 'EAGLE_STRATEGY'
         #study_config.algorithm = 'RANDOM_SEARCH'
-        study_config.algorithm = 'DEFAULT'
+        #study_config.algorithm = 'DEFAULT'
     return study_config
 
 def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
@@ -225,7 +213,7 @@ def tune_run(config):
 
     for i, trial in enumerate(suggested_trials):
         
-        hparams = {k: v.value for k, v in trial.parameters.items()}
+        hparams = {k: v for k, v in trial.parameters.items()}
         config2 = {
             **config,
             **hparams,
