@@ -287,11 +287,14 @@ def train_run(config):
         optimal_trials = study.optimal_trials()
         if optimal_trials is None:
             raise ValueError(f"No optimal trials found for project_id={config['project_id']}, study_name={config['study_name']}, endpoint={config['vizier_endpoint']}")
-        best_trial = optimal_trials[0]
+        best_trial = None
+        for tr in optimal_trials:
+            best_trial = tr
+            break
         best_trial_data = best_trial.materialize()
         best_params = dict(best_trial_data.parameters)
-        best_value = best_trial_data.final_measurement.metrics[0].value
-        
+        best_value = best_trial_data.final_measurement.metrics.get(f'ndcg_{config["top_k"]}')
+        best_value = best_value.value
         print(f"Loaded Best Objective: {best_value}")
         print(f"Loaded Best Parameters: {best_params}")
         config.update(**best_params)
@@ -364,9 +367,10 @@ def main(_):
     config = {k: v for k, v in config.items() if k.find('?') == -1}
     # static top_k
     config['top_k'] = 20
+    
     if config['phase'] == 'tune':
         tune_run(config)
-    elif config['phase'] == 'test_best' or config['phase'] == 'test_given':
+    elif config['phase'].find('test') == 0:
         test_run(config)
     else:
         train_run(config)
