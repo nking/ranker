@@ -82,3 +82,9 @@ container holding vizier server is listening on 172.17.0.1 at port 8000
      # OR (on Linux)
      ss -tulpn | grep 8000
 
+===========
+a container is misisng a module, so can run the container
+for duration of a session and while in its terminal,
+submit commands like pip list
+    docker run --rm -it ranker-vizier_server bash
+

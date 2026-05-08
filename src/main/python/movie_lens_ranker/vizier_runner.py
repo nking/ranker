@@ -121,7 +121,11 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False):
     if use_batching_alg:
         study_config.algorithm = 'GP_UCB_PE'
     else:
-        study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
+        #bandit and eagle cannot support conditional search space:
+        #study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
+        #study_config.algorithm = 'EAGLE_STRATEGY'
+        #study_config.algorithm = 'RANDOM_SEARCH'
+        study_config.algorithm = 'DEFAULT'
     return study_config
 
 def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
@@ -217,7 +221,7 @@ def tune_run(config):
     study = setup_vizier_study(project_id=config['project_id'], study_name=config['study_name'],
         endpoint=config['vizier_endpoint'], top_k=config['top_k'], use_batching_alg=n_large)
     
-    suggested_trials = study.suggest(count=len(trial_ids), client_id=worker_rank)
+    suggested_trials = study.suggest(count=len(trial_ids), client_id=study._client._client_id)
 
     for i, trial in enumerate(suggested_trials):
         

@@ -2,6 +2,7 @@ import json
 import os
 import logging
 import jax
+from vizier._src.service.vizier_client import VizierClient
 from vizier.service import pyvizier as vz
 from vizier.service import clients as vz_clients
 
@@ -241,6 +242,15 @@ class TestRanker(unittest.TestCase):
             'mlflow_experiment_name': STUDY_NAME,
         }
         set_flags_from_dict(config)
+        
+        try:
+            vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
+            resource_name = f"owners/{config['project_id']}/studies/{config['study_name']}"
+            study = vz_clients.Study.from_owner_and_id(owner=config['project_id'],
+                study_id=config['study_name'])
+            study.delete()
+        except Exception as ex:
+            pass
         
         run_vizier_main(None)
         
