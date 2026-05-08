@@ -59,7 +59,7 @@ def main(_):
     # run the experiment locally w/ xm_local.Local.  also means this is a block and wait context.
     # also means of xm_local.Vertex or Kubernetes is used, this block does not wait
     # and any jobs must be stopped from a cluster control plane.
-    # BUT, if for some reason you want this blobk to block an wait after launching to
+    # BUT, if for some reason you want this blobk to block and wait after launching to
     # cloud, then use job_group = experiment.add(...) and at end use job_group.wait_for_completion()
     with xm_local.create_experiment(experiment_title='vizier_hpo_run') as experiment:
         docker_packageable = xm.dockerfile_container(
@@ -92,7 +92,7 @@ def main(_):
 
         #can find network name in docker-compose-dbs.yaml
         for i in range(num_trials, num_trials_per_worker):
-            trial_ids = [i for i in range(i, i+num_trials_per_worker)]
+            trial_ids = [ii for ii in range(i, i+num_trials_per_worker)]
             experiment.add(
                 xm.Job(
                     executable=executable,
@@ -103,7 +103,7 @@ def main(_):
                     env_vars=env_config,
                     args={
                         **run_config,
-                        'trial_ida': dumps(trial_ids),
+                        'trial_ids': dumps(trial_ids),
                     },
                 )
             )
