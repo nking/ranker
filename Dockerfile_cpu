@@ -26,6 +26,6 @@ RUN python3 -m pip install --no-cache-dir equinox==0.13.2 alembic==1.18.4 --pref
 #RUN python3 -c "import sys; print('SYS PATH:', sys.path); import site; print('SITE PACKAGES:', site.getsitepackages())"
 #['', '/usr/local/lib/python312.zip', '/usr/local/lib/python3.12', '/usr/local/lib/python3.12/lib-dynload', '/usr/local/lib/python3.12/site-packages']
 
-ENTRYPOINT ["python3", "-m", "movie_lens_ranker.vizier_runner"]
+ENTRYPOINT ["python3", "-m", "movie_lens_ranker.app_runner"]
 #default flags go here:
 #CMD ["param1","param2"] ...

@@ -53,7 +53,7 @@ from movie_lens_ranker.util import set_flags_from_dict
 from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
     get_mlflow_metrics_by_exp_name
 
-from movie_lens_ranker.vizier_runner import main as run_vizier_main
+from movie_lens_ranker.app_runner import main as run_vizier_main
 
 import unittest
 
