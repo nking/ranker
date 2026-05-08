@@ -26,7 +26,6 @@ def safe_jax_init():
         print(f'WARNING while trying to initialize jax distributed: {e}')
 safe_jax_init()
 
-from typing import Tuple
 import json
 import mlflow
 from absl import flags
@@ -211,9 +210,9 @@ def tune_run(config):
     
     suggested_trials = study.suggest(count=len(trial_ids), client_id=study._client._client_id)
 
-    for i, trial in enumerate(suggested_trials):
+    for i, trial_suggestion in enumerate(suggested_trials):
         
-        hparams = {k: v for k, v in trial.parameters.items()}
+        hparams = {k: v for k, v in trial_suggestion.parameters.items()}
         config2 = {
             **config,
             **hparams,
@@ -225,14 +224,16 @@ def tune_run(config):
         trial_id = trial_ids[i]
         config2['trial_id'] = trial_id
         
-        best_val_ndcg_k, mlflow_run_id = train_fn(config2, trial=trial, save_checkpoints=False)
+        # NOTE: if have a comb of infeasible params or failure in which trial should not be
+        # repeated, mark the trial using trial.infeasible() and continue w/o running train_fn
         
-        trial.metadata.get_namespace('user')['mlflow_run_id'] = mlflow_run_id
+        best_val_ndcg_k, mlflow_run_id = train_fn(config2, trial=trial_suggestion, save_checkpoints=False)
         
-        #NOTE: if have a comb of infeasible params or failure in which trial should not be
-        # repeated, mark the trial using trial.infeasible()
-        trial.complete(vz.Measurement(metrics={f'ndcg_{config["top_k"]}': float(best_val_ndcg_k)}))
-
+        # protobuf error
+        trial_suggestion.update_metadata(vz.Metadata({'mlflow_run_id': mlflow_run_id}))
+        
+        trial_suggestion.complete(vz.Measurement(metrics={f'ndcg_{config["top_k"]}': float(best_val_ndcg_k)}))
+    
 def train_run(config):
    
     if "debug" in config and config['debug']:
@@ -361,12 +362,15 @@ def main(_):
     config = FLAGS.flag_values_dict()
     # removing problem key: '?'
     config = {k: v for k, v in config.items() if k.find('?') == -1}
+    # static top_k
+    config['top_k'] = 20
     if config['phase'] == 'tune':
         tune_run(config)
     elif config['phase'] == 'test_best' or config['phase'] == 'test_given':
         test_run(config)
     else:
         train_run(config)
+    
     
 if __name__ == '__main__':
     define_flags()
