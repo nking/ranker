@@ -595,7 +595,7 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False, rngs:n
         print(
             f"expect the model training to start w/ loss = {-log(1. / config['num_candidates'])}")
         
-        best_val_ndcg_k, STATE = _train_fn(model=model, train_dataloader=train_dataloader,
+        best_val_ndcg_k = _train_fn(model=model, train_dataloader=train_dataloader,
             val_dataloader=val_dataloader,
             optimizer=optimizer, top_k=config['top_k'],
             latest_checkpoint_uri=config['latest_checkpoint_uri'],
@@ -827,7 +827,7 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
                 )
             config['mlflow_run_id'] = mlflow_run.info.run_id
             
-        best_val_ndcg_k, STATE = _train_fn(model=restore_dict['model'],
+        best_val_ndcg_k = _train_fn(model=restore_dict['model'],
             train_dataloader=restore_dict['train_dataloader'],
             val_dataloader=restore_dict['val_dataloader'],
             optimizer=restore_dict['optimizer'],
@@ -841,7 +841,7 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
             restored_global_step=restore_dict['global_step'],
             save_checkpoints=save_checkpoints
         )
-        return best_val_ndcg_k, STATE
+        return best_val_ndcg_k
         
     finally:
         if mlflow_run is not None:
