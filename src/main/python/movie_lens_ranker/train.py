@@ -563,9 +563,10 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False, rngs:n
                 experiment_name=config['mlflow_experiment_name'],
             )
             # don't use nested=True because the parent isn't in the same thread in production
-            print(f"mlflow start run: {config['train_id']}")
+            train_id = config.get('train_id', 0)
+            print(f"mlflow start run: train_{train_id}")
             mlflow_run = mlflow.start_run(
-                run_name=f"train_{config.get('train_id', 0)}",
+                run_name=f"train_{train_id}",
                 #tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
                 tags = {"mlflow.parentRunId" : config['mlflow_parent_run_id']}
             )
