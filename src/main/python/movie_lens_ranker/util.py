@@ -1,4 +1,5 @@
 import argparse
+import json
 from collections import defaultdict
 from typing import Tuple, Dict, List, Union, Set
 import jax
@@ -30,7 +31,7 @@ mlflow_config_keys = {
     'mlflow_parent_run_id'
 }
 hpo_config_keys = {'vizier_endpoint', 'trial_ids',
-    'trial_id', 'train_id', 'tune_id','test_id',
+    'trial_id', 'train_id', 'test_id',
     'phase', 'LOGNAME', 'USER', 'debug', 'study_name', 'project_id'
 }
 model_params_trainable_keys = {
@@ -195,6 +196,9 @@ def define_flags():
     flags.DEFINE_integer("train_id", default=0,
         help="an id to assign to train if phase is 'train_best' or 'train_given'"
     )
+    flags.DEFINE_integer("trial_id", default=0,
+        help="an id internally in a single trial _train_fn run"
+    )
     flags.DEFINE_enum(
         'phase', 'train_best',
         ['tune', 'train_best', 'train_given', 'test_best', 'test_given'],
@@ -248,6 +252,20 @@ def define_flags():
         help="prints debug statements"
     )
 
+def stringify_mlflow_params(config:dict):
+    return {k: json.dumps(v) for k, v in config.items() if
+        k.find('?') == -1}
+
+def destringify_mlflow_params(params:dict):
+    config = {}
+    for k, v in params.items():
+        try:
+            config[k] = json.loads(v)
+        except (json.JSONDecodeError, TypeError):
+            # Fallback for plain strings that aren't valid JSON (like "adam")
+            config[k] = v
+    return config
+    
 def read_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
     """
     read the user and movie embeddings and concatentate them: [row of zeros, user embeddings, movie embeddings].  the

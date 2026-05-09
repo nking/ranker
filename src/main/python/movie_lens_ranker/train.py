@@ -10,6 +10,7 @@ import jax.tree_util as jtu
 from jax.sharding import PartitionSpec as P
 # In JAX 0.8+, shard_map is typically in the main namespace
 from jax import shard_map, Array
+from mlflow import MlflowException
 
 from vizier.service import pyvizier as vz
 from vizier.service.clients import Trial
@@ -27,7 +28,8 @@ import orbax.checkpoint as ocp
 from movie_lens_ranker.data_loading import create_train_and_val_dataloaders, \
     create_test_dataloader
 from movie_lens_ranker.model import GraphRanker
-from movie_lens_ranker.util import read_embeddings, get_env_resources
+from movie_lens_ranker.util import read_embeddings, get_env_resources, \
+    stringify_mlflow_params
 
 env_resources, mesh = get_env_resources()
 
@@ -541,8 +543,11 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False, rngs:n
     :param rngs:
     :return: val_ndcg_20, mlflow_run_id
     """
+    for key in {"phase", "mlflow_experiment_name", "mlflow_experiment_id", "mlflow_parent_run_id"}:
+        if key not in config:
+            raise ValueError(f"config is missing {key}")
     
-    #hard wiring top_k for consistent stats with retrieval and reranker
+    #fixed top_k for consistent stats with retrieval and reranker
     config['top_k'] = 20
     
     worker_rank = jax.process_index()
@@ -563,34 +568,34 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False, rngs:n
                 experiment_name=config['mlflow_experiment_name'],
             )
             # don't use nested=True because the parent isn't in the same thread in production
-            train_id = config.get('train_id', 0)
-            print(f"mlflow start run: train_{train_id}")
+            if config['phase'].find('tune') == 0:
+                run_name = f"trail_{config['trial_id']}"
+            elif config['phase'].find('train') == 0:
+                run_name = f"train_{config['train_id']}"
+            elif config['phase'].find('test') == 0:
+                run_name = f"test_{config['test_id']}"
+            else:
+                raise ValueError(f"Invalid phase={config['phase']}")
+           
+            print(f"mlflow start run: {run_name}")
             mlflow_run = mlflow.start_run(
-                run_name=f"train_{train_id}",
+                run_name=run_name,
                 #tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
                 tags = {"mlflow.parentRunId" : config['mlflow_parent_run_id']}
             )
             config['mlflow_run_id'] = mlflow_run.info.run_id
             mlflow.set_tag("phase", config["phase"]) #do not move this before start_run
-            for k,v in config.items():
-                if k.find('?') > -1:
-                    print(f"problem key: {k}={v}", flush=True)
-            save_dict = {k:v for k,v in config.items() if k.find('?')==-1}
-            mlflow.log_params(save_dict)
-           
-            mlflow.log_text(str(model), "model_summary.txt")
-            
+    
             if save_checkpoints:
-                sfx = f"{config['study_name']}/trial_{config['trial_id']:04d}"
+                # paradigm is that we save checkpoints for "train" phase, but not HPO trial phases
+                sfx = f"{config['study_name']}/{run_name}"
                 config['best_checkpoint_uri'] = f"{config['best_checkpoint_uri']}/{sfx}"
                 config['latest_checkpoint_uri'] = f"{config['latest_checkpoint_uri']}/{sfx}"
-                mlflow.set_tag('best_checkpoint_uri',
-                    config['best_checkpoint_uri'])
-                mlflow.set_tag('latest_checkpoint_uri',
-                    config['latest_checkpoint_uri'])
-                mlflow.log_param("best_checkpoint_uri", config['best_checkpoint_uri'])
-                mlflow.log_param("latest_checkpoint_uri", config['latest_checkpoint_uri'])
-                #paradigm is that we save checkpoints for "train" phase, but not HPO trial phases
+                mlflow.set_tag('best_checkpoint_uri', config['best_checkpoint_uri'])
+                mlflow.set_tag('latest_checkpoint_uri', config['latest_checkpoint_uri'])
+            
+            mlflow.log_params(stringify_mlflow_params(config))
+            mlflow.log_text(str(model), "model_summary.txt")
         
         print(
             f"expect the model training to start w/ loss = {-log(1. / config['num_candidates'])}")
@@ -741,12 +746,20 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
 
 def test_fn(config: dict):
     
-    #hard wiring as is done in train_fn:
+    for key in {"phase", "mlflow_experiment_name", "mlflow_experiment_id",
+        "mlflow_parent_run_id"}:
+        if key not in config:
+            raise ValueError(f"config is missing {key}")
+    
+    # fixed top_k for consistent stats with retrieval and reranker
     config['top_k'] = 20
     
     worker_rank = jax.process_index()
     
-    restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['test_checkpoint_uri'])
+    if config['phase'] == 'test_best':
+        restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
+    else:
+        restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['test_checkpoint_uri'])
     
     model = restore_dict['model']
     
@@ -765,7 +778,6 @@ def test_fn(config: dict):
             )
             config['mlflow_run_id'] = mlflow_run.info.run_id
             mlflow.set_tag("phase", config["phase"])  # do not move this before start_run
-            #mlflow.log_params(config)
             
             #these uris are all in config too, excepting test_ratings
             test_dataloader = create_test_dataloader(
@@ -801,7 +813,7 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
     
     worker_rank = jax.process_index()
     
-    restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
+    restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['latest_checkpoint_uri'])
     
     best_val_ndcg_k = -1.0
     mlflow_run = None
@@ -814,14 +826,14 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
             # in production, there may be ACL to solve for this:
             if run_id is None:
                 mlflow_run = mlflow.start_run(
-                    run_name=f"trial_{config.get('trial_id', 0):04d}",
+                    run_name=f"trial_{config.get('trial_id', 0)}",
                     # tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
                     tags={"mlflow.parentRunId": config['mlflow_parent_run_id']}
                 )
             else:
                 mlflow_run = mlflow.start_run(
                     run_id=run_id,
-                    run_name=f"trial_{config.get('trial_id', 0):04d}",
+                    run_name=f"trial_{config.get('trial_id', 0)}",
                     # tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
                     tags={"mlflow.parentRunId": config['mlflow_parent_run_id']}
                 )

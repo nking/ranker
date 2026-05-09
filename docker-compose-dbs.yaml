@@ -67,7 +67,7 @@ services:
       # Mount the init script into the special entrypoint directory
       - ./init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d mlflow_db && pg_isready -U ${POSTGRES_USER} -d mlflow_db" ]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d mlflow_db" ]
       interval: 5s
       timeout: 5s
       retries: 5

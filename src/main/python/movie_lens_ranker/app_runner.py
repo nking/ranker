@@ -1,7 +1,5 @@
 import os
-import grpc
 import jax
-
 def safe_jax_init():
     # Check if we are in a distributed environment (e.g., K8s, Vertex, Slurm)
     # Different orchestrators use different keys, but these are common:
@@ -9,7 +7,13 @@ def safe_jax_init():
         'JAX_COORDINATOR_ADDRESS', 'KUBERNETES_SERVICE_HOST',
         'SLURM_JOB_ID', 'PADDLE_TRAINER_ENDPOINTS'
     ])
-
+    '''
+    jax.distributed.initialize(
+        coordinator_address=os.environ.get("JAX_COORDINATOR_ADDRESS"),
+        num_processes=int(os.environ.get("JAX_NUM_PROCESSES", 1)),
+        process_id=int(os.environ.get("JAX_PROCESS_ID", 0)),
+    )
+    '''
     try:
         if is_distributed:
             # Let JAX auto-detect cluster settings
@@ -26,6 +30,8 @@ def safe_jax_init():
         print(f'WARNING while trying to initialize jax distributed: {e}')
 safe_jax_init()
 
+import grpc
+from vizier._src.pyvizier.shared.trial import ParameterValue, ParameterDict
 import json
 import mlflow
 from absl import flags
@@ -34,7 +40,7 @@ from vizier.service import clients as vz_clients
 
 from movie_lens_ranker.train import train_fn, test_fn, \
     restore_items_from_checkpoint
-from movie_lens_ranker.util import define_flags
+from movie_lens_ranker.util import define_flags, get_recognized_keys
 
 FLAGS = flags.FLAGS
 
@@ -71,6 +77,16 @@ def get_or_create_mlflow_experiment(experiment_name:str):
         return experiment.experiment_id
     else:
         return mlflow.create_experiment(experiment_name)
+
+def extract_correct_vizier_param_types_dict(params:ParameterDict):
+    config = {}
+    int_keys = {"top_k", "num_layers", "num_heads","hidden_dim","max_history","num_candidates","out_dim","edge_embed_dim"}
+    for k, v in params.items():
+        if k in int_keys:
+            config[k] = int(v.value)
+        else:
+            config[k] = float(v.value)
+    return config
 
 def _get_study_config(top_k:int=20, use_batching_alg:bool=False):
     
@@ -184,7 +200,7 @@ def tune_run(config):
         else:
             #get parent run id:
             runs = mlflow.search_runs(
-                experiment_names=[config['study_name']],
+                experiment_ids=[experiment.experiment_id],
                 filter_string="attributes.run_name = 'tune'",
                 output_format="list"
             )
@@ -211,7 +227,7 @@ def tune_run(config):
     suggested_trials = study.suggest(count=len(trial_ids), client_id=study._client._client_id)
 
     for i, trial_suggestion in enumerate(suggested_trials):
-        
+        #can use extract_correct_param_types_dict if needed
         hparams = {k: v for k, v in trial_suggestion.parameters.items()}
         config2 = {
             **config,
@@ -226,7 +242,7 @@ def tune_run(config):
         
         # NOTE: if have a comb of infeasible params or failure in which trial should not be
         # repeated, mark the trial using trial.infeasible() and continue w/o running train_fn
-        
+        os.environ.get("JAX_COORDINATOR_ADDRESS")
         best_val_ndcg_k, mlflow_run_id = train_fn(config2, trial=trial_suggestion, save_checkpoints=False)
         
         # protobuf error
@@ -262,7 +278,7 @@ def train_run(config):
         else:
             #get parent run id:
             runs = mlflow.search_runs(
-                experiment_names=[config['study_name']],
+                experiment_ids = [experiment.experiment_id],
                 filter_string="attributes.run_name = 'train'",
                 output_format="list"
             )
@@ -292,7 +308,8 @@ def train_run(config):
             best_trial = tr
             break
         best_trial_data = best_trial.materialize()
-        best_params = dict(best_trial_data.parameters)
+        #best_params contains only the params being tuned, not all params needed for train_fn
+        best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
         best_value = best_trial_data.final_measurement.metrics.get(f'ndcg_{config["top_k"]}')
         best_value = best_value.value
         print(f"Loaded Best Objective: {best_value}")
@@ -329,7 +346,7 @@ def test_run(config):
         else:
             # get parent run id:
             runs = mlflow.search_runs(
-                experiment_names=[config['study_name']],
+                experiment_ids=[experiment.experiment_id],
                 filter_string="attributes.run_name = 'test'",
                 output_format="list"
             )
@@ -347,24 +364,14 @@ def test_run(config):
     config['mlflow_experiment_name'] = config['study_name']
     config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
     
-    if config['phase'] == 'test_best':
-        restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
-    else:
-        restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['test_checkpoint_uri'])
-        
-    restore_dict['config']['ratings_test_uri'] = config['ratings_test_uri']
-    restore_dict['config']['train_negatives_uri'] = config['train_negatives_uri']
-    
-    restore_dict['config']['test_id'] = config.get('test_id', 0)
-    
-    test_metrics = test_fn(config=restore_dict['config'])
+    test_metrics = test_fn(config=config)
         
     print(f'TEST METRICS: {test_metrics}', flush=True)
     
 def main(_):
     config = FLAGS.flag_values_dict()
-    # removing problem key: '?'
-    config = {k: v for k, v in config.items() if k.find('?') == -1}
+    config = {k:v for k, v in config.items() if k in get_recognized_keys()}
+   
     # static top_k
     config['top_k'] = 20
     

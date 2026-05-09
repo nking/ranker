@@ -99,7 +99,7 @@ def main(_):
                     executor=xm_local.Local(
                         requirements=resources,
                     ),
-                    name=f"{env_config.get('study_name')}_trial_{i:04d}",
+                    name=f"{env_config.get('study_name')}_trial_{i}",
                     env_vars=env_config,
                     args={
                         **run_config,

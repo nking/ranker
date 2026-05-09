@@ -1,4 +1,3 @@
-import json
 import os
 import logging
 
@@ -37,6 +36,7 @@ from vizier.service import clients as vz_clients
 import numpy as np
 from dotenv import dotenv_values
 from absl import flags
+import json
 
 import glob
 import os.path
@@ -51,13 +51,16 @@ from absl import flags
 
 from helper import *
 from movie_lens_ranker.train import *
-from movie_lens_ranker.util import set_flags_from_dict
+from movie_lens_ranker.util import set_flags_from_dict, \
+    destringify_mlflow_params
 from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
     get_mlflow_metrics_by_exp_name
 
-from movie_lens_ranker.app_runner import main as app_runner
+from movie_lens_ranker.app_runner import main as app_runner, \
+    extract_correct_vizier_param_types_dict
 
 import unittest
+import subprocess
 
 #found by ip addr show docker0
 base_url = "172.17.0.1"
@@ -91,7 +94,57 @@ def wait_for_postgres_vizier_mlflow_dbs(retries=5, delay=2):
                     f"Database {db} not ready, retrying in {delay}s... ({i + 1}/{retries});  ex={ex}")
                 time.sleep(delay)
     return s[0]==True and s[1]==True
+    
+def reset_mlflow_db():
+    # The SQL command
+    truncate_query = """
+    TRUNCATE TABLE
+        experiments,
+        experiment_tags,
+        datasets,
+        endpoints,
+        assessments
+    CASCADE;
+    """
+    container_name = "local_db_store"
+    db = "mlflow_db"
+    env_file = os.path.join(get_project_dir(), ".env_unittests")
+    env_dict = dotenv_values(env_file)
+    
+    # Construct the docker command
+    command = [
+        "docker", "exec", "-t", container_name,
+        "psql", "-U", env_dict['POSTGRES_USER'], "-w", env_dict['POSTGRES_PASSWORD'],
+        "-d", db, "-c", truncate_query
+    ]
+        
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        print(f"MLFlow Database reset successful")
+    except subprocess.CalledProcessError as e:
+        print(f"Error resetting database: {e.stderr}")
 
+def reset_checkpoint_buckets():
+    command = [
+        "docker", "exec", "gcs_emulator",
+        "sh", "-c", "rm -rf /storage/checkpoint_bucket/*"
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        print("empty checkpoint_bucket/* successful")
+    except subprocess.CalledProcessError as e:
+        print(f"Error resetting database: {e.stderr}")
+    
 class TestRanker(unittest.TestCase):
     def setUp(self):
         
@@ -250,6 +303,19 @@ class TestRanker(unittest.TestCase):
         except Exception as ex:
             pass
         
+        try:
+            # empty MLFlow db:
+            reset_mlflow_db()
+        except Exception as ex:
+            pass
+        
+        try:
+            # epty the checkpoints bucket
+            reset_checkpoint_buckets()
+        except Exception as ex:
+            pass
+        
+        # run tune HPO
         app_runner(None)
         
         vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
@@ -265,7 +331,8 @@ class TestRanker(unittest.TestCase):
             break
         self.assertIsNotNone(best_trial)
         best_trial_data = best_trial.materialize()
-        best_params = dict(best_trial_data.parameters)
+        #best_params contains only the params being tuned, not all params needed for train_fn
+        best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
         print("Available metrics:",
             list(best_trial_data.final_measurement.metrics.keys()), flush=True)
         bfm = best_trial_data.final_measurement
@@ -282,9 +349,16 @@ class TestRanker(unittest.TestCase):
         #phase was tune, so no need to check for checkpoint paths
         
         mlflow_run = mlflow.get_run(mlflow_run_id)
-        #caveat: numbers are all strings in this:
-        config = mlflow_run.data.params
+        config = destringify_mlflow_params(mlflow_run.data.params)
         self.assertIsNotNone(config)
+        self.assertTrue(isinstance(config['batch_size'], int))
+        
+        ## assert the values are the same
+        for k, v in best_params.items():
+            if isinstance(v, float):
+                self.assertAlmostEqual(v, config[k], delta=0.01*v)
+            else:
+                self.assertEqual(v, config[k])
         
         #### ====================================================== ####
         config['phase'] = 'train_best'
@@ -303,12 +377,13 @@ class TestRanker(unittest.TestCase):
             except Exception as ex:
                 pass
 
+        #run train using best found in HPO
         app_runner(None)
         
         #results will be stored for study_name and run_name='train'
         run_name = f"train_{train_id}"
         runs = mlflow.search_runs(
-            experiment_names=[config['study_name']],
+            experiment_ids=[config['mlflow_experiment_id']],
             filter_string=f"attributes.run_name = '{run_name}'",
             output_format="list"
         )
@@ -317,7 +392,8 @@ class TestRanker(unittest.TestCase):
         
         self.assertIsNotNone(runs)
         self.assertEqual(len(runs), 1)
-        run_id = runs[0].info.run_id
+        best_run = runs[0]
+        run_id = best_run.info.run_id
         metrics_dict = {}
         for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
             for key_t in (f"train_{key}", f"val_{key}"):
@@ -329,9 +405,14 @@ class TestRanker(unittest.TestCase):
         self.assertTrue(len(metrics_dict), 8)
         
         #phase is train, so assert checkpoint paths are in mlflow
+        # we have to fetch the checkpoint path from the mflow params or tags
+        best_checkpoint_uri_tag = best_run.data.tags.get("best_checkpoint_uri")
+        best_checkpoint_uri_param = json.loads(best_run.data.params.get("best_checkpoint_uri"))
+        self.assertTrue(best_checkpoint_uri_tag == best_checkpoint_uri_param)
+        print(f'best_checkpoint_uri={best_checkpoint_uri}')
         
         #the train method stores checkpoints so assert checkpoints and restore and assert can resume training if not complete ==============================
-        restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
+        restore_dict = restore_items_from_checkpoint(checkpoint_uri=best_checkpoint_uri_tag)
         
         expected_keys = {'model', 'optimizer', 'train_dataloader', 'train_dataloader_iter',
             'val_dataloader', 'rngs', 'global_step', 'config'}
@@ -342,21 +423,23 @@ class TestRanker(unittest.TestCase):
         restore_dict['config']['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
         restore_dict['config']['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
         
-        test_metrics = test_fn(config=restore_dict['config'])
-        
-        print(f'TEST METRICS: {test_metrics}', flush=True)
+        #test_metrics = test_fn(config=restore_dict['config'])
+        #print(f'TEST METRICS: {test_metrics}', flush=True)
         
         #=== operate test from entrypoint
-        config['test_checkpoint_uri'] = config['best_checkpoint_uri']
+        config['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
+        config['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
+        #config['test_checkpoint_uri'] = best_checkpoint_uri_tag  #for use when phase is 'test_given'
+        config['best_checkpoint_uri'] = best_checkpoint_uri_tag
         config['phase'] = 'test_best'
         test_id = 234567
         config['test_id'] = test_id
         set_flags_from_dict(config)
         app_runner(None)
-        
+    
         run_name = f'test_{config.get('test_id', 0)}'
         runs = mlflow.search_runs(
-            experiment_names=[config['study_name']],
+            experiment_ids=[config['mlflow_experiment_id']],
             filter_string=f"attributes.run_name = '{run_name}'",
             output_format="list"
         )
@@ -381,7 +464,9 @@ class TestRanker(unittest.TestCase):
         STEPS_PER_EPOCH_LOCAL = STEPS_PER_EPOCH_GLOBAL // NUM_TRAIN_SHARDS
         
         ## ================ get the 2nd to last latest checkpoint and assert can continue training from it. ====
-        earlier_restore_dict = restore_items_from_checkpoint(config['latest_checkpoint_uri'], get_earliest=True)
+        best_checkpoint_uri = best_run.data.tags.get("best_checkpoint_uri")
+        latest_checkpoint_uri = best_run.data.tags.get("latest_checkpoint_uri")
+        earlier_restore_dict = restore_items_from_checkpoint(latest_checkpoint_uri, get_earliest=True)
         print(f'global_step next to last={earlier_restore_dict["global_step"]}')
         self.assertTrue(earlier_restore_dict['global_step'] > 0)
         epoch = (earlier_restore_dict['global_step']//TRAIN_BATCH_SIZE)//STEPS_PER_EPOCH_GLOBAL
@@ -390,7 +475,6 @@ class TestRanker(unittest.TestCase):
         #because this is next to last epoch saved, we shoud see < STEPS_PER_EPOCH_LOCAL loops over the iterator
         start_step = earlier_restore_dict['global_step'] // NUM_TRAIN_SHARDS
         n_iter = 0
-        #TODO: follow up.  something is wrong here because it iterates over 4 epochs
         try:
             for batch_idx, padded_super_graph in enumerate(earlier_restore_dict['train_dataloader_iter']):
                 n_iter += 1
@@ -400,7 +484,7 @@ class TestRanker(unittest.TestCase):
         #self.assertEqual(n_iter, 1)
         
         ## ==== get the last latest checkpoint and assert that doesn't continue training from it because number of epochs is reached. ====
-        last_restored_dict = restore_items_from_checkpoint(config['latest_checkpoint_uri'], get_earliest=False)
+        last_restored_dict = restore_items_from_checkpoint(latest_checkpoint_uri, get_earliest=False)
         print(f'global_step last epoch={last_restored_dict["global_step"]}')
         self.assertTrue(earlier_restore_dict['global_step'] > 0)
         epoch = (last_restored_dict['global_step'] // TRAIN_BATCH_SIZE) // STEPS_PER_EPOCH_GLOBAL
@@ -418,7 +502,7 @@ class TestRanker(unittest.TestCase):
         # self.assertEqual(n_iter, 0)
         
         ## ====== assert that training continues ======
-        best_val_ndcg_k_2 = resume_train_fn(config=restore_dict['config'],
+        best_val_ndcg_k_2 = resume_train_fn(config=earlier_restore_dict['config'],
             trial=None, save_checkpoints=True)
         
         print(f'best_val_ndcg_k from resume 2nd to last chkpt training={best_val_ndcg_k_2}')
@@ -440,8 +524,8 @@ class TestRanker(unittest.TestCase):
           order by key,timestamp;
         '''
         runs = mlflow.search_runs(
-            experiment_names=[config['study_name']],
-            #filter_string="attributes.run_name = 'Optuna_HPO'",
+            experiment_ids=[config['mlflow_experiment_id']],
+            filter_string="attributes.run_name LIKE 'train_%'",
             output_format="list"
         )
         expected_keys = {'loss', 'ndcg_20', 'mrr_20', 'recall_20'}
@@ -462,5 +546,5 @@ class TestRanker(unittest.TestCase):
         for png_file in pngs:
             self.assertTrue(os.path.exists(png_file))
     
-    if __name__ == '__main__':
-        unittest.main()
+if __name__ == '__main__':
+    unittest.main()

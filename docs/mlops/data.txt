@@ -31,3 +31,31 @@
     - best checkpoint
       - Orbax (backend fake gcs server, hosted by a container)
 
+======================
+MLFlow:
+  - experiment:
+     - experiment_name: study_name
+     - parent run: 
+         - run_name: "tune"
+         - each trial run: 
+            - run_name: "trial_{trial_id}"
+         - train run: 
+            - run_name: "train_{train_id}"
+         - test run: 
+            - run_name: "test_{test_id}"
+OR 
+   if no tune phase preceeded a trial run
+  - experiment:
+     - experiment_name: study_name
+     - parent run: 
+         - run_name: "train"
+         - train run: 
+            - run_name: "train_{train_id}"
+OR 
+   if no tune phase preceeded a test run
+  - experiment:
+     - experiment_name: study_name
+     - parent run: 
+         - run_name: "test"
+         - train run: 
+            - run_name: "test_{test_id}"

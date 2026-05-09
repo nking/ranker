@@ -33,8 +33,6 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
         self.n_hard = self.num_candidates - 1 - self.n_approx
         self.recommendations = recommendations
         self.seed = seed
-        self.n_approx = self.num_candidates // 2
-        self.n_hard = self.num_candidates - 1 - self.n_approx
 
     def map(self, batch:Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """
