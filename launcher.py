@@ -1,12 +1,12 @@
 from xmanager import xm
 from xmanager import xm_local
 from dotenv import dotenv_values
-from json import dumps
+from json import dumps, loads
 
-#import logging
-#from absl import logging as absl_logging
-#absl_logging.set_verbosity(absl_logging.DEBUG)
-#logging.basicConfig(level=logging.DEBUG)
+import logging
+from absl import logging as absl_logging
+absl_logging.set_verbosity(absl_logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
 
 """
 start db services with:
@@ -18,8 +18,8 @@ or:
 #TODO: switch to coding for a GCS Secret Manager instead of embedding
 #passwords in uris. see todo.txt for API details
 def main(_):
-    num_trials = 1 #20
-    num_trials_per_worker = 1
+    num_trials = 4 #20
+    num_trials_per_worker = 2
     
     #default gateway used by docker is 172.17.0.1
     # can verify that with ip addr show docker0 | grep "inet "
@@ -27,7 +27,8 @@ def main(_):
     
     env_config = {
         **dotenv_values(".env_unittests"),
-        'PYTHONUNBUFFERED': '1'
+        'PYTHONUNBUFFERED': '1',
+        'JAX_COORDINATOR_ADDRESS': 'localhost:8888',
     }
     
     # Add the explicit environment overrides from your yaml
@@ -38,7 +39,7 @@ def main(_):
         "study_name": "GraphRanker_tuning_xmngr",
         "mlflow_experiment_name": "GraphRanker_tuning_cli",
         "mlflow_tracking_uri": f"postgresql://{env_config.get('POSTGRES_USER')}:{env_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db",
-        "vizier_endpoint_uri": f"{docker_bridge_gateway}:8000",
+        "vizier_endpoint": f"{docker_bridge_gateway}:8000",
         "latest_checkpoint_uri": "gs://checkpoint_bucket/latest",
         "best_checkpoint_uri": "gs://checkpoint_bucket/best",
         "movies_uri": "gs://data/movies-00000-of-00001.array_record",
@@ -53,7 +54,8 @@ def main(_):
         "num_epochs": 2,
         "batch_size": 64,
         "seed": 12345,
-        "phase": "tune"
+        "phase": "tune",
+        'project_id': 'tune-xmngr-01',
     }
     
     # run the experiment locally w/ xm_local.Local.  also means this is a block and wait context.
@@ -90,8 +92,9 @@ def main(_):
         # Adjust based on whether you need GPUs or specific CPU counts
         resources = xm.JobRequirements(cpu=1, ram=8 * xm.GiB)
 
+        print("begin jobs")
         #can find network name in docker-compose-dbs.yaml
-        for i in range(num_trials, num_trials_per_worker):
+        for i in range(0, num_trials, num_trials_per_worker):
             trial_ids = [ii for ii in range(i, i+num_trials_per_worker)]
             experiment.add(
                 xm.Job(
@@ -99,11 +102,12 @@ def main(_):
                     executor=xm_local.Local(
                         requirements=resources,
                     ),
-                    name=f"{env_config.get('study_name')}_trial_{i}",
+                    name=f"{run_config.get('study_name')}_trial_ids_{trial_ids})",
                     env_vars=env_config,
                     args={
                         **run_config,
-                        'trial_ids': dumps(trial_ids),
+                        'trial_ids': dumps(list(trial_ids)),
+                        "debug": True,
                     },
                 )
             )

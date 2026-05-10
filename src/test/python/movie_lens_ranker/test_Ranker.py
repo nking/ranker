@@ -209,12 +209,6 @@ class TestRanker(unittest.TestCase):
         print(f'local device count={jax.local_device_count()}')
         print(f'process_count={jax.process_count()}')
         print(f'process_index={jax.process_index()}')
-
-    def test_dp(self):
-        print(f"devices = {jax.devices()}")
-        mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=('data',))
-        jax.set_mesh(mesh)
-        print(mesh)
     
     def get_or_create_mlflow_experiment(self, experiment_name: str):
         if experiment := mlflow.get_experiment_by_name(experiment_name):

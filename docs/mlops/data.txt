@@ -59,3 +59,23 @@ OR
          - run_name: "test"
          - train run: 
             - run_name: "test_{test_id}"
+
+========================================
+
+using SPMD paradigm for model training with grain dataloading
+
+    shard_opts = grain.sharding.ShardByJaxProcess()
+
+xax.local_device_count():
+    The number of accelerators attached to this specific 
+    process/container.	
+jax.device_count():
+    The total number of accelerators across all 
+    processes/workers in the cluster.
+jax.process_count():
+    the # of jax processes assoc with the backend.
+    the number of hosts or containers in the cluster.
+
+==> jax.device_count() = jax.process_count() * jax.local_device_count()
+
+

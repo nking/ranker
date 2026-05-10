@@ -32,7 +32,7 @@ mlflow_config_keys = {
 }
 hpo_config_keys = {'vizier_endpoint', 'trial_ids',
     'trial_id', 'train_id', 'test_id',
-    'phase', 'LOGNAME', 'USER', 'debug', 'study_name', 'project_id'
+    'phase', 'LOGNAME', 'USER', 'debug', 'study_name', 'project_id', "debug"
 }
 model_params_trainable_keys = {
     'top_k',
@@ -64,7 +64,7 @@ def get_env_resources():
     num_local_devices = jax.local_device_count()
     devices = np.array(jax.devices())
     mesh = jax.sharding.Mesh(devices, axis_names=('data',))
-    jax.set_mesh(mesh)
+    #jax.set_mesh(mesh)
     device_dict = {}
     if backend == "tpu":
         device_dict.update({"use_gpu": False, "use_tpu": True,
