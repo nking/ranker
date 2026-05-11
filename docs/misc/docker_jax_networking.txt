@@ -1,0 +1,90 @@
+Jax Coordination Service:
+  - jax uses gRPC for its coordination service.
+  - in a multi-container setup, the coordinator
+    must be reachable at the exact IP and port
+    specified in JAX_COORDINATOR_ADDRESS 
+    from all workers.
+
+Jax multi-node/multi-process across containers:
+  - setup distributed communication
+  - jax.distributed.initialize() on each host
+    allows the processes to discover each other
+    and coordinate device access
+  - if using Docker, increase shared memory with 
+    --ipc=host or --shm-size to prevent data 
+    loader bottlenecks.
+  - xmanager details:
+  - kubeflow trainer v2:
+    - automattically injects env vars needed for
+      jax distributed
+  - cloud TPU
+    jax uses Pathways so that all TPU devices
+    across a cluster are local, that is 
+    jax.process_index() will be 0 on all nodess.
+
+
+Docker bridge:
+  - docker0
+  - running a container without the --network option connects it
+    to the default bridge which is usually 172.17.0.1
+  - containers attached to the default bridge can access 
+    network services outside of the docker host
+    (if host has internet access, so does container via
+    'masquerading')
+    -  e.g. docker run --rm -ti busybox ping -c1 docker.com
+  - when containers use the default bridge network,they have
+    access to each other using the container IP address.
+  - to create groups of containers for which containers 
+    have intra-group access but not inter-group access:
+    -  ADD DETAILS HERE
+  - docker drivers avail:
+    - bridge:
+      default network driver
+    - host
+      remove network isolation between the container and
+      the Docker host
+    - none
+      completely isolate a container from the host and
+      other containers
+    - overlay
+      swarm overlay networks connect multiple Docker
+      daemons together
+    - ipvlan
+      connect containers to external VLANs
+    - macvlan
+      containers appear as devices on the host's
+      network.
+  - container can be connected to multiple Docker
+    networks, such as a bridge netowrk and a --internal
+    network
+    
+Hairpin NAT loopback:
+  - 
+
+
+find te docker gateway IP and see which containers are connected:
+  docker network inspect bridge
+
+test if port is open from within a worker container:
+  docker exec -it [worker_1_id] nc -zv 172.17.0.1 8888.
+  docker exec -it [worker_1_id] ss -tulpn | grep 88
+
+in python slim, use python for it:
+   export C_ID=<container id from docker ps -a>
+   export ADDR=<container gateway used in launcher_2.py>
+     docker exec -it $C_ID python3 -c "import socket; s = socket.socket(); s.settimeout(2); print('SUCCESS: Connection to Coordinator open') if s.connect_ex(($ADDR, 8888)) == 0 else print('FAILURE: Connection refused'); s.close()"
+     docker exec -it $C_ID python3 -c "with open('/proc/net/tcp', 'r') as f: lines = f.readlines()[1:]; listens = [l.split()[1] for l in lines if l.split()[3] == '0A']; print('\n'.join([f'Listening on port: {int(p.split(\":\")[1], 16)}' for p in listens])) if listens else print('No listening ports found')"
+  
+     docker exec -it $C_ID python3 -c "import socket; s = socket.socket(); print(s.connect_ex(($ADDR, 8888)))"
+
+to look at packet level on the docker0 interface:
+  can use tcpdump or tshark
+
+===========
+https://docs.docker.com/network/drivers/bridge/
+https://docs.docker.com/config/containers/container-networking/
+https://jax.readthedocs.io/en/latest/multi_process.html
+
+browse:
+https://cloud.google.com/blog/products/serverless/cloud-run-now-supports-multi-container-deployments
+

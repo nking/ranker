@@ -1,4 +1,5 @@
 import os
+import uuid
 from functools import partial
 from typing import Dict, Union
 
@@ -8,16 +9,10 @@ def safe_jax_init():
     # Check if we are in a distributed environment (e.g., K8s, Vertex, Slurm)
     # Different orchestrators use different keys, but these are common:
     is_distributed = any(k in os.environ for k in [
-        'JAX_COORDINATOR_ADDRESS', 'KUBERNETES_SERVICE_HOST',
+        'KUBERNETES_SERVICE_HOST',
         'SLURM_JOB_ID', 'PADDLE_TRAINER_ENDPOINTS'
     ])
-    '''
-    jax.distributed.initialize(
-        coordinator_address=os.environ.get("JAX_COORDINATOR_ADDRESS"),
-        num_processes=int(os.environ.get("JAX_NUM_PROCESSES", 1)),
-        process_id=int(os.environ.get("JAX_PROCESS_ID", 0)),
-    )
-    '''
+   
     try:
         if is_distributed:
             # Let JAX auto-detect cluster settings
@@ -25,9 +20,9 @@ def safe_jax_init():
         else:
             # Force local-only initialization for unit tests
             jax.distributed.initialize(
-                coordinator_address="localhost:8888",
-                num_processes=1,
-                process_id=0
+                coordinator_address=os.environ.get('JAX_COORDINATOR_ADDRESS', 'localhost:8888'),
+                num_processes=int(os.environ.get('JAX_NUM_PROCESSES', 1)),
+                process_id=int(os.environ.get('JAX_PROCESS_ID', 0))
             )
     except RuntimeError as e:
         # Handle the "already initialized" error gracefully
@@ -295,7 +290,11 @@ def tune_run(config):
     if worker_rank == 0:
         study = setup_vizier_study(project_id=config['project_id'], study_name=config['study_name'],
             endpoint=config['vizier_endpoint'], top_k=config['top_k'], use_batching_alg=n_large)
-        suggested_trials = study.suggest(count=len(trial_ids), client_id=study._client._client_id)
+        unique_id = uuid.uuid4().hex[:8]
+        resource_name = f"owners_{config['project_id']}_studies_{config['study_name']}"
+        client_id = f"{resource_name}_{unique_id}"
+        #suggested_trials = study.suggest(count=len(trial_ids), client_id=study._client._client_id)
+        suggested_trials = study.suggest(count=len(trial_ids), client_id=client_id)
     
     trial_suggestion = None
     hparams = {}

@@ -8,7 +8,7 @@ def safe_jax_init():
     # Check if we are in a distributed environment (e.g., K8s, Vertex, Slurm)
     # Different orchestrators use different keys, but these are common:
     is_distributed = any(k in os.environ for k in [
-        'JAX_COORDINATOR_ADDRESS', 'KUBERNETES_SERVICE_HOST',
+        'KUBERNETES_SERVICE_HOST',
         'SLURM_JOB_ID', 'PADDLE_TRAINER_ENDPOINTS'
     ])
 
@@ -19,9 +19,10 @@ def safe_jax_init():
         else:
             # Force local-only initialization for unit tests
             jax.distributed.initialize(
-                coordinator_address="localhost:8888",
-                num_processes=1,
-                process_id=0
+                coordinator_address=os.environ.get('JAX_COORDINATOR_ADDRESS',
+                    'localhost:8888'),
+                num_processes=int(os.environ.get('JAX_NUM_PROCESSES', 1)),
+                process_id=int(os.environ.get('JAX_PROCESS_ID', 0))
             )
     except RuntimeError as e:
         # Handle the "already initialized" error gracefully
