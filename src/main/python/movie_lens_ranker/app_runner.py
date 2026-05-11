@@ -202,32 +202,39 @@ def sync_hyperparams(params_dict) -> Dict[str, Union[int, float]]:
     sync_keys = ["top_k", "num_layers", "num_heads", "hidden_dim",
         "max_history","num_candidates", "learning_rate", "weight_decay", "out_dim",
         "edge_embed_dim","dropout_rate"]
+    num_keys = len(sync_keys)
     if jax.process_index() == 0:
         #extract ParameterValue to primitives:
         params_dict = extract_correct_vizier_param_types_dict(params_dict)
-        # everything is converted to float:
-        params_arr = jnp.array([params_dict[k] for k in sync_keys])
+        params_arr = jnp.array([float(params_dict[k]) for k in sync_keys],
+            dtype=jnp.float32)
     else:
-        params_arr = jnp.zeros(len(sync_keys))  # Must match shape
-        
+        params_arr = jnp.zeros((num_keys,), dtype=jnp.float32)
+    
+    global_shape = (jax.process_count(), num_keys)
+    global_sharding = jax.sharding.NamedSharding(mesh2, P('processes', None))
+    
     # Add a 'processes' dimension so it is (1, num_params) locally
     params_arr_2d = params_arr[None, :]
-
-    # Create a Global Array view from this local piece
-    # This tells JAX: 'My (1, 11) array is the i-th shard of a (TotalProcesses, 11) array'
-    global_sharding = jax.sharding.NamedSharding(mesh2, P('processes', None))
+    
+    local_devices = jax.local_devices()
+    arrays_on_distinct_devices = [
+        jax.device_put(params_arr_2d, d) for d in local_devices
+    ]
+    
+    num_local_devices = jax.local_device_count()
     global_params = jax.make_array_from_single_device_arrays(
-        shape=(jax.process_count(), len(sync_keys)),
+        shape=global_shape,
         sharding=global_sharding,
-        arrays=[params_arr_2d]
+        arrays=arrays_on_distinct_devices
     )
-
+    
     with mesh2:
         # 4. Sync via shard_map
         synced_global_2d = _sync_params(global_params)
     
-    # 5. Return as a simple 1D array (all rows are now identical)
-    final_params = synced_global_2d[0]
+    final_params = jax.device_get(synced_global_2d)[0]
+    
     # map back to dictionary
     final_params_dict = {k: v for k, v in zip(sync_keys, final_params)}
     # cast to int where needed:
