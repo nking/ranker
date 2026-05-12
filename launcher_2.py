@@ -102,9 +102,6 @@ def main(_):
         #)
         [executable] = experiment.package([docker_packageable])
 
-        # 2. Define the Resource Requirements
-        # Adjust based on whether you need GPUs or specific CPU counts
-        # number of cpus per container
         '''
         SPMD w/ grain dataloader:
         with num_processes = 2, we are partitioning the data betweewn worker,shard, process_id=0
@@ -165,7 +162,7 @@ def main(_):
                         },
                     )
             #https://github.com/google-deepmind/xmanager/blob/c9c7a46957c052978b578411f3c385e47e663fc5/xmanager/xm/job_blocks.py#L421
-            #launch the ranks together:
+            #launch the ranks together as a JobGroup:
             experiment.add(xm.JobGroup(**group_jobs))
            
     print(f'xmanager is done running {num_trials} trials')

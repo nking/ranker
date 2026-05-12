@@ -543,14 +543,19 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False, rngs:n
     :param rngs:
     :return: val_ndcg_20, mlflow_run_id
     """
-    for key in {"phase", "mlflow_experiment_name", "mlflow_experiment_id", "mlflow_parent_run_id"}:
-        if key not in config:
-            raise ValueError(f"config is missing {key}")
+    if "phase" not in config:
+        raise ValueError(f"config is missing key 'phase'")
     
     #fixed top_k for consistent stats with retrieval and reranker
     config['top_k'] = 20
     
     worker_rank = jax.process_index()
+    
+    if worker_rank == 0:
+        for key in {"phase", "mlflow_experiment_name", "mlflow_experiment_id",
+            "mlflow_parent_run_id"}:
+            if key not in config:
+                raise ValueError(f"config is missing {key}")
     
     _dict = build_model_optimizer_and_dataloaders(config, rngs=rngs)
     model = _dict['model']
@@ -607,9 +612,9 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False, rngs:n
             best_checkpoint_uri=config['best_checkpoint_uri'],
             rngs=rngs, config_dict=config,
             trial=trial, save_checkpoints=save_checkpoints)
-        return best_val_ndcg_k, config['mlflow_run_id']
+        return best_val_ndcg_k, config.get('mlflow_run_id', "")
     finally:
-        if mlflow_run is not None:
+        if worker_rank==0 and mlflow_run is not None:
             mlflow.log_metric(f"final_ndcg_{config['top_k']}", float(best_val_ndcg_k))
             mlflow.end_run()
     
@@ -746,15 +751,19 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
 
 def test_fn(config: dict):
     
-    for key in {"phase", "mlflow_experiment_name", "mlflow_experiment_id",
-        "mlflow_parent_run_id"}:
-        if key not in config:
-            raise ValueError(f"config is missing {key}")
+    if "phase" not in config:
+        raise ValueError("config requires a 'phase' parameter")
     
     # fixed top_k for consistent stats with retrieval and reranker
     config['top_k'] = 20
     
     worker_rank = jax.process_index()
+    
+    if worker_rank == 0:
+        for key in {"phase", "mlflow_experiment_name", "mlflow_experiment_id",
+            "mlflow_parent_run_id"}:
+            if key not in config:
+                raise ValueError(f"config is missing {key}")
     
     if config['phase'] == 'test_best':
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])

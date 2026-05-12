@@ -261,7 +261,7 @@ def tune_run(config):
         experiment = mlflow.get_experiment_by_name(name=config['study_name'])
         if experiment is None:
             experiment = mlflow.set_experiment(experiment_name=config['study_name'])
-            # Create the parent run and immediately get its ID
+            # Create the parent run and get its ID
             try:
                 parent_run = mlflow.start_run(run_name="tune")
                 mlflow_parent_run_id = parent_run.info.run_id
@@ -284,10 +284,9 @@ def tune_run(config):
                     mlflow.end_run()
         config['mlflow_experiment_id'] = experiment.experiment_id
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
-    
-    config['mlflow_experiment_name'] = config['study_name']
-    config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
-    
+        config['mlflow_experiment_name'] = config['study_name']
+        config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
+        
     if "debug" in config and config['debug']:
         print(f'args received by tune_fn: {config}', flush=True)
         
@@ -323,7 +322,8 @@ def tune_run(config):
         # NOTE: if have a comb of infeasible params or failure in which trial should not be
         # repeated, mark the trial using trial.infeasible() and continue w/o running train_fn
         os.environ.get("JAX_COORDINATOR_ADDRESS")
-    
+        
+        # if worker_Rank !=0, then mlflow_run_id is ""
         best_val_ndcg_k, mlflow_run_id = train_fn(config2, trial=trial_suggestion, save_checkpoints=False)
         
         if worker_rank == 0:
@@ -372,9 +372,8 @@ def train_run(config):
                     mlflow.end_run()
         config['mlflow_experiment_id'] = experiment.experiment_id
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
-    
-    config['mlflow_experiment_name'] = config['study_name']
-    config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
+        config['mlflow_experiment_name'] = config['study_name']
+        config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
     
     if config['phase'] == 'train_best':
         #get best hpo results and add to config
@@ -395,7 +394,8 @@ def train_run(config):
         print(f"Loaded Best Objective: {best_value}")
         print(f"Loaded Best Parameters: {best_params}")
         config.update(**best_params)
-            
+        
+    #if worker_Rank !=0, then mlflow_run_id is ""
     best_val_ndcg_k, mlflow_run_id = train_fn(config, trial=None, save_checkpoints=True)
 
 def test_run(config):
@@ -441,8 +441,8 @@ def test_run(config):
         config['mlflow_experiment_id'] = experiment.experiment_id
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
     
-    config['mlflow_experiment_name'] = config['study_name']
-    config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
+        config['mlflow_experiment_name'] = config['study_name']
+        config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
     
     test_metrics = test_fn(config=config)
         
