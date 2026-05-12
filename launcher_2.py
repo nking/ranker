@@ -8,6 +8,8 @@ from absl import logging as absl_logging
 absl_logging.set_verbosity(absl_logging.DEBUG)
 logging.basicConfig(level=logging.DEBUG)
 
+import asyncio
+
 """
 launcher for simulating 2 jax processes running the trials
 
@@ -119,13 +121,14 @@ def main(_):
         jax_port = 8888
         
         work_unit_id = 0
-        print("begin jobs")
+        print("begin tune jobs")
         #can find network name in docker-compose-dbs.yaml
         for i in range(0, num_trials, num_trials_per_worker):
             work_unit_id += 1
+            group_jobs = {}
             trial_ids = [ii for ii in range(i, i+num_trials_per_worker)]
             group_coordinator_port = jax_port + i*num_processes
-            group_jobs = {}
+            #this uses the name given to container for worker_0 by xmanager and jax uses dns to get the ip address
             coordinator_name = f"{experiment.experiment_id}_{work_unit_id}_job_{i}_worker_0"
             for rank in range(num_processes):
                 if rank == 0:
@@ -161,11 +164,14 @@ def main(_):
                             "debug": True,
                         },
                     )
+            # type tuning handle=<Future pending cb=[_chain_future.<locals>._call_check_cancel()
+            tuning_handle = experiment.add(xm.JobGroup(**group_jobs))
             #https://github.com/google-deepmind/xmanager/blob/c9c7a46957c052978b578411f3c385e47e663fc5/xmanager/xm/job_blocks.py#L421
-            #launch the ranks together as a JobGroup:
-            experiment.add(xm.JobGroup(**group_jobs))
-           
-    print(f'xmanager is done running {num_trials} trials')
+        
+        print(f'xmanager is done running {num_trials} trials')
+        
+        
+    print(f'xmanager is done with experiment "vizier_hpo_run"')
 
 if __name__ == '__main__':
     xm_local.run(main)

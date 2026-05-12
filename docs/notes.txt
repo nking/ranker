@@ -68,6 +68,13 @@ In choosing an MLOps pipeline and ML APIs:
   SQLAlchemy==1.2, all else have >= 1.4,
   SQLAlchemy doesn't officially support threading and
   memory management of py3.12, so needs py3.11
+  - I updated SQL-Alchemy to 1.4 and all went smoothly, so
+    am trying that.  It's compatible with postgres 12
+    and psycog-binary==2.9.5.
+    - it still needs to live in a different venv than
+      oss vizie and the container code,
+      but should be able to use the postgres container service
+      for a remote db for xmanger's parameter_controller
 - google-vizier==0.1.24 installs  SQL 2.0.49
   so cannot share same venv as xmanager,
   but can co-habitate w/ the jax ai stack.
