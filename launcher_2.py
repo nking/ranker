@@ -20,7 +20,7 @@ or:
 #TODO: switch to coding for a GCS Secret Manager instead of embedding
 #passwords in uris. see todo.txt for API details
 def main(_):
-    num_trials = 2 #20
+    num_trials = 4 #20
     num_trials_per_worker = 2
     num_processes = 2
     print(f'JAX_NUM_PROCESSES={num_processes}', flush=True)
@@ -62,7 +62,7 @@ def main(_):
         "val_negatives_uri": "gs://data/val_negatives.array_record",
         "movie_embeddings_uri": "gs://data/movie_emb-00000-of-00001.array_record",
         "user_embeddings_uri": "gs://data/user_emb-00000-of-00001.array_record",
-        "num_epochs": 2,
+        "num_epochs":2,
         "batch_size": 64,
         "seed": 12345,
         "phase": "tune",
@@ -126,7 +126,7 @@ def main(_):
             trial_ids = [ii for ii in range(i, i+num_trials_per_worker)]
             group_coordinator_port = jax_port + i*num_processes
             group_jobs = {}
-            coordinator_name = f"{experiment.experiment_id}_{work_unit_id}_job_{i}_worker_{work_unit_id-1}"
+            coordinator_name = f"{experiment.experiment_id}_{work_unit_id}_job_{i}_worker_0"
             for rank in range(num_processes):
                 if rank == 0:
                     container_ip = f"{container_gateway}"
