@@ -1,0 +1,12 @@
+# Connector used - one of ['cloudsql', 'sqlite', 'generic']
+#TODO: consider security.  don't check this file into repository, etc.
+sql_connector: 'generic'
+
+sql_connection_settings:
+  backend: 'postgresql'
+  username: 'runner'
+  password: 'password123'
+  host: '172.17.0.1'
+  port: 5432
+  # Database name
+  db_name: 'xmngr_db'

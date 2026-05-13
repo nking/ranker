@@ -17,6 +17,8 @@ start db services with:
     ./run_compose_dbs.sh
 or:
     docker compose -f docker-compose-dbs.yaml up -d
+    
+xmanager launch xmngr_controller/launcher_2.py
 """
 
 #TODO: switch to coding for a GCS Secret Manager instead of embedding
@@ -32,7 +34,7 @@ def main(_):
     docker_bridge_gateway = "172.17.0.1"
     
     env_config = {
-        **dotenv_values(".env_unittests"),
+        **dotenv_values(".env_unittests"), #relative to based dir where xmanager invoked
         'PYTHONUNBUFFERED': '1',
         #'JAX_COORDINATOR_ADDRESS': f'{docker_bridge_gateway}:8888',
         'JAX_NUM_PROCESSES': str(num_processes),
@@ -81,8 +83,8 @@ def main(_):
         print(f'Experiment id={experiment.experiment_id}')
         #print(f'Experiment work_unit_id={experiment.work_unit_id}', flush=True)
         docker_packageable = xm.dockerfile_container(
-            path='.',
-            dockerfile='Dockerfile_offline',
+            path='..',
+            dockerfile='Dockerfile_offline', #relative to xmngr_controller directory
             executor_spec = xm_local.Local.Spec(),
             env_vars=env_config,
             args={
