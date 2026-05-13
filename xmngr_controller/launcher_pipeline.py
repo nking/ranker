@@ -1,5 +1,6 @@
 from xmanager import xm
 from xmanager import xm_local
+from xmanager.contrib import parameter_controller
 from dotenv import dotenv_values
 from json import dumps, loads
 
@@ -11,14 +12,14 @@ logging.basicConfig(level=logging.DEBUG)
 import asyncio
 
 """
-launcher for simulating 2 jax processes running the trials
+launcher for simulating 2 jax processes running the pipeline tune, train, test
 
 start db services with:
     ./run_compose_dbs.sh
 or:
     docker compose -f docker-compose-dbs.yaml up -d
     
-xmanager launch xmngr_controller/launcher_2.py
+xmanager launch xmngr_controller/launcher_pipeline.py -- --xm_db_yaml_config_path=db_config.yaml
 """
 
 #TODO: switch to coding for a GCS Secret Manager instead of embedding

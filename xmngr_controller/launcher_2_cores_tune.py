@@ -19,7 +19,7 @@ launcher for simulating 2 jax processes running the trials.
 or:
     docker compose -f docker-compose-dbs.yaml up -d
 3) activate conda virtual environment having xmanager
-4) xmanager launch xmngr_controller/launcher.py -- \
+4) xmanager launch xmngr_controller/launcher_2_cores_tune.py -- \
 --xm_db_yaml_config_path=db_config.yaml
 
 """
