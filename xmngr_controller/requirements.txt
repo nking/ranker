@@ -1,0 +1,6 @@
+absl-py==2.4.0
+cloudpickle==3.1.2
+numpy==2.4.4
+six==1.17.0
+sqlparse==0.5.5
+psycopg2-binary==2.9.5

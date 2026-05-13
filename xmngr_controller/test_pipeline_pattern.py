@@ -57,14 +57,14 @@ def main(_):
         )
         async def run_pipeline(experiment: xm.Experiment):
             executable = experiment.package([
-                #xm.Packageable(
-                #    executable_spec=xm.Container(image_path='docker.io/library/hello-world:latest'),
-                #    executor_spec=xm_local.Local.Spec(),
-                #),
                 xm.Packageable(
-                    executable_spec=xm.Binary(path='./hello_world'), #a c++ compiled hello world that sleeps for 3 sec at end
+                    executable_spec=xm.Container(image_path='docker.io/library/hello-world:latest'),
                     executor_spec=xm_local.Local.Spec(),
                 ),
+                #xm.Packageable(
+                #    executable_spec=xm.Binary(path='./hello_world'), #a c++ compiled hello world that sleeps for 3 sec at end
+                #    executor_spec=xm_local.Local.Spec(),
+                #),
             ])[0]
             
             for i in range(3):
@@ -72,8 +72,8 @@ def main(_):
                 job = xm.Job(
                     executable=executable,
                     executor=xm_local.Local(),
-                    args={'trial_id': i, 'learning_rate': 0.01 * (i + 1)},
-                    env_vars={f'print_{i}' : f"/tmp/print_{i}"},
+                    args={},
+                    env_vars={},
                 )
                 handle = await experiment.add(job)
                 await handle.wait_until_complete()
@@ -86,8 +86,8 @@ def main(_):
                 job = xm.Job(
                     executable=executable,
                     executor=xm_local.Local(),
-                    args={'trial_id': i, 'learning_rate': 0.01 * (i + 1)},
-                    env_vars={f'print_{i}' : f"/tmp/print_{i}"},
+                    args={},
+                    env_vars={},
                 )
                 handle = await experiment.add(job)
                 await handle.wait_until_complete()
