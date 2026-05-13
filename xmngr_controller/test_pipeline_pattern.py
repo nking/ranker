@@ -36,13 +36,16 @@ logging.basicConfig(level=logging.DEBUG)
 
 def main(_):
     
-    with xm_local.create_experiment(experiment_title='test_pattern') as experiment:
+    with (xm_local.create_experiment(experiment_title='test_pattern') as experiment):
         
+        num_processes = 2
         env_config = {
             **dotenv_values(".env_unittests"), #includes postgres user and password as needed
             'PYTHONUNBUFFERED': '1',
             'PYTHONIOENCODING': 'UTF-8',
-            'JAX_LOG_LEVEL': 'debug',
+            #'JAX_LOG_LEVEL': 'debug',
+            #'JAX_NUM_PROCESSES': str(num_processes),
+            'XLA_FLAGS': f'--xla_force_host_platform_device_count={num_processes}',
         }
         executable = experiment.package([
             # xm.Packageable(
@@ -76,16 +79,17 @@ def main(_):
         async def run_pipeline(experiment: xm.Experiment):
             
             for i in range(3):
-                logging.info(f"Scheduling Job {i}...")
-                job = xm.Job(
-                    executable=executable,
-                    executor=xm_local.Local(),
-                    args={},
-                    env_vars={},
-                )
-                handle = await experiment.add(job)
+                group_jobs = {}
+                for rank in range(num_processes):
+                    group_jobs[f"job_{i}_rank_{rank}"] = xm.Job(
+                        executable=executable,
+                        executor=xm_local.Local(),
+                        args={},
+                        env_vars={},
+                    )
+                handle = await experiment.add(xm.JobGroup(**group_jobs))
                 await handle.wait_until_complete()
-                logging.info(f'finished job_{i}')
+                logging.info(f'finished group job_{i}')
                 
             logging.info("All phase 1 jobs complete.")
             
