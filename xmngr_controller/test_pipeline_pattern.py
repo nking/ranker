@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import asyncio
+import os
 
 from xmanager import xm
 from xmanager import xm_local
@@ -43,6 +44,23 @@ def main(_):
             'PYTHONIOENCODING': 'UTF-8',
             'JAX_LOG_LEVEL': 'debug',
         }
+        executable = experiment.package([
+            # xm.Packageable(
+            #    executable_spec=xm.Container(image_path='docker.io/library/hello-world:latest'),
+            #    executor_spec=xm_local.Local.Spec(),
+            # ),
+            # xm.Packageable(
+            #    executable_spec=xm.Binary(path='./hello_world'), #a c++ compiled hello world that sleeps for 3 sec at end
+            #    executor_spec=xm_local.Local.Spec(),
+            # ),
+            xm.Packageable(
+                executable_spec=xm.Dockerfile(
+                    path=os.path.abspath('.'),
+                    dockerfile='Dockerfile_hello_world',
+                ),
+                executor_spec=xm_local.Local.Spec()
+            ),
+        ])[0]
         
         @parameter_controller.controller(
             executor=xm_local.Local(
@@ -56,16 +74,6 @@ def main(_):
             package_path='.',
         )
         async def run_pipeline(experiment: xm.Experiment):
-            executable = experiment.package([
-                xm.Packageable(
-                    executable_spec=xm.Container(image_path='docker.io/library/hello-world:latest'),
-                    executor_spec=xm_local.Local.Spec(),
-                ),
-                #xm.Packageable(
-                #    executable_spec=xm.Binary(path='./hello_world'), #a c++ compiled hello world that sleeps for 3 sec at end
-                #    executor_spec=xm_local.Local.Spec(),
-                #),
-            ])[0]
             
             for i in range(3):
                 logging.info(f"Scheduling Job {i}...")
