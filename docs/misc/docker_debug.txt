@@ -97,3 +97,34 @@ a shell into the running postgres sql server mlflow_db:
 sometimes, computer cannot resolve docker address:
     sudo systemctl restart docker
 
+------------------
+
+access vizier_server tables for queries:
+
+docker exec -it vizier_server python3 -c "
+import sqlite3
+conn = sqlite3.connect('/app/data/vizier.db') 
+cursor = conn.cursor()
+cursor.execute('SELECT name FROM sqlite_master WHERE type=\'table\';')
+print(cursor.fetchall())"
+
+docker exec -it vizier_server python3 -c "
+import sqlite3
+conn = sqlite3.connect('/app/data/vizier.db') 
+cursor = conn.cursor()
+cursor.execute('SELECT m.name AS table_name, p.name AS column_name, p.type AS data_type FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE m.type = \'table\';')
+print(cursor.fetchall())"
+
+these are (table_name, a_column_name, data_type)...
+there is no time entry in any of them!
+
+[('owners', 'owner_name', 'VARCHAR'), ('studies', 'study_name', 'VARCHAR'), ('studies', 'owner_id', 'VARCHAR'), ('studies', 'study_id', 'VARCHAR'), ('studies', 'serialized_study', 'VARCHAR'), ('trials', 'trial_name', 'VARCHAR'), ('trials', 'owner_id', 'VARCHAR'), ('trials', 'study_id', 'VARCHAR'), ('trials', 'trial_id', 'INTEGER'), ('trials', 'serialized_trial', 'VARCHAR'), ('suggestion_operations', 'operation_name', 'VARCHAR'), ('suggestion_operations', 'owner_id', 'VARCHAR'), ('suggestion_operations', 'study_id', 'VARCHAR'), ('suggestion_operations', 'client_id', 'VARCHAR'), ('suggestion_operations', 'operation_number', 'INTEGER'), ('suggestion_operations', 'serialized_op', 'VARCHAR'), ('early_stopping_operations', 'operation_name', 'VARCHAR'), ('early_stopping_operations', 'owner_id', 'VARCHAR'), ('early_stopping_operations', 'study_id', 'VARCHAR'), ('early_stopping_operations', 'trial_id', 'INTEGER'), ('early_stopping_operations', 'serialized_op', 'VARCHAR')]
+
+to get last time the db file was modified:
+docker exec -it vizier_server python3 -c "
+import os
+import datetime
+db_path = '/app/data/vizier.db'
+timestamp = os.path.getmtime(db_path)
+last_modified = datetime.datetime.fromtimestamp(timestamp)
+print(f'Database last modified: {last_modified}')"

@@ -91,6 +91,17 @@ def main(_):
             'project_id': 'tune-xmngr-01',
         }
         
+        executable = experiment.package([
+            # docker tag ranker-app:latest localhost/ranker-app:latest
+            xm.Packageable(
+                executable_spec=xm.Dockerfile(
+                    path=os.path.abspath('.'),
+                    dockerfile='Dockerfile_offline',
+                ),
+                executor_spec=xm_local.Local.Spec()
+            ),
+        ])[0]
+        
         @parameter_controller.controller(
             executor=xm_local.Local(
                 docker_options=xm_local.DockerOptions(
@@ -98,25 +109,11 @@ def main(_):
                     volumes={'/var/run/docker.sock': '/var/run/docker.sock'}
                 ),
             ),
-            controller_args=env_config,
+            controller_args={},
             controller_env_vars=env_config,
             package_path='.',
         )
-        editing...
         async def run_pipeline(experiment: xm.Experiment):
-            executable = experiment.package([
-                # docker tag ranker-app:latest localhost/ranker-app:latest
-                xm.Packageable(
-                    executable_spec=xm.Dockerfile(
-                        path=os.path.abspath('.'),
-                        dockerfile='Dockerfile_offline',
-                    ),
-                    executor_spec=xm_local.Local.Spec(
-                        env_vars=env_config,
-                        args={**run_config})
-                ),
-            ])[0]
-            
             '''
             SPMD w/ grain dataloader:
             with num_processes = 2, we are partitioning the data betweewn worker,shard, process_id=0
@@ -176,6 +173,7 @@ def main(_):
                         },
                     )
                 
+                logging.info(f'adding tuning job_{i}')
                 tuning_handle = await experiment.add(xm.JobGroup(**group_jobs))
                 await tuning_handle.wait_until_complete()
                 logging.info(f'finished tuning job_{i}')

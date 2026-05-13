@@ -47,6 +47,7 @@ def main(_):
             #'JAX_NUM_PROCESSES': str(num_processes),
             'XLA_FLAGS': f'--xla_force_host_platform_device_count={num_processes}',
         }
+        
         executable = experiment.package([
             # xm.Packageable(
             #    executable_spec=xm.Container(image_path='docker.io/library/hello-world:latest'),
@@ -72,7 +73,7 @@ def main(_):
                     volumes={'/var/run/docker.sock': '/var/run/docker.sock'}
                 ),
             ),
-            controller_args=env_config,
+            controller_args={},
             controller_env_vars=env_config,
             package_path='.',
         )
