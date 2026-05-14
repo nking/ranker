@@ -286,7 +286,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         top_k:int, latest_checkpoint_uri: str, best_checkpoint_uri:str,
         rngs:nnx.Rngs, config_dict:Dict[str, Union[str, int, float]],
         trial: Trial = None, save_checkpoints: bool=False,
-        restored_train_dataloader_iter=None, restored_global_step:int=None) -> float:
+        restored_train_dataloader_iter=None, restored_global_step:int=None, validate_checkpoint_restores:bool=False) -> float:
     """
     a shard's portion of the training
     :param model:
@@ -472,6 +472,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                         )
                     )
                     mngr_best.wait_until_finished()  # Ensure it's on disk
+                    if validate_checkpoint_restores:
+                        _assert_checkpoints_restore(best_checkpoint_uri, model, val_dataloader, top_k)
             elif epoch >= delay:
                 epochs_without_improvement += 1
                 if rank == 0:
@@ -541,7 +543,8 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs=None) -> Di
     return {"rngs": rngs, "model": model, "optimizer": optimizer,
         'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader}
 
-def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False, rngs:nnx.Rngs=None) -> Tuple[float, str]:
+def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False,
+        rngs:nnx.Rngs=None) -> Tuple[float, str]:
     """
     train the model given data and params specified in config dict and return best validation set ndcg@20 metric and
     return the mlflow_run_id
@@ -573,22 +576,24 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False, rngs:n
     
     mlflow_run = None
     best_val_ndcg_k = -1.0
+    
+    if config['phase'].find('tune') == 0:
+        run_name = f"trail_{config['trial_id']}"
+    elif config['phase'].find('train') == 0:
+        run_name = f"train_{config['train_id']}"
+    elif config['phase'].find('test') == 0:
+        run_name = f"test_{config['test_id']}"
+    else:
+        raise ValueError(f"Invalid phase={config['phase']}")
+    
     try:
         if worker_rank == 0:
+            print(f"mlflow set experiment: {config['mlflow_experiment_name']}")
             print(f"mlflow set experiment: {config['mlflow_experiment_name']}")
             mlflow.set_experiment(
                 experiment_name=config['mlflow_experiment_name'],
             )
             # don't use nested=True because the parent isn't in the same thread in production
-            if config['phase'].find('tune') == 0:
-                run_name = f"trail_{config['trial_id']}"
-            elif config['phase'].find('train') == 0:
-                run_name = f"train_{config['train_id']}"
-            elif config['phase'].find('test') == 0:
-                run_name = f"test_{config['test_id']}"
-            else:
-                raise ValueError(f"Invalid phase={config['phase']}")
-           
             print(f"mlflow start run: {run_name}")
             mlflow_run = mlflow.start_run(
                 run_name=run_name,
@@ -597,20 +602,26 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False, rngs:n
             )
             config['mlflow_run_id'] = mlflow_run.info.run_id
             mlflow.set_tag("phase", config["phase"]) #do not move this before start_run
-    
-            if save_checkpoints:
-                # paradigm is that we save checkpoints for "train" phase, but not HPO trial phases
-                sfx = f"{config['study_name']}/{run_name}"
-                config['best_checkpoint_uri'] = f"{config['best_checkpoint_uri']}/{sfx}"
-                config['latest_checkpoint_uri'] = f"{config['latest_checkpoint_uri']}/{sfx}"
-                mlflow.set_tag('best_checkpoint_uri', config['best_checkpoint_uri'])
-                mlflow.set_tag('latest_checkpoint_uri', config['latest_checkpoint_uri'])
-            
             mlflow.log_params(stringify_mlflow_params(config))
             mlflow.log_text(str(model), "model_summary.txt")
         
+        if save_checkpoints:
+            # paradigm is that we save checkpoints for "train" phase, but not HPO trial phases
+            sfx = f"{config['study_name']}/{run_name}"
+            config['best_checkpoint_uri'] = f"{config['best_checkpoint_uri']}/{sfx}"
+            config['latest_checkpoint_uri'] = f"{config['latest_checkpoint_uri']}/{sfx}"
+            if worker_rank == 0:
+                # cannot update the mlflow logged param, so instead creata tag for the uris
+                mlflow.set_tag('best_checkpoint_uri',  config['best_checkpoint_uri'])
+                mlflow.set_tag('latest_checkpoint_uri',config['latest_checkpoint_uri'])
+                if trial is not None:
+                    trial.update_metadata(
+                        vz.Metadata({'best_checkpoint_uri': config['best_checkpoint_uri']}))
+        
         print(
             f"expect the model training to start w/ loss = {-log(1. / config['num_candidates'])}")
+        
+        validate_checkpoint_restores = config.get('validate_checkpoint_restores', False)
         
         best_val_ndcg_k = _train_fn(model=model, train_dataloader=train_dataloader,
             val_dataloader=val_dataloader,
@@ -618,7 +629,13 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False, rngs:n
             latest_checkpoint_uri=config['latest_checkpoint_uri'],
             best_checkpoint_uri=config['best_checkpoint_uri'],
             rngs=rngs, config_dict=config,
-            trial=trial, save_checkpoints=save_checkpoints)
+            trial=trial, save_checkpoints=save_checkpoints,
+            validate_checkpoint_restores=validate_checkpoint_restores)
+        
+        if "debug" in config and config['debug'] and save_checkpoints:
+            print(f"checkpoints save to directories:\n  {config.get('best_checkpoint_uri','')}"
+                  f"\n  {config.get('latest_checkpoint_uri','')}")
+            
         return best_val_ndcg_k, config.get('mlflow_run_id', "")
     finally:
         if worker_rank==0 and mlflow_run is not None:
@@ -767,7 +784,7 @@ def test_fn(config: dict):
     worker_rank = jax.process_index()
     
     if worker_rank == 0:
-        for key in {"phase", "mlflow_experiment_name", "mlflow_experiment_id",
+        for key in {"mlflow_experiment_name", "mlflow_experiment_id",
             "mlflow_parent_run_id"}:
             if key not in config:
                 raise ValueError(f"config is missing {key}")
@@ -775,6 +792,7 @@ def test_fn(config: dict):
     if config['phase'] == 'test_best':
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
     else:
+        #test_given, uese given checkpoint path to restore, test_checkpoint_uri
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['test_checkpoint_uri'])
     
     model = restore_dict['model']
@@ -782,13 +800,14 @@ def test_fn(config: dict):
     config['phase'] = 'test_best'
     
     mlflow_run = None
+    run_name = f"test_{config.get('test_id', 0)}"
     try:
         if worker_rank == 0:
             mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
             # don't use nested=True because the parent isn't in the same thread in production
             #in production, there may be ACL to solve for this:
             mlflow_run = mlflow.start_run(
-                run_name=f"test_{config.get('test_id', 0)}",
+                run_name=run_name,
                 # tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
                 tags={"mlflow.parentRunId": config['mlflow_parent_run_id']}
             )
@@ -867,7 +886,7 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
             config_dict=config,
             restored_train_dataloader_iter=restore_dict['train_dataloader_iter'],
             restored_global_step=restore_dict['global_step'],
-            save_checkpoints=save_checkpoints
+            save_checkpoints=save_checkpoints,
         )
         return best_val_ndcg_k
         
@@ -876,3 +895,15 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
             mlflow.log_metric(f"final_ndcg_{config['top_k']}",
                 float(best_val_ndcg_k))
             mlflow.end_run()
+
+def _assert_checkpoints_restore(checkpoint_uri:str, model, val_dataloader:grain.DataLoader, top_k:int=20):
+    restore_dict = restore_items_from_checkpoint(checkpoint_uri)
+
+    global_avg_val_metrics_current = _epoch_validation(model, val_dataloader, top_k)
+    
+    global_avg_val_metrics_restored = _epoch_validation(restore_dict['model'],
+        restore_dict['val_dataloader'], top_k)
+    
+    for key in ("loss", "mrr", "ndcg", "recall"):
+        assert(jnp.allclose(global_avg_val_metrics_current[key], global_avg_val_metrics_restored[key]))
+    print(f'checkpoint validated for {checkpoint_uri}')
