@@ -77,5 +77,33 @@ jax.process_count():
     the number of hosts or containers in the cluster.
 
 ==> jax.device_count() = jax.process_count() * jax.local_device_count()
+      if the device count is same across all nodes
 
+=========================================
+in general, see test_Ranker.py for details
+
+To find the best results for a trial:
+   - vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
+     study = vz_clients.Study.from_owner_and_id(owner=config['project_id'],
+            study_id=config['study_name'])
+     optimal_trials = study.optimal_trials()
+     best trial is the first in optimal_trials
+   - can get the mlflow run id from it
+To get the trained model, trained from best HPs:
+   - run_name = f"train_{train_id}"
+     runs = mlflow.search_runs(
+        experiment_ids=[config['mlflow_experiment_id']],
+        filter_string=f"attributes.run_name = '{run_name}'",
+        output_format="list"
+    )
+    find the best run in runs
+    - best_checkpoint_uri_tag = best_run.data.tags.get("best_checkpoint_uri")
+To get test metrics:
+    - run_name = f'test_{config.get('test_id', 0)}'
+      runs = mlflow.search_runs(
+          experiment_ids=[config['mlflow_experiment_id']],
+          filter_string=f"attributes.run_name = '{run_name}'",
+          output_format="list"
+      )
+      then for the run, use client get history to get the metrics
 
