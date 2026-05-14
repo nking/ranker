@@ -211,6 +211,7 @@ def main(_):
                     args={
                         **run_config,
                         'phase': 'train_best',
+                        'validate_checkpoint_restores' : True,
                         "debug": True,
                     },
                 )

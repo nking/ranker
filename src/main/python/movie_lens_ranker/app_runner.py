@@ -394,6 +394,7 @@ def train_run(config):
         print(f"Loaded Best Objective: {best_value}")
         print(f"Loaded Best Parameters: {best_params}")
         config.update(**best_params)
+        #if need other config params from best results, can get them from mlflow params and tags.  see unit test examples
         
     #if worker_Rank !=0, then mlflow_run_id is ""
     best_val_ndcg_k, mlflow_run_id = train_fn(config, trial=None, save_checkpoints=True)
@@ -464,7 +465,7 @@ def main(_):
     if "debug" in config and config['debug']:
         print(f'recognized args: {config}', flush=True)
         
-    # static top_k
+    # static top_k is throughout code
     config['top_k'] = 20
     
     if config['phase'] == 'tune':

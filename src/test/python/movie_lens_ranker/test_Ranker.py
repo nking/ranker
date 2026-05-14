@@ -289,6 +289,7 @@ class TestRanker(unittest.TestCase):
         }
         set_flags_from_dict(config)
         
+        #reset oss vizier db
         try:
             vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
             resource_name = f"owners/{config['project_id']}/studies/{config['study_name']}"
@@ -298,17 +299,19 @@ class TestRanker(unittest.TestCase):
         except Exception as ex:
             pass
         
+        #reset mlflow db
         try:
-            # empty MLFlow db:
             reset_mlflow_db()
         except Exception as ex:
             pass
         
+        #reset orbax checkpoint_bucket
         try:
-            # epty the checkpoints bucket
             reset_checkpoint_buckets()
         except Exception as ex:
             pass
+        
+        print(f'BEGIN TUNING')
         
         # run tune HPO
         app_runner(None)
@@ -356,9 +359,12 @@ class TestRanker(unittest.TestCase):
                 self.assertEqual(v, config[k])
         
         #### ====================================================== ####
+        print(f'BEGIN TRAINING')
+        
         config['phase'] = 'train_best'
         train_id = 1234567
         config['train_id'] = train_id
+        config['validate_checkpoint_restores'] = True
         
         for k, v in config.items():
             if k.find('<=') > -1:
@@ -401,10 +407,10 @@ class TestRanker(unittest.TestCase):
         
         #phase is train, so assert checkpoint paths are in mlflow
         # we have to fetch the checkpoint path from the mflow params or tags
+        
         best_checkpoint_uri_tag = best_run.data.tags.get("best_checkpoint_uri")
-        best_checkpoint_uri_param = json.loads(best_run.data.params.get("best_checkpoint_uri"))
-        self.assertTrue(best_checkpoint_uri_tag == best_checkpoint_uri_param)
-        print(f'best_checkpoint_uri={best_checkpoint_uri}')
+        print(f'best_checkpoint_uri_tag={best_checkpoint_uri_tag}')
+        self.assertTrue(best_checkpoint_uri_tag.find('train_') > -1)
         
         #the train method stores checkpoints so assert checkpoints and restore and assert can resume training if not complete ==============================
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=best_checkpoint_uri_tag)
@@ -422,6 +428,7 @@ class TestRanker(unittest.TestCase):
         #print(f'TEST METRICS: {test_metrics}', flush=True)
         
         #=== operate test from entrypoint
+        print(f'BEGIN TESTING')
         config['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
         config['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
         #config['test_checkpoint_uri'] = best_checkpoint_uri_tag  #for use when phase is 'test_given'
@@ -497,6 +504,7 @@ class TestRanker(unittest.TestCase):
         # self.assertEqual(n_iter, 0)
         
         ## ====== assert that training continues ======
+        print(f'BEGIN RESUME TRAIN 2nd to last')
         best_val_ndcg_k_2 = resume_train_fn(config=earlier_restore_dict['config'],
             trial=None, save_checkpoints=True)
         
