@@ -128,6 +128,7 @@ def main(_):
             container_gateway = "0.0.0.0"
             jax_port = 8888
             work_unit_id = 0
+            
             print("begin tune jobs")
             # can find network name in docker-compose-dbs.yaml
             for i in range(0, num_trials, num_trials_per_worker):
@@ -169,7 +170,7 @@ def main(_):
                         args={
                             **run_config,
                             'trial_ids': dumps(list(trial_ids)),
-                            "debug": True,
+                            "debug": False,
                         },
                     )
                 
@@ -177,10 +178,48 @@ def main(_):
                 tuning_handle = await experiment.add(xm.JobGroup(**group_jobs))
                 await tuning_handle.wait_until_complete()
                 logging.info(f'finished tuning job_{i}')
-            
             logging.info(f"finished tuning {num_trials} trials")
             
-            #begin train
+            # ===============  begin train  =======================
+            jax_port = 8890
+            print("begin trian job")
+            group_jobs = {}
+            work_unit_id += 1
+            group_coordinator_port = jax_port
+            coordinator_name = f"{experiment.experiment_id}_{work_unit_id}_train_job_0_worker_0"
+            for rank in range(num_processes):
+                if rank == 0:
+                    container_ip = f"{container_gateway}"
+                else:
+                    container_ip = coordinator_name
+                docker_options = xm_local.DockerOptions()
+                coordinator_addr = f"{container_ip}:{group_coordinator_port}"
+                group_jobs[f"train_job_0_worker_{rank}"] = xm.Job(
+                    executable=executable,
+                    executor=xm_local.Local(
+                        requirements=resources,
+                        docker_options=docker_options
+                    ),
+                    name=f"train_job_0_worker_{rank}",
+                    env_vars={
+                        **env_config,
+                        'JAX_PROCESS_ID': str(rank),
+                        'JAX_COORDINATOR_ADDRESS': coordinator_addr,
+                        # 'JAX_COORDINATOR_IP': container_ip,
+                        'JAX_COORDINATOR_PORT': str(jax_port),
+                    },
+                    args={
+                        **run_config,
+                        'phase': 'train_best',
+                        "debug": True,
+                    },
+                )
+            logging.info(f'adding train job')
+            handle = await experiment.add(xm.JobGroup(**group_jobs))
+            await handle.wait_until_complete()
+            logging.info(f'finished train job')
+            
+            # ===============  begin test  =======================
             
         experiment.add(run_pipeline())
         
