@@ -21,7 +21,7 @@ data_params_nontrainable_keys = {'movies_uri', 'recommendations_uri',
 }
 model_params_nontrainable_keys = {
     'latest_checkpoint_uri', 'best_checkpoint_uri',
-    'movie_embeddings_uri', 'user_embeddings_uri',
+    'movie_embeddings_uri', 'user_embeddings_uri', 'validate_checkpoint_restores'
 }
 mlflow_config_keys = {
     'mlflow_tracking_uri',
