@@ -25,6 +25,8 @@ from grain._src.python.data_loader import DataLoader
 from movie_lens_ranker.BatchSampler import BatchSampler
 
 import orbax.checkpoint as ocp
+from orbax.checkpoint import utils as checkpoint_utils
+
 from movie_lens_ranker.data_loading import create_train_and_val_dataloaders, \
     create_test_dataloader
 from movie_lens_ranker.model import GraphRanker
@@ -427,11 +429,19 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 #orbax for checkpointing.  saves latest 2
                 _graphdef, model_state = nnx.split(model)
                 _, opt_state = nnx.split(optimizer)
+                global_model_state = jax.tree.map(
+                    checkpoint_utils.fully_replicated_host_local_array_to_global_array,
+                    model_state
+                )
+                global_opt_state = jax.tree.map(
+                    checkpoint_utils.fully_replicated_host_local_array_to_global_array,
+                    opt_state
+                )
                 mngr_latest.save(
                     epoch,
                     args=ocp.args.Composite(
-                        model=ocp.args.StandardSave(model_state),
-                        opt=ocp.args.StandardSave(opt_state),
+                        model=ocp.args.StandardSave(global_model_state),
+                        opt=ocp.args.StandardSave(global_opt_state),
                         global_step=ocp.args.StandardSave({'global_step':global_step}),
                         # NNX RNGs need to be converted to state (dictionary of arrays)
                         rngs=ocp.args.StandardSave(nnx.state(rngs)),
@@ -448,14 +458,11 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 if rank == 0:
                     print(f"  New best val NDCG! ({global_avg_val_ndcg})")
                 if save_checkpoints:
-                    #all shards write their best
-                    _graphdef, model_state = nnx.split(model)
-                    _, opt_state = nnx.split(optimizer)
                     mngr_best.save(
                         epoch,
                         args=ocp.args.Composite(
-                            model=ocp.args.StandardSave(model_state),
-                            opt=ocp.args.StandardSave(opt_state),
+                            model=ocp.args.StandardSave(global_model_state),
+                            opt=ocp.args.StandardSave(global_opt_state),
                             global_step=ocp.args.StandardSave({'global_step': global_step}),
                             # NNX RNGs need to be converted to state (dictionary of arrays)
                             rngs=ocp.args.StandardSave(nnx.state(rngs)),
@@ -568,7 +575,7 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False, rngs:n
     best_val_ndcg_k = -1.0
     try:
         if worker_rank == 0:
-            print(f"mlflow set experiment: {config['mlflow_experiment_name']}")
+        print(f"mlflow set experiment: {config['mlflow_experiment_name']}")
             mlflow.set_experiment(
                 experiment_name=config['mlflow_experiment_name'],
             )
