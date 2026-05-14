@@ -58,7 +58,8 @@ from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
     get_mlflow_metrics_by_exp_name
 
 from movie_lens_ranker.app_runner import main as app_runner, \
-    extract_correct_vizier_param_types_dict
+    extract_correct_vizier_param_types_dict, \
+    get_best_checkpoint_uri_for_testing, get_best_parameters_for_training
 
 import unittest
 import subprocess
@@ -344,6 +345,8 @@ class TestRanker(unittest.TestCase):
         mlflow_run_id = best_trial_data.metadata.get('mlflow_run_id')
         self.assertIsNotNone(mlflow_run_id)
         
+        best_params2 = get_best_parameters_for_training(config)
+        
         #phase was tune, so no need to check for checkpoint paths
         
         mlflow_run = mlflow.get_run(mlflow_run_id)
@@ -355,6 +358,7 @@ class TestRanker(unittest.TestCase):
         for k, v in best_params.items():
             if isinstance(v, float):
                 self.assertAlmostEqual(v, config[k], delta=0.01*v)
+                self.assertAlmostEqual(v, best_params2[k], delta=0.01 * v)
             else:
                 self.assertEqual(v, config[k])
         
@@ -411,6 +415,8 @@ class TestRanker(unittest.TestCase):
         best_checkpoint_uri_tag = best_run.data.tags.get("best_checkpoint_uri")
         print(f'best_checkpoint_uri_tag={best_checkpoint_uri_tag}')
         self.assertTrue(best_checkpoint_uri_tag.find('train_') > -1)
+        best_checkpoint_uri = get_best_checkpoint_uri_for_testing(config)
+        self.assertEqual(best_checkpoint_uri_tag, best_checkpoint_uri)
         
         #the train method stores checkpoints so assert checkpoints and restore and assert can resume training if not complete ==============================
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=best_checkpoint_uri_tag)

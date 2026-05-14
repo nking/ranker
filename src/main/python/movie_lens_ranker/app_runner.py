@@ -1,7 +1,7 @@
 import os
 import uuid
 from functools import partial
-from typing import Dict, Union
+from typing import Dict, Union, Any
 
 import jax
 
@@ -41,7 +41,8 @@ from vizier.service import pyvizier as vz
 from vizier.service import clients as vz_clients
 
 from movie_lens_ranker.train import train_fn, test_fn
-from movie_lens_ranker.util import define_flags, get_recognized_keys
+from movie_lens_ranker.util import define_flags, get_recognized_keys, \
+    get_canonical_mlflow_run_name
 
 FLAGS = flags.FLAGS
 
@@ -343,7 +344,6 @@ def train_run(config):
     
     study = None
     if worker_rank == 0:
-        
         mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
         #create an ML-Flow parent study if it does not exist
         experiment = mlflow.get_experiment_by_name(name=config['study_name'])
@@ -376,28 +376,62 @@ def train_run(config):
         config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
     
     if config['phase'] == 'train_best':
-        #get best hpo results and add to config
-        vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
-        study = vz_clients.Study.from_owner_and_id(owner=config['project_id'], study_id=config['study_name'])
-        optimal_trials = study.optimal_trials()
-        if optimal_trials is None:
-            raise ValueError(f"No optimal trials found for project_id={config['project_id']}, study_name={config['study_name']}, endpoint={config['vizier_endpoint']}")
-        best_trial = None
-        for tr in optimal_trials:
-            best_trial = tr
-            break
-        best_trial_data = best_trial.materialize()
-        #best_params contains only the params being tuned, not all params needed for train_fn
-        best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
-        best_value = best_trial_data.final_measurement.metrics.get(f'ndcg_{config["top_k"]}')
-        best_value = best_value.value
-        print(f"Loaded Best Objective: {best_value}")
-        print(f"Loaded Best Parameters: {best_params}")
+        #worker==0 fetches the best parameters and then all workers synchronize to get best params
+        best_params = {}
+        if worker_rank == 0:
+            best_params = get_best_parameters_for_training(config)
+        best_params = sync_hyperparams(best_params)
         config.update(**best_params)
-        #if need other config params from best results, can get them from mlflow params and tags.  see unit test examples
         
-    #if worker_Rank !=0, then mlflow_run_id is ""
     best_val_ndcg_k, mlflow_run_id = train_fn(config, trial=None, save_checkpoints=True)
+
+def get_best_parameters_for_training(config:Dict[str, Any]) -> Dict[str, Union[float, int]]:
+    """
+    get the best hyperparameter optimization (HPO) results given fonfig dictionary with keys "vizier_endpoint"
+    "project_id", and "study_name"
+    :param config:
+    :return:
+    """
+    vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
+    study = vz_clients.Study.from_owner_and_id(owner=config['project_id'],
+        study_id=config['study_name'])
+    optimal_trials = study.optimal_trials()
+    if optimal_trials is None:
+        raise ValueError(
+            f"No optimal trials found for project_id={config['project_id']}, "
+            f"study_name={config['study_name']}, endpoint={config['vizier_endpoint']}")
+    best_trial = next(iter(optimal_trials), None)
+    if best_trial is None:
+        raise ValueError(f"No optimal trials found for project_id={config['project_id']},"
+            f"study_name={config['study_name']}, endpoint={config['vizier_endpoint']}")
+    best_trial_data = best_trial.materialize()
+    # best_params contains only the params being tuned, not all params needed for train_fn
+    best_params = extract_correct_vizier_param_types_dict( best_trial_data.parameters)
+    return best_params
+
+def get_best_checkpoint_uri_for_testing(config:Dict[str, Any]) -> str:
+    """
+    given a dictionary with keys "mlflow_tracking_uri", and "mlflow_experiment_name", find the
+    latest train run's 'best_checkpoint_uri' tag and return it.
+    :param config: a dictionary with keys "mlflow_tracking_uri", and "mlflow_experiment_name"
+    :return: best_checkpoint_uri for latest train run of experiment having mlflow_experiment_name
+    """
+    mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
+    if 'mlflow_experiment_id' not in config:
+        experiment = mlflow.get_experiment_by_name(name=config['mlflow_experiment_name'])
+        if experiment is None:
+            raise ValueError(f"Experiment {config['mlflow_experiment_name']} is not found")
+        config['mlflow_experiment_id'] = experiment.experiment_id
+    runs = mlflow.search_runs(
+        experiment_ids=[config['mlflow_experiment_id']],
+        filter_string="attributes.run_name LIKE 'train_%'",
+        order_by=["attributes.end_time DESC"],
+        max_results=1,
+        output_format="list"
+    )
+    if runs is None or len(runs) == 0:
+        raise ValueError(f"No runs found for train_* for MLFlow experiment name: {config['study_name']}")
+    return runs[0].data.tags.get("best_checkpoint_uri")
 
 def test_run(config):
     if "debug" in config and config['debug']:
@@ -408,6 +442,10 @@ def test_run(config):
         return
     
     worker_rank = jax.process_index()
+    
+    if config['phase'] == 'test_best':
+        #all worker ranks need this in order to get the checkpoint
+        config['best_checkpoint_uri'] = get_best_checkpoint_uri_for_testing(config)
     
     study = None
     if worker_rank == 0:

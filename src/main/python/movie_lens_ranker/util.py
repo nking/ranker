@@ -1,7 +1,6 @@
-import argparse
 import json
 from collections import defaultdict
-from typing import Tuple, Dict, List, Union, Set
+from typing import Tuple, Dict, List, Union, Set, Any
 import jax
 import jax.numpy as jnp
 from array_record.python import array_record_module
@@ -58,6 +57,17 @@ def get_recognized_keys():
         *hpo_config_keys,
     }
 
+def get_canonical_mlflow_run_name(config: Dict[str, Any]) -> str:
+    if config['phase'].find('tune') == 0:
+        run_name = f"trail_{config.get('trial_id', 0)}"
+    elif config['phase'].find('train') == 0:
+        run_name = f"train_{config.get('train_id',0)}"
+    elif config['phase'].find('test') == 0:
+        run_name = f"test_{config.get('test_id',0)}"
+    else:
+        raise ValueError(f"Invalid phase={config['phase']}")
+    return run_name
+    
 def get_env_resources():
     # 'cpu', 'gpu', or 'tpu'
     backend = jax.extend.backend.get_backend().platform
@@ -114,8 +124,8 @@ def set_flags_from_dict(params_dict, store_only_recognized:bool=True):
 
 def define_flags():
     """
-    define global flags.  they are received in main method from command line arguments, xmanager arguments, kaic params etc.
-    Note: if using this in a jupyter notebook, it might need to be enclosed by a try/except to avoid errors when a cell contianing
+    define global flags.  they are received in main method from command line arguments, xmanager arguments, params etc.
+    Note: if using this in a jupyter notebook, it might need to be enclosed by a try/except to avoid errors when a cell containing
     this is reinvoked.
     :return:
     """
@@ -210,7 +220,7 @@ def define_flags():
         'mode for running the train_fn.  tune: HPO run; '
         'train_best: use best HPs from tune; '
         'train_given: use given HPs; '
-        'test_best: use test_fn for best model for the given study_name and projec_id;'
+        'test_best: use test_fn for best model for the given study_name and project_id;'
         'test_given: use test_fn with test_checkpoint_uri'
     )
     flags.DEFINE_string("mlflow_tracking_uri", default=None,
@@ -239,7 +249,7 @@ def define_flags():
         help="output dimension of the score head dense layer in GraphRanker"
     )
     flags.DEFINE_integer("hidden_dim", default=64,
-        help="size of hidden layers per head in the GATv2 layer of GraphPranker"
+        help="size of hidden layers per head in the GATv2 layer of GraphRanker"
     )
     flags.DEFINE_integer("num_layers", default=2,
         help="number of layers in the GATv2 layer of the GraphRanker"
@@ -248,7 +258,7 @@ def define_flags():
         help="number of attention heads in the GATv2 layer of the GraphRanker"
     )
     flags.DEFINE_integer("edge_embed_dim", default=8,
-        help="size of output of the GATv2 layer of GraphPranker"
+        help="size of output of the GATv2 layer of GraphRanker"
     )
     flags.DEFINE_float("dropout_rate", default=0.1,
         help="the dropout probability of a layer in the GATv2 layer of the GraphRanker"
@@ -273,7 +283,7 @@ def destringify_mlflow_params(params:dict):
     
 def read_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
     """
-    read the user and movie embeddings and concatentate them: [row of zeros, user embeddings, movie embeddings].  the
+    read the user and movie embeddings and concatenate them: [row of zeros, user embeddings, movie embeddings].  the
     row of zeros is needed because user_ids start with 1.
     :param user_embeddings_uri:
     :param movie_embeddings_uri:

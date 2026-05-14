@@ -182,7 +182,7 @@ def main(_):
             
             # ===============  begin train  =======================
             jax_port = 8890
-            print("begin trian job")
+            print("begin train job")
             group_jobs = {}
             work_unit_id += 1
             group_coordinator_port = jax_port
@@ -221,6 +221,48 @@ def main(_):
             logging.info(f'finished train job')
             
             # ===============  begin test  =======================
+            """
+            jax_port = 8892
+            print("begin test job")
+            group_jobs = {}
+            work_unit_id += 1
+            group_coordinator_port = jax_port
+            coordinator_name = f"{experiment.experiment_id}_{work_unit_id}_test_job_0_worker_0"
+            for rank in range(num_processes):
+                if rank == 0:
+                    container_ip = f"{container_gateway}"
+                else:
+                    container_ip = coordinator_name
+                docker_options = xm_local.DockerOptions()
+                coordinator_addr = f"{container_ip}:{group_coordinator_port}"
+                group_jobs[f"test_job_0_worker_{rank}"] = xm.Job(
+                    executable=executable,
+                    executor=xm_local.Local(
+                        requirements=resources,
+                        docker_options=docker_options
+                    ),
+                    name=f"test_job_0_worker_{rank}",
+                    env_vars={
+                        **env_config,
+                        'JAX_PROCESS_ID': str(rank),
+                        'JAX_COORDINATOR_ADDRESS': coordinator_addr,
+                        # 'JAX_COORDINATOR_IP': container_ip,
+                        'JAX_COORDINATOR_PORT': str(jax_port),
+                    },
+                    args={
+                        **run_config,
+                        'phase': 'test_best',
+                        'validate_checkpoint_restores' : False,
+                        "debug": True,
+                        "ratings_test_uri": "gs://data/small/ratings_test_liked.array_record",
+                        "test_negatives_uri": "gs://data/test_negatives.array_record",
+                    },
+                )
+            logging.info(f'adding test job')
+            handle = await experiment.add(xm.JobGroup(**group_jobs))
+            await handle.wait_until_complete()
+            logging.info(f'finished test job')
+            """
             
         experiment.add(run_pipeline())
         

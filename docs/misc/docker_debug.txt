@@ -92,6 +92,11 @@ submit commands like pip list
 a shell into the running postgres sql server mlflow_db:
     docker exec -it local_db_store psql -U runner -w password123 -d mlflow_db
 
+list all tables:
+  \dt
+
+describe a table:
+  \d table_name
 ----------
 
 sometimes, computer cannot resolve docker address:

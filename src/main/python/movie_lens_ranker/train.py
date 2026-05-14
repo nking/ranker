@@ -8,9 +8,7 @@ from math import log
 import jax
 import jax.tree_util as jtu
 from jax.sharding import PartitionSpec as P
-# In JAX 0.8+, shard_map is typically in the main namespace
 from jax import shard_map, Array
-from mlflow import MlflowException
 
 from vizier.service import pyvizier as vz
 from vizier.service.clients import Trial
@@ -31,7 +29,7 @@ from movie_lens_ranker.data_loading import create_train_and_val_dataloaders, \
     create_test_dataloader
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.util import read_embeddings, get_env_resources, \
-    stringify_mlflow_params
+    stringify_mlflow_params, get_canonical_mlflow_run_name
 
 env_resources, mesh = get_env_resources()
 
@@ -549,6 +547,7 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False,
     train the model given data and params specified in config dict and return best validation set ndcg@20 metric and
     return the mlflow_run_id
     :param config:
+    :param trial:
     :param save_checkpoints:
     :param rngs:
     :return: val_ndcg_20, mlflow_run_id
@@ -577,14 +576,7 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False,
     mlflow_run = None
     best_val_ndcg_k = -1.0
     
-    if config['phase'].find('tune') == 0:
-        run_name = f"trail_{config['trial_id']}"
-    elif config['phase'].find('train') == 0:
-        run_name = f"train_{config['train_id']}"
-    elif config['phase'].find('test') == 0:
-        run_name = f"test_{config['test_id']}"
-    else:
-        raise ValueError(f"Invalid phase={config['phase']}")
+    run_name = get_canonical_mlflow_run_name(config)
     
     try:
         if worker_rank == 0:
@@ -697,7 +689,7 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     :param checkpoint_uri:
     :param get_earliest: False by default, else returns earliest of saved checkpoints
     :return: dictionary holding: 'model', 'optimizer', 'train_dataloader', 'train_dataloader_iter',
-            'val_dataloader', 'rngs', 'global_step', 'config
+            'val_dataloader', 'rngs', 'global_step', 'config'
     """
     mngr = ocp.CheckpointManager(checkpoint_uri,
         item_handlers={
@@ -805,7 +797,7 @@ def test_fn(config: dict):
         if worker_rank == 0:
             mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
             # don't use nested=True because the parent isn't in the same thread in production
-            #in production, there may be ACL to solve for this:
+            #there may be ACL to solve for this:
             mlflow_run = mlflow.start_run(
                 run_name=run_name,
                 # tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
