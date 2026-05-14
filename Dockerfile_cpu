@@ -14,9 +14,8 @@ COPY ./requirements.txt ./
 
 RUN chown -R 1000:1000 /app
 
-#RUN pip install --user --no-cache-dir -c requirements2.txt .
 RUN python3 -m pip install --no-cache-dir -c requirements.txt . --prefix=/usr/local
-#update equinox to a version which uses jax.extend.core where needed:
+#update equinox from 0.11.7 to a version which uses jax.extend.core where needed:
 RUN python3 -m pip install --no-cache-dir equinox==0.13.2 alembic==1.18.4 --prefix=/usr/local
 
 #RUN python3 -m pip list
