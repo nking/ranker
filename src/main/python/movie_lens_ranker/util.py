@@ -99,12 +99,14 @@ def set_flags_from_dict(params_dict, store_only_recognized:bool=True):
             except Exception:
                 if isinstance(value, str):
                     flags.DEFINE_string(key, key, f"{key}={value}")
+                elif isinstance(value, bool):
+                    #check for boolean must come before check for int because it is narrower type.  int includes int and bool
+                    flags.DEFINE_bool(key, value, f"{key}={value}")
                 elif isinstance(value, int):
                     flags.DEFINE_integer(key, value, f"{key}={value}")
                 elif isinstance(value, float):
                     flags.DEFINE_float(key, value, f"{key}={value}")
-                elif isinstance(value, bool):
-                    flags.DEFINE_bool(key, value, f"{key}={value}")
+                
             setattr(FLAGS, key, value)
     # Crucial for unit tests: tells absl it's safe to read these values
     if not FLAGS.is_parsed():
@@ -177,6 +179,9 @@ def define_flags():
     )
     flags.DEFINE_string("test_checkpoint_uri", default=None,
         help="uri to read orbax checkpointed model for tests when phase='test_given'"
+    )
+    flags.DEFINE_bool("validate_checkpoint_restores", default=False, help="compares validation metrics of active model  "
+        "with validation metrics for saved active model restored, but only if the phase is a train phase with save checkpoints enabled."
     )
     flags.DEFINE_string("study_name", default=None,
         help="study name for use in vizier study and mflow experiment name"
