@@ -109,7 +109,6 @@ mdurl==0.1.2
 ml_dtypes==0.5.3
 mlflow-skinny==3.11.1
 more-itertools==11.0.2
--e git+ssh://git@github.com/nking/ranker.git@c399873d7dee601b8a3219f121cfd3f5c7c859ec#egg=movie_lens_ranker
 msgpack==1.1.2
 multidict==6.7.1
 mypy_extensions==1.1.0
