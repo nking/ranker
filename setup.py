@@ -15,6 +15,7 @@ setup(
      'psycopg2-binary==2.9.12',
      'gcsfs==2026.2.0',
      "google-vizier[jax]==0.1.24",
+     #then install equinox==0.13.2 alembic==1.18.4 afterwards
   ],
   #extras_require={"test": ["pytest"]},
   classifiers=[ 'Natural Language :: English',
