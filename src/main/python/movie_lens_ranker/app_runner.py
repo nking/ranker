@@ -190,13 +190,6 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
                 raise e
     raise RuntimeError(f"Worker {jax.process_index()} timed out waiting for study to be created by worker 0.")
 
-@jax.jit
-@partial(jax.shard_map, mesh=mesh2, in_specs=P('processes', None), out_specs=P())
-def _sync_params(params_array:jnp.ndarray):
-    # Sum the arrays across the 'processes' axis of the mesh.
-    # Since others are 0, Sum(Value, 0, 0...) = Value on all workers.
-    return jax.lax.psum(params_array, axis_name='processes')
-    
 def sync_hyperparams(params_dict) -> Dict[str, Union[int, float]]:
     # Convert dict to a fixed-order array on Process 0
     # Others initialize with zeros
@@ -207,34 +200,14 @@ def sync_hyperparams(params_dict) -> Dict[str, Union[int, float]]:
     if jax.process_index() == 0:
         #extract ParameterValue to primitives:
         params_dict = extract_correct_vizier_param_types_dict(params_dict)
-        params_arr = jnp.array([float(params_dict[k]) for k in sync_keys],
+        local_arr = jnp.array([float(params_dict[k]) for k in sync_keys],
             dtype=jnp.float32)
     else:
-        params_arr = jnp.zeros((num_keys,), dtype=jnp.float32)
+        local_arr = jnp.zeros((num_keys,), dtype=jnp.float32)
     
-    global_shape = (jax.process_count(), num_keys)
-    global_sharding = jax.sharding.NamedSharding(mesh2, P('processes', None))
+    gathered = jax.experimental.multihost_utils.process_allgather(local_arr)
     
-    # Add a 'processes' dimension so it is (1, num_params) locally
-    params_arr_2d = params_arr[None, :]
-    
-    local_devices = jax.local_devices()
-    arrays_on_distinct_devices = [
-        jax.device_put(params_arr_2d, d) for d in local_devices
-    ]
-    
-    num_local_devices = jax.local_device_count()
-    global_params = jax.make_array_from_single_device_arrays(
-        shape=global_shape,
-        sharding=global_sharding,
-        arrays=arrays_on_distinct_devices
-    )
-    
-    with mesh2:
-        # 4. Sync via shard_map
-        synced_global_2d = _sync_params(global_params)
-    
-    final_params = jax.device_get(synced_global_2d)[0]
+    final_params = jnp.sum(gathered, axis=0)
     
     # map back to dictionary
     final_params_dict = {k: v for k, v in zip(sync_keys, final_params)}

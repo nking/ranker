@@ -33,6 +33,10 @@ from movie_lens_ranker.util import read_embeddings, get_env_resources, \
 
 env_resources, mesh = get_env_resources()
 
+def convert_to_global(arr, mesh):
+    from jax.sharding import NamedSharding, PartitionSpec as P
+    return jax.device_put(arr, NamedSharding(mesh, P()))
+
 def get_nontrainable_train_config(movies_uri:str,
         recommendations_uri:str, recommendations_ts_uri:str,
         ratings_train_uri:str, ratings_val_uri:str,
@@ -425,16 +429,11 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             
             if save_checkpoints:
                 #orbax for checkpointing.  saves latest 2
+                convert_fn = partial(convert_to_global, mesh=mesh)
                 _graphdef, model_state = nnx.split(model)
                 _, opt_state = nnx.split(optimizer)
-                global_model_state = jax.tree.map(
-                    checkpoint_utils.fully_replicated_host_local_array_to_global_array,
-                    model_state
-                )
-                global_opt_state = jax.tree.map(
-                    checkpoint_utils.fully_replicated_host_local_array_to_global_array,
-                    opt_state
-                )
+                global_model_state = jax.tree.map(convert_fn, model_state)
+                global_opt_state = jax.tree.map(convert_fn, opt_state)# opt_state.as_dict())
                 mngr_latest.save(
                     epoch,
                     args=ocp.args.Composite(
