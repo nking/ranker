@@ -23,7 +23,6 @@ from grain._src.python.data_loader import DataLoader
 from movie_lens_ranker.BatchSampler import BatchSampler
 
 import orbax.checkpoint as ocp
-from orbax.checkpoint import utils as checkpoint_utils
 
 from movie_lens_ranker.data_loading import create_train_and_val_dataloaders, \
     create_test_dataloader
@@ -34,8 +33,20 @@ from movie_lens_ranker.util import read_embeddings, get_env_resources, \
 env_resources, mesh = get_env_resources()
 
 def convert_to_global(arr, mesh):
-    from jax.sharding import NamedSharding, PartitionSpec as P
-    return jax.device_put(arr, NamedSharding(mesh, P()))
+    #handle PRNG keys:
+    is_key = hasattr(arr, 'dtype') and jnp.issubdtype(arr.dtype, jax.dtypes.prng_key)
+    if is_key:
+        # Extract the underlying integer data (bits)
+        arr_to_broadcast = jax.random.key_data(arr)
+    else:
+        arr_to_broadcast = arr
+        
+    #broadcast_one_to_all returns a pytree matching in_tree where the leaves now all contain the data from the first host
+    synced_arr = jax.experimental.multihost_utils.broadcast_one_to_all(arr_to_broadcast)
+    
+    # Now wrap it in the Global Sharding for Orbax.
+    replicated_sharding = jax.sharding.NamedSharding(mesh, P())
+    return jax.device_put(synced_arr, replicated_sharding)
 
 def get_nontrainable_train_config(movies_uri:str,
         recommendations_uri:str, recommendations_ts_uri:str,
@@ -433,15 +444,17 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 _graphdef, model_state = nnx.split(model)
                 _, opt_state = nnx.split(optimizer)
                 global_model_state = jax.tree.map(convert_fn, model_state)
-                global_opt_state = jax.tree.map(convert_fn, opt_state)# opt_state.as_dict())
+                global_opt_state = jax.tree.map(convert_fn, opt_state)
+                global_step_state = jax.tree.map(convert_fn,{'global_step': global_step})
+                global_rng_state = jax.tree.map(convert_fn, nnx.state(rngs))
                 mngr_latest.save(
                     epoch,
                     args=ocp.args.Composite(
                         model=ocp.args.StandardSave(global_model_state),
                         opt=ocp.args.StandardSave(global_opt_state),
-                        global_step=ocp.args.StandardSave({'global_step':global_step}),
+                        global_step=ocp.args.StandardSave(global_step_state),
                         # NNX RNGs need to be converted to state (dictionary of arrays)
-                        rngs=ocp.args.StandardSave(nnx.state(rngs)),
+                        rngs=ocp.args.StandardSave(global_rng_state),
                         # Include your dataloader from before
                         train_dataloader=grain.checkpoint.CheckpointSave(train_dataloader_iter),
                         config=ocp.args.JsonSave(config_dict)
@@ -460,9 +473,9 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                         args=ocp.args.Composite(
                             model=ocp.args.StandardSave(global_model_state),
                             opt=ocp.args.StandardSave(global_opt_state),
-                            global_step=ocp.args.StandardSave({'global_step': global_step}),
+                            global_step=ocp.args.StandardSave(global_step_state),
                             # NNX RNGs need to be converted to state (dictionary of arrays)
-                            rngs=ocp.args.StandardSave(nnx.state(rngs)),
+                            rngs=ocp.args.StandardSave(global_rng_state),
                             # Include your dataloader from before
                             train_dataloader=grain.checkpoint.CheckpointSave(train_dataloader_iter),
                             config=ocp.args.JsonSave(config_dict)
@@ -888,6 +901,7 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
             mlflow.end_run()
 
 def _assert_checkpoints_restore(checkpoint_uri:str, model, val_dataloader:grain.DataLoader, top_k:int=20):
+    print('begin _assert_checkpoints_restore')
     restore_dict = restore_items_from_checkpoint(checkpoint_uri)
 
     global_avg_val_metrics_current = _epoch_validation(model, val_dataloader, top_k)
@@ -896,5 +910,6 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_dataloader:grain.
         restore_dict['val_dataloader'], top_k)
     
     for key in ("loss", "mrr", "ndcg", "recall"):
+        print(f'key={key}, model={global_avg_val_metrics_current[key]}, restored={global_avg_val_metrics_restored[key]}', flush=True)
         assert(jnp.allclose(global_avg_val_metrics_current[key], global_avg_val_metrics_restored[key]))
     print(f'checkpoint validated for {checkpoint_uri}')

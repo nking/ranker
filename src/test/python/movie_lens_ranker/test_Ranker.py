@@ -11,7 +11,7 @@ def safe_jax_init():
         'KUBERNETES_SERVICE_HOST',
         'SLURM_JOB_ID', 'PADDLE_TRAINER_ENDPOINTS'
     ])
-
+   
     try:
         if is_distributed:
             # Let JAX auto-detect cluster settings
@@ -19,17 +19,13 @@ def safe_jax_init():
         else:
             # Force local-only initialization for unit tests
             jax.distributed.initialize(
-                coordinator_address=os.environ.get('JAX_COORDINATOR_ADDRESS',
-                    'localhost:8888'),
+                coordinator_address=os.environ.get('JAX_COORDINATOR_ADDRESS', 'localhost:8888'),
                 num_processes=int(os.environ.get('JAX_NUM_PROCESSES', 1)),
                 process_id=int(os.environ.get('JAX_PROCESS_ID', 0))
             )
     except RuntimeError as e:
         # Handle the "already initialized" error gracefully
-        if "already initialized" in str(e).lower():
-            pass
-        else:
-            raise e
+        print(f'WARNING while trying to initialize jax distributed: {e}')
 safe_jax_init()
 
 from mlflow import MlflowClient
