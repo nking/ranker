@@ -107,3 +107,55 @@ To get test metrics:
       )
       then for the run, use client get history to get the metrics
 
+==================================
+
+choices in pre-processing data software
+
+Training:
+  - maximizing compute on the hardware.  SPMD ability.
+  - shuffling needed for best optimization results
+  - maximize throughput using parallelization when possible
+Production:
+  - minimizing latency and maximizing availability
+
+software to consider:
+  - grain DataLoaders 
+    -  are meant to be used for distributed
+      jax paradigms, have ability to
+      deterministically save and restore from checkpoints,
+      ability to handle complex nested objects.
+    - medium to hgh scalability.  good for CPU and multiple TPU
+      environment, but not necessarily for globally distributed 
+      cluster computing framework
+    - caveats in production environment is that the python
+      stack is needed, and the Python Global Interpreter Lock 
+      (GIL) can lead to multi-threading bottlenecks.
+    => good for training, but bad for production
+  - apache beam
+    - batch and streaming parallel data processing across
+      distributed clusters.
+    - massive scalability
+    - cavears scheduling overhead makes it unsuitable for
+      production environment.
+    => good for training, but bad for production.
+       great tool to use on data before grain DataLoader ingestion
+  - apache kafka
+    - event streaming platform to ingest, store, and process
+      real-time data in parallel distributed paradigm.
+    - low latency so great for instant updates to graph
+      databases
+    - it is not a compute engine so doing any complex
+      construction (like creating padded graph tuples
+      for model input) is highly inefficient and complex.
+    - high scalability
+    => not good for training nor production for this project
+  - pure NumPy/C++
+    - custom made for the production inputs to replace
+      what the custom grain DataLoader does.
+    => needed for production
+  - a graph database
+    stores the data needed to construct the padded graph
+    inputs to the model.
+    - Neo4J?
+    => good for production, to be used by the NumPy/C++ code
+
