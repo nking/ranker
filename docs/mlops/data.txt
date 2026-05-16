@@ -159,3 +159,4 @@ software to consider:
     - Neo4J?
     => good for production, to be used by the NumPy/C++ code
 
+also, see https://docs.cloud.google.com/tpu/docs/jax-ai-stack

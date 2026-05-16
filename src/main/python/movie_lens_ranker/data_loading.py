@@ -1,8 +1,11 @@
 
 from typing import Tuple, List
+
+import jax
 import tensorstore as ts
 import grain.sharding
 from array_record.python import array_record_module
+from flax import nnx
 from grain import DataLoader
 from grain.sharding import ShardOptions
 
@@ -27,7 +30,7 @@ def create_train_and_val_dataloaders(
         train_ratings_uri:str, val_ratings_uri:str,
         train_negatives_uri:str, val_negatives_uri:str,
         max_history:int, num_candidates:int,
-        num_epochs:int, batch_size:int, seed:int) -> Tuple[DataLoader, DataLoader]:
+        num_epochs:int, batch_size:int, rngs:nnx.Rngs, seed:int=0) -> Tuple[DataLoader, DataLoader]:
     
     all_movie_ids: List[int] = read_movies_array_record(movies_uri, batch_size=batch_size)
     
@@ -48,7 +51,7 @@ def create_train_and_val_dataloaders(
         recommendations=recommendations,
         ratings_uri=val_ratings_uri, negatives_uri=val_negatives_uri,
         max_history=max_history, num_candidates=num_candidates,
-        num_epochs=1, batch_size=batch_size, seed=seed)
+        num_epochs=1, batch_size=batch_size, seed=seed, shuffle=False)
     
     return train_dataloader, val_dataloader
 
@@ -70,7 +73,7 @@ def create_test_dataloader(
         all_movie_ids=all_movie_ids, recommendations=recommendations,
         ratings_uri=ratings_uri, negatives_uri=negatives_uri,
         max_history=max_history, num_candidates=num_candidates,
-        num_epochs=1, batch_size=batch_size, seed=seed)
+        num_epochs=1, batch_size=batch_size, seed=seed, shuffle=False)
         
     return dataloader
 
@@ -78,7 +81,7 @@ def _create_dataloader(
         all_movie_ids: List[int], recommendations: RecommendedMovies,
         ratings_uri:str, negatives_uri:str,
         max_history: int, num_candidates: int,
-        num_epochs:int, batch_size: int, seed: int) -> DataLoader:
+        num_epochs:int, batch_size: int, seed: int, shuffle:bool=True) -> DataLoader:
     
     shard_opts = grain.sharding.ShardByJaxProcess()
     print(f'shard_opts={shard_opts}')
@@ -92,7 +95,7 @@ def _create_dataloader(
     
     ra_sampler = BatchSampler(num_records=datasource.__len__(),
         num_epochs=num_epochs,
-        batch_size=batch_size, shuffle=True, seed=seed,
+        batch_size=batch_size, shuffle=shuffle, seed=seed,
         shard_options=shard_opts)
     
     # NOTE that train_history_dict, etc are passed by reference to the MapTransforms

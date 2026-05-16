@@ -477,3 +477,17 @@ def build_history_lookup(ratings_uri_list: Union[str, List[str]], batch_size: in
             [r[ii] for ii in idx])
     
     return lookup2, max_history
+
+
+def calc_number_jax_graph_components(batch_size: int, max_history: int,
+        num_candidates: int) -> Dict[str, int]:
+    
+    # 40->50, #123->200, #1234->2000, #12345->20000
+    def next_64(x) -> int:
+        return 64 * (1 + int(x // 64))
+    
+    max_nodes = next_64(batch_size * (1 + max_history + num_candidates))
+    max_edges = next_64(batch_size * (max_history + num_candidates))
+    max_graphs = batch_size + 1
+    return {'max_nodes': max_nodes, 'max_edges': max_edges,
+        'max_graphs': max_graphs}

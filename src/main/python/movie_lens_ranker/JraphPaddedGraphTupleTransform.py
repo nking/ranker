@@ -1,27 +1,17 @@
-from typing import List, Dict
+from typing import List
 
 import grain.python as pgrain
 import jraph
 
+from movie_lens_ranker.util import calc_number_jax_graph_components
+
+
 class JraphPaddedGraphTupleTransform(pgrain.MapTransform):
     def __init__(self,  batch_size: int, max_history: int, num_candidates: int):
         
-        self.jax_graph_comp_dict = self.calc_number_jax_graph_components(batch_size,
+        self.jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
             max_history, num_candidates)
     
-    def calc_number_jax_graph_components(self, batch_size: int, max_history: int,
-            num_candidates: int) -> Dict[str, int]:
-        
-        # 40->50, #123->200, #1234->2000, #12345->20000
-        def next_64(x) -> int:
-            return 64 * (1 + int(x // 64))
-        
-        max_nodes = next_64(batch_size * (1 + max_history + num_candidates))
-        max_edges = next_64(batch_size * (max_history + num_candidates))
-        max_graphs = batch_size + 1
-        return {'max_nodes': max_nodes, 'max_edges': max_edges,
-            'max_graphs': max_graphs}
- 
     def map(self, batch: List[jraph.GraphsTuple]) -> jraph.GraphsTuple:
         
         super_graph = jraph.batch(batch)
