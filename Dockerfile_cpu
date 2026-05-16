@@ -10,8 +10,10 @@ WORKDIR /app
 COPY requirements0.txt ./
 RUN chown -R 1000:1000 /app
 
+#TODO: move numpy to requirements0.txt
+
 #bring in most of the libraries to avoid rebuilding entire image for changes below
-RUN python3 -m pip install --no-cache-dir -r requirements0.txt . --prefix=/usr/local
+RUN python3 -m pip install --no-cache-dir -r requirements0.txt --prefix=/usr/local
 
 #only copying src/main/python/movie_lens_ranker.  see .dockerignore
 COPY ./src ./src

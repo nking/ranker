@@ -1,6 +1,10 @@
+"""
+main runner for the tuning, training, and testing of a Jax AI stack
+model with JaxAI stack dataloader under SPMD paradigm with multi-host, multi-process
+abilities.
+"""
 import os
 import uuid
-from functools import partial
 from typing import Dict, Union, Any
 
 import jax

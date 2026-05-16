@@ -1,3 +1,7 @@
+"""
+tune, train, test functions for a multi-host, multi-process Jax AI Stack model
+and dataloader using SPMD paradigm.
+"""
 import time
 from functools import partial
 from typing import Dict, Tuple, Union, Any
@@ -496,10 +500,10 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         global_step = local_step * NUM_TRAIN_SHARDS
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
         
-        #global_batch = batch_to_global(batch, mesh, data_axis="data")
+        global_batch = batch_to_global(padded_super_graph, mesh, data_axis="data")
         
         #jraph.GraphsTuple
-        loss = train_step(model, padded_super_graph, optimizer)
+        loss = train_step(model, global_batch, optimizer)
         
         epoch_avg_train_loss.append(loss)
         
