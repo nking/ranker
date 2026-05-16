@@ -16,6 +16,9 @@ services:
     env_file:
       - .env
     user: "${UID}:${GID}"
+    volumes:
+      #avoidn rebuilding when src code changes:
+      - ./src:/app/src
     environment:
       #- PYTHONPATH=/usr/local/lib/python3.11/site-packages
       #these are in .env

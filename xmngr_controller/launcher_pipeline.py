@@ -179,6 +179,7 @@ def main(_):
                 await tuning_handle.wait_until_complete()
                 logging.info(f'finished tuning job_{i}')
             logging.info(f"finished tuning {num_trials} trials")
+            print('\a')
             
             # ===============  begin train  =======================
             jax_port = 8890
@@ -219,6 +220,8 @@ def main(_):
             handle = await experiment.add(xm.JobGroup(**group_jobs))
             await handle.wait_until_complete()
             logging.info(f'finished train job')
+            print('\a')
+            print('\a')
             
             # ===============  begin test  =======================
             """
@@ -262,6 +265,9 @@ def main(_):
             handle = await experiment.add(xm.JobGroup(**group_jobs))
             await handle.wait_until_complete()
             logging.info(f'finished test job')
+            print('\a')
+            print('\a')
+            print('\a')
             """
             
         experiment.add(run_pipeline())
