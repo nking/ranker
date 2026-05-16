@@ -142,7 +142,7 @@ software to consider:
   - apache kafka
     - event streaming platform to ingest, store, and process
       real-time data in parallel distributed paradigm.
-    - low latency so great for instant updates to graph
+    - low latency, so it is great for instant updates to graph
       databases
     - it is not a compute engine so doing any complex
       construction (like creating padded graph tuples
@@ -157,6 +157,7 @@ software to consider:
     stores the data needed to construct the padded graph
     inputs to the model.
     - Neo4J?
+      Docker: docker run -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/password neo4j:latest
     => good for production, to be used by the NumPy/C++ code
 
 also, see https://docs.cloud.google.com/tpu/docs/jax-ai-stack
