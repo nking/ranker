@@ -38,40 +38,112 @@ def convert_to_global(arr, mesh, sync:bool=True):
     Universal helper for JAX 0.8.0 multi-host.
     sync=True for Saving (ensures identity).
     sync=False for Restoring (just defines the container).
-    """
-    is_key = hasattr(arr, 'dtype') and jnp.issubdtype(arr.dtype, jax.dtypes.prng_key)
-    arr_to_broadcast = jax.random.key_data(arr) if is_key else arr
+    Orbax needs all workers to have an identical structural blueprint (metadata)
+    of the model, while coordinating their respective memory shards.
     
-    # Optional Sync (The "Save vs Restore" switch)
-    if sync:
-        arr_to_broadcast = jax.experimental.multihost_utils.broadcast_one_to_all(arr_to_broadcast)
-        
+    different partitions of the data across different workers may have taken
+    different branches in the graph and so lazily constructed different parameters.
+    whether a rng key gets populated is one correction needed below.
+    
+    During Save, sync=True: The workers need identical metadata, but independent data shards.
+    we wrap the local states into unified NamedSharding global arrays so that worker 0
+    can write it's data to disk nd worker 1 can write its, ...
+    During restore, sync=False: orbax reads a single file structure
+    from storage and needs to split those bytes among workers.
+    """
+    
+    if hasattr(arr, 'sharding') and not arr.sharding.is_fully_addressable:
+        global_sharding = arr.sharding
+        global_shape = arr.shape
+        dtype = arr.dtype
+    else:
+        if not hasattr(arr, 'shape'):
+            arr = jnp.asarray(arr)
+        global_sharding = jax.sharding.NamedSharding(mesh, P())
+        global_shape = arr.shape
+        dtype = arr.dtype
+    
+    if not sync:
+        # Return an abstract metadata mold. This completely avoids device errors
+        # and guarantees Orbax returns a true global array spanning [0, 1, 2048, 2049]
+        return jax.ShapeDtypeStruct(shape=global_shape, dtype=dtype,
+            sharding=global_sharding)
+    
+    is_key = jnp.issubdtype(dtype, jax.dtypes.prng_key)
     if is_key:
-        arr_to_broadcast = jax.random.wrap_key_data(arr_to_broadcast)
+        arr_to_broadcast = jax.random.key_data(arr)
+    else:
+        arr_to_broadcast = arr
+    
+    arr_to_broadcast = jax.experimental.multihost_utils.broadcast_one_to_all(
+        arr_to_broadcast)
     
     if isinstance(arr_to_broadcast, (np.ndarray, np.generic)):
         arr_to_broadcast = jnp.asarray(arr_to_broadcast)
     
-    global_sharding = jax.sharding.NamedSharding(mesh, P())
-    global_shape = arr_to_broadcast.shape
+    if is_key:
+        arr_to_broadcast = jax.random.wrap_key_data(arr_to_broadcast)
     
-    if sync:
-        # DURING SAVE: Use a callback to build the global array safely across hosts.
-        # This prevents the local PjRtBuffer device address mismatch error.
-        def data_callback(index):
-            return arr_to_broadcast[index]
+    def data_callback(index):
+        return arr_to_broadcast[index]
+    
+    return jax.make_array_from_callback(global_shape, global_sharding,
+        data_callback)
+
+def batch_to_global(batch, mesh, data_axis="data"):
+    """
+    Converts a process-local PyTree (like a jraph.GraphsTuple from Grain)
+    into a unified Global JAX Array structure sharded across the cluster.
+    """
+    # Shard the leading axis (batch/graph dimension) along the data axis of your mesh
+    sharding = jax.sharding.NamedSharding(mesh, P(data_axis))
+    replicated_sharding = jax.sharding.NamedSharding(mesh, P())
+    
+    def leaf_to_global(arr):
+        # Coerce any raw numpy or primitive data types into JAX arrays
+        if not hasattr(arr, 'shape'):
+            arr = jnp.asarray(arr)
         
-        return jax.make_array_from_callback(
-            global_shape, global_sharding, data_callback
-        )
-    else:
-        # DURING RESTORE: Anchor targets locally to the addressable devices.
-        local_devices = global_sharding.addressable_devices
-        local_arrays = list([jax.device_put(arr_to_broadcast, d) for d in local_devices])
-        return jax.make_array_from_single_device_arrays(
-            global_shape, global_sharding, local_arrays
-        )
+        if arr.ndim > 0:
+            # Maps the process-local array shard into the global grid layout.
+            # For padded super-graphs, this combines Worker 0's [max_nodes, ...]
+            # and Worker 1's [max_nodes, ...] into a global [2 * max_nodes, ...] array.
+            return jax.make_array_from_process_local_data(sharding, arr)
+        else:
+            # 0D scalars or global constants are safely replicated across all nodes
+            return jax.device_put(arr, replicated_sharding)
     
+    return jax.tree.map(leaf_to_global, batch)
+
+def batch_to_global2(batch, mesh, data_axis="data"):
+    """
+    Transforms a host-local Grain batch (GraphsTuple) into a unified
+    Global JAX Array structure sharded along the data-parallel axis.
+    """
+    local_devices = jax.local_devices()
+    # Define a sharding strategy split across the data axis of your mesh
+    sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec(data_axis))
+    
+    def to_global_array(arr):
+        if not isinstance(arr, (np.ndarray, jax.Array)):
+            return arr  # Pass through strings, Nones, or nested dictionary structures
+        
+        # 1. Distribute this host's local batch evenly across its own local GPUs/TPUs
+        num_local_devices = len(local_devices)
+        local_chunks = np.array_split(arr, num_local_devices, axis=0)
+        local_device_arrays = [
+            jax.device_put(chunk, dev) for chunk, dev in zip(local_chunks, local_devices)
+        ]
+        
+        # 2. Derive the total global shape across all distributed hosts
+        global_shape = (arr.shape[0] * jax.process_count(), *arr.shape[1:])
+        
+        # 3. Assemble into a single global array container
+        return jax.make_array_from_single_device_arrays(global_shape, sharding,
+            local_device_arrays)
+    
+    return jtu.tree_map(to_global_array, batch)
+
 def get_nontrainable_train_config(movies_uri:str,
         recommendations_uri:str, recommendations_ts_uri:str,
         ratings_train_uri:str, ratings_val_uri:str,
@@ -423,8 +495,12 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         local_step = batch_idx * TRAIN_BATCH_SIZE
         global_step = local_step * NUM_TRAIN_SHARDS
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
+        
+        #global_batch = batch_to_global(batch, mesh, data_axis="data")
+        
         #jraph.GraphsTuple
         loss = train_step(model, padded_super_graph, optimizer)
+        
         epoch_avg_train_loss.append(loss)
         
         if batch_idx % 5 == 0 and rank==0:
@@ -470,10 +546,10 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 convert_fn = partial(convert_to_global, mesh=mesh)
                 _graphdef, model_state = nnx.split(model)
                 _, opt_state = nnx.split(optimizer)
-                global_model_state = jax.tree.map(convert_fn, model_state)
-                global_opt_state = jax.tree.map(convert_fn, opt_state)
-                global_step_state = jax.tree.map(convert_fn,{'global_step': jnp.array(global_step, dtype=jnp.int32)})
-                global_rng_state = jax.tree.map(convert_fn, nnx.state(rngs))
+                global_model_state = jax.tree_util.tree_map(convert_fn, model_state)
+                global_opt_state = jax.tree_util.tree_map(convert_fn, opt_state)
+                global_step_state = jax.tree_util.tree_map(convert_fn,{'global_step': jnp.array(global_step, dtype=jnp.int32)})
+                global_rng_state = jax.tree_util.tree_map(convert_fn, nnx.state(rngs))
                 mngr_latest.save(
                     epoch,
                     args=ocp.args.Composite(
@@ -749,12 +825,13 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     if epoch is None:
         raise FileNotFoundError(f"No checkpoint found at {checkpoint_uri}")
     
+    restore_fn = partial(convert_to_global, mesh=mesh, sync=False)
+    
     # restore config, then rngs, so can restore model and dataloaders from them
     restored_config = mngr.restore(epoch, args=ocp.args.Composite(config=ocp.args.JsonRestore()))
     config = restored_config['config']
     rngs = nnx.Rngs(config.get('seed', 0))
-    global_rng_target = jax.tree.map(
-        lambda x: convert_to_global(x, mesh, False), nnx.state(rngs))
+    global_rng_target = jax.tree_util.tree_map(restore_fn, nnx.state(rngs))
     
     _ = mngr.restore(epoch, args=ocp.args.Composite(rngs=ocp.args.StandardRestore(global_rng_target),))
     nnx.update(rngs, _['rngs'])
@@ -769,12 +846,9 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     _, model_state = nnx.split(model)
     _, opt_state = nnx.split(optimizer)
     
-    global_model_target = jax.tree.map(
-        lambda x: convert_to_global(x, mesh, False), model_state)
-    global_opt_target = jax.tree.map(
-        lambda x: convert_to_global(x, mesh, False), opt_state)
-    global_step_target = jax.tree.map(
-        lambda x: convert_to_global(x, mesh, False),  {'global_step': jnp.array(0, dtype=jnp.int32)})
+    global_model_target = jax.tree_util.tree_map(restore_fn, model_state)
+    global_opt_target = jax.tree_util.tree_map(restore_fn, opt_state)
+    global_step_target = jax.tree_util.tree_map(restore_fn,  {'global_step': jnp.array(0, dtype=jnp.int32)})
     
     restored = mngr.restore(
         epoch,

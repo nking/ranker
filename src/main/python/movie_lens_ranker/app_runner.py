@@ -267,6 +267,8 @@ def tune_run(config):
     trial_ids = json.loads(config['trial_ids'])
     n_large = len(trial_ids) > 10
     
+    jax.experimental.multihost_utils.sync_global_devices( "sync_barrier_for_trials")
+    
     if worker_rank == 0:
         study = setup_vizier_study(project_id=config['project_id'], study_name=config['study_name'],
             endpoint=config['vizier_endpoint'], top_k=config['top_k'], use_batching_alg=n_large)
@@ -282,6 +284,9 @@ def tune_run(config):
         if worker_rank == 0:
             trial_suggestion = suggested_trials[i]
             hparams = {k: v for k, v in trial_suggestion.parameters.items()}
+            
+        jax.experimental.multihost_utils.sync_global_devices("sync_barrier_for_trial")
+    
         hparams = sync_hyperparams(hparams)
         config2 = {
             **config,
