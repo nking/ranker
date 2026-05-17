@@ -23,10 +23,10 @@ COPY ./requirements3.txt ./
 
 RUN chown -R 1000:1000 /app
 
-RUN python3 -m pip install --no-cache-dir -c requirements.txt . --prefix=/usr/local
+RUN python3 -m pip install --no-cache-dir -c requirements.txt -e . --prefix=/usr/local
 #update equinox from 0.11.7 to a version which uses jax.extend.core where needed:
 RUN python3 -m pip install --no-cache-dir equinox==0.13.2 alembic==1.18.4 --prefix=/usr/local
-RUN python3 -m pip install --no-cache-dir orbax-checkpoint==0.11.39 -c requirements3.txt --prefix=/usr/local
+RUN python3 -m pip install --no-cache-dir orbax-checkpoint==0.11.39 jax==0.8.3 flax==0.12.6 -c requirements3.txt --prefix=/usr/local
 
 #RUN python3 -m pip list
 

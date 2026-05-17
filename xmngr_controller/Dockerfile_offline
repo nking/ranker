@@ -1,6 +1,8 @@
 # Use your already-built image as the base
 FROM ranker-app:latest
 
+COPY ./src /app/src
+
 # Do NOT run pip install
 # Do NOT run apt-get
 # Just set the environment variables we need

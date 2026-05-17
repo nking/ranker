@@ -39,7 +39,23 @@ or:
 
 xmanager launch xmngr_controller/launcher_pipeline.py -- --xm_db_yaml_config_path=db_config.yaml
 """
-
+import subprocess
+def reset_checkpoint_buckets():
+    command = [
+        "docker", "exec", "gcs_emulator",
+        "sh", "-c", "rm -rf /storage/checkpoint_bucket/*"
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        print("empty checkpoint_bucket/* successful")
+    except subprocess.CalledProcessError as e:
+        print(f"Error resetting database: {e.stderr}")
+        
 #TODO: switch to coding for a GCS Secret Manager instead of embedding
 #passwords in uris. see todo.txt for API details
 def main(_):
@@ -106,7 +122,10 @@ def main(_):
             executor=xm_local.Local(
                 docker_options=xm_local.DockerOptions(
                     # for local runs
-                    volumes={'/var/run/docker.sock': '/var/run/docker.sock'}
+                    volumes={
+                        '/var/run/docker.sock': '/var/run/docker.sock',
+                        os.path.abspath('./src'): '/app/src'
+                    }
                 ),
             ),
             controller_args={},
@@ -275,4 +294,10 @@ def main(_):
         logging.info("pipeline done.")
         
 if __name__ == '__main__':
+    # reset all of orbax checkpoint_bucket
+    #try:
+    #    reset_checkpoint_buckets()
+    #except Exception as ex:
+    #    pass
+    
     app.run(main)

@@ -1,6 +1,4 @@
-import jax
 import jraphx
-from flax import nnx
 import jraph
 from array_record.python import array_record_module
 from movie_lens_ranker.data_loading import *
@@ -56,7 +54,7 @@ class GraphRanker(nnx.Module):
         :return:
         """
         #[ len(graph.nodes["ids"]) X embed_in_dim ]
-        x = jnp.take(a=self.user_movie_embeddings.value, indices=graph.nodes["ids"], axis=0)
+        x = jnp.take(a=self.user_movie_embeddings.get_value(), indices=graph.nodes["ids"], axis=0)
         
         # Convert edge ratings to integers (0-5)
         # Ensure they are int32 so the embedding layer can use them as indices
@@ -83,21 +81,7 @@ class GraphRanker(nnx.Module):
             batch=batch_indices,
             batch_size=graph.n_node.shape[0]
         )
-        
-        '''
-        # this is how to remove the dummy graph.  but doing so conflicts with array lengths in graph used for loss calcs
-        num_real_graphs = len(graph.n_node) - 1 #subtract the dummy graph
-        num_total_candidates = num_real_graphs * self.K
-        
-        user_indices = jnp.where(graph.nodes["type"] == 0, size=num_real_graphs)[0]
-        cand_indices = jnp.where(graph.nodes["type"] == 2, size=num_total_candidates)[0]
-        
-        user_reprs = node_repr[user_indices]
-        cand_reprs = node_repr[cand_indices]
-        
-        user_expanded = jnp.repeat(user_reprs, self.K, axis=0)
-        cross_repr = jnp.concatenate([user_expanded, cand_reprs], axis=-1)
-        '''
+       
         num_total_graphs = len(graph.n_node) #batch_size + 1
         num_total_candidates = num_total_graphs * self.K # K is num_candidates from data loading stage
         
@@ -115,10 +99,4 @@ class GraphRanker(nnx.Module):
         combined = jnp.concatenate([user_expanded, cand_reprs], axis=-1)
         
         scores = self.score_head(combined)
-        return jnp.squeeze(scores, axis=-1)
-        
-        
-        scores = self.score_head(cross_repr)
-        
-        # Return flat scores for the candidates only
         return jnp.squeeze(scores, axis=-1)

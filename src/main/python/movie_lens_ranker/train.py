@@ -94,60 +94,6 @@ def convert_to_global(arr, mesh, sync:bool=True):
     return jax.make_array_from_callback(global_shape, global_sharding,
         data_callback)
 
-def batch_to_global(batch, mesh, data_axis="data"):
-    """
-    Converts a process-local PyTree (like a jraph.GraphsTuple from Grain)
-    into a unified Global JAX Array structure sharded across the cluster.
-    """
-    # Shard the leading axis (batch/graph dimension) along the data axis of your mesh
-    sharding = jax.sharding.NamedSharding(mesh, P(data_axis))
-    replicated_sharding = jax.sharding.NamedSharding(mesh, P())
-    
-    def leaf_to_global(arr):
-        # Coerce any raw numpy or primitive data types into JAX arrays
-        if not hasattr(arr, 'shape'):
-            arr = jnp.asarray(arr)
-        
-        if arr.ndim > 0:
-            # Maps the process-local array shard into the global grid layout.
-            # For padded super-graphs, this combines Worker 0's [max_nodes, ...]
-            # and Worker 1's [max_nodes, ...] into a global [2 * max_nodes, ...] array.
-            return jax.make_array_from_process_local_data(sharding, arr)
-        else:
-            # 0D scalars or global constants are safely replicated across all nodes
-            return jax.device_put(arr, replicated_sharding)
-    
-    return jax.tree.map(leaf_to_global, batch)
-
-def batch_to_global2(batch, mesh, data_axis="data"):
-    """
-    Transforms a host-local Grain batch (GraphsTuple) into a unified
-    Global JAX Array structure sharded along the data-parallel axis.
-    """
-    local_devices = jax.local_devices()
-    # Define a sharding strategy split across the data axis of your mesh
-    sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec(data_axis))
-    
-    def to_global_array(arr):
-        if not isinstance(arr, (np.ndarray, jax.Array)):
-            return arr  # Pass through strings, Nones, or nested dictionary structures
-        
-        # 1. Distribute this host's local batch evenly across its own local GPUs/TPUs
-        num_local_devices = len(local_devices)
-        local_chunks = np.array_split(arr, num_local_devices, axis=0)
-        local_device_arrays = [
-            jax.device_put(chunk, dev) for chunk, dev in zip(local_chunks, local_devices)
-        ]
-        
-        # 2. Derive the total global shape across all distributed hosts
-        global_shape = (arr.shape[0] * jax.process_count(), *arr.shape[1:])
-        
-        # 3. Assemble into a single global array container
-        return jax.make_array_from_single_device_arrays(global_shape, sharding,
-            local_device_arrays)
-    
-    return jtu.tree_map(to_global_array, batch)
-
 def get_nontrainable_train_config(movies_uri:str,
         recommendations_uri:str, recommendations_ts_uri:str,
         ratings_train_uri:str, ratings_val_uri:str,
@@ -382,17 +328,6 @@ def _epoch_validation_simplest(model: GraphRanker, val_dataloader: DataLoader, t
     local_metrics = {'loss': avg_val_loss, 'ndcg': avg_val_ndcg, 'mrr': avg_val_mrr, 'recall': avg_val_recall}
     
     return local_metrics
-    '''
-    dict_specs = {k: P() for k in local_metrics.keys()}
-    
-    @jax.shard_map(mesh, in_specs=(dict_specs,), out_specs=dict_specs, check_vma=False)
-    def sync_fn(metrics):
-        # Inside shard_map, 'data' is now a bound axis
-        return jax.lax.pmean(metrics, axis_name='data')
-    
-    # Now this call will find the mesh context it needs
-    return sync_fn(local_metrics)
-    '''
 
 def _train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
@@ -447,6 +382,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     print(f'STEPS_PER_EPOCH_LOCAL_VAL={STEPS_PER_EPOCH_LOCAL_VAL}')
     
     if save_checkpoints:
+        print(f'worker_rank={rank}: constructing checkpoint managers')
         mngr_latest = ocp.CheckpointManager(latest_checkpoint_uri,
             item_handlers={
                 'model': ocp.StandardCheckpointHandler(),
@@ -467,9 +403,9 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 'train_dataloader': grain.checkpoint.CheckpointHandler(),
                 'config': ocp.handlers.JsonCheckpointHandler()
             },
-            options=ocp.CheckpointManagerOptions(max_to_keep=2)
+            options=ocp.CheckpointManagerOptions(max_to_keep=1)
         )
-    
+
     ndcg_text = f'ndcg_{top_k}'
     mrr_text = f'mrr_{top_k}'
     recall_text = f'recall_{top_k}'
@@ -500,10 +436,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         global_step = local_step * NUM_TRAIN_SHARDS
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
         
-        global_batch = batch_to_global(padded_super_graph, mesh, data_axis="data")
-        
-        #jraph.GraphsTuple
-        loss = train_step(model, global_batch, optimizer)
+        loss = train_step(model, padded_super_graph, optimizer)
         
         epoch_avg_train_loss.append(loss)
         
@@ -568,6 +501,9 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                     )
                 )
                 mngr_latest.wait_until_finished()  # Ensure it's on disk
+                if validate_checkpoint_restores:
+                    _assert_checkpoints_restore(latest_checkpoint_uri, model, val_dataloader, global_step, top_k)
+                    validate_checkpoint_restores = False #only need to check it once
             
             if global_avg_val_ndcg > best_ndcg + 1e-6:
                 best_ndcg = global_avg_val_ndcg.item()
@@ -575,6 +511,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 if rank == 0:
                     print(f"  New best val NDCG! ({global_avg_val_ndcg})")
                 if save_checkpoints:
+                    print(f'worker_rank={rank}: saving best checkpoint', flush=True)
                     mngr_best.save(
                         epoch,
                         args=ocp.args.Composite(
@@ -589,8 +526,6 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                         )
                     )
                     mngr_best.wait_until_finished()  # Ensure it's on disk
-                    if validate_checkpoint_restores:
-                        _assert_checkpoints_restore(best_checkpoint_uri, model, top_k)
             elif epoch >= delay:
                 epochs_without_improvement += 1
                 if rank == 0:
@@ -636,7 +571,7 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         num_candidates=config['num_candidates'],
         num_epochs=config['num_epochs'],
         batch_size=config['batch_size'],
-        rngs=rngs, seed=config.get('seed', 0),)
+        seed=config.get('seed', 0),)
     
     # NOTE: these are prepended with a row of zeros so that user_ids and movie_ids are direct indexes to the embeddings
     embeddings = read_embeddings(
@@ -667,7 +602,6 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     :param config:
     :param trial:
     :param save_checkpoints:
-    :param rngs:
     :return: val_ndcg_20, mlflow_run_id
     """
     if "phase" not in config:
@@ -804,14 +738,16 @@ def run_full_validation(model, val_dataloader, top_k, steps=903, micro_batch_siz
 
 def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -> Dict[str, Any]:
     """
-    restore the model, dataloadern and state from checkpoint_uri.  if get_Earliest is set to True,
-    the earlies of the saved runs will be returned.  This is useful for testing continuation of
+    restore the model, dataloader and state from checkpoint_uri.  if get_Earliest is set to True,
+    the earlies of the 2 saved runs will be returned.  This is useful for testing continuation of
     training from an earlier checkpoint.
     :param checkpoint_uri:
-    :param get_earliest: False by default, else returns earliest of saved checkpoints
+    :param get_earliest: False by default and so returns latest of the 2 saved checkpoints, else if get_Earliest=True
+    returns the earlier of the 2 checkpoints.  note that for "best" rather than "latest" checkpoints, only 1 is saved.
     :return: dictionary holding: 'model', 'optimizer', 'train_dataloader', 'train_dataloader_iter',
             'val_dataloader', 'rngs', 'global_step', 'config'
     """
+    n_keep = 2 if checkpoint_uri.find('latest') > -1 else 1
     
     mngr = ocp.CheckpointManager(checkpoint_uri,
         item_handlers={
@@ -822,7 +758,7 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
             'train_dataloader': grain.checkpoint.CheckpointHandler(),
             'config': ocp.handlers.JsonCheckpointHandler()
         },
-        options=ocp.CheckpointManagerOptions(max_to_keep=2)
+        options=ocp.CheckpointManagerOptions(max_to_keep=n_keep)
     )
     
     epoch = mngr.all_steps()[0] if get_earliest else mngr.latest_step()
@@ -834,13 +770,8 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     # restore config, then rngs, so can restore model and dataloaders from them
     restored_config = mngr.restore(epoch, args=ocp.args.Composite(config=ocp.args.JsonRestore()))
     config = restored_config['config']
-    rngs = nnx.Rngs(config.get('seed', 0))
-    global_rng_target = jax.tree_util.tree_map(restore_fn, nnx.state(rngs))
     
-    _ = mngr.restore(epoch, args=ocp.args.Composite(rngs=ocp.args.StandardRestore(global_rng_target),))
-    nnx.update(rngs, _['rngs'])
-    
-    _dict = build_model_optimizer_and_dataloaders(config, rngs=rngs)
+    _dict = build_model_optimizer_and_dataloaders(config, rngs=nnx.Rngs(config.get('seed', 0)))
     model = _dict['model']
     optimizer = _dict['optimizer']
     train_dataloader = _dict['train_dataloader']
@@ -849,10 +780,12 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     #restore state to those objects:
     _, model_state = nnx.split(model)
     _, opt_state = nnx.split(optimizer)
+    rngs = nnx.Rngs(config.get('seed', 0))
     
     global_model_target = jax.tree_util.tree_map(restore_fn, model_state)
     global_opt_target = jax.tree_util.tree_map(restore_fn, opt_state)
     global_step_target = jax.tree_util.tree_map(restore_fn,  {'global_step': jnp.array(0, dtype=jnp.int32)})
+    global_rng_target = jax.tree_util.tree_map(restore_fn, nnx.state(rngs))
     
     restored = mngr.restore(
         epoch,
@@ -862,12 +795,14 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
             global_step=ocp.args.StandardRestore(global_step_target),
             # Grain requires the actual iterator object to restore state in-place
             train_dataloader=grain.checkpoint.CheckpointRestore( iter(train_dataloader)),
+            rngs=ocp.args.StandardRestore(global_rng_target),
         )
     )
     
     train_dataloader_iter = restored['train_dataloader']
     nnx.update(optimizer, restored['opt'])
     nnx.update(model, restored['model'])
+    nnx.update(rngs, restored['rngs'])
     global_step = int(restored['global_step']['global_step'].item())
     
     print(f"Restored model at step {global_step}")
@@ -1153,31 +1088,104 @@ def export_model(trained_model: GraphRanker, batch_size:int, max_history:int,
     '''
     pass
 
-def _assert_checkpoints_restore(checkpoint_uri:str, model, top_k:int=20):
+def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, global_step, top_k:int=20):
     
-    print('begin _assert_checkpoints_restore')
+    print(f'worker_rank={jax.process_index()}: begin _assert_checkpoints_restore', flush=True)
     
     restore_dict = restore_items_from_checkpoint(checkpoint_uri)
+    print(f'worker_rank={jax.process_index()}: global_step={global_step}, restored global_step={restore_dict["global_step"]}', flush=True)
     restored_model = restore_dict['model']
     restored_model.eval()
     
     model.eval()
     
+    import copy
+    loader_current = copy.deepcopy(val_data_loader)
+    loader_restored = copy.deepcopy(val_data_loader)
+    
     # iter(x) makes a new iterator state
-    global_avg_val_metrics_current, n_batches_current = _epoch_validation(model, iter(restore_dict['val_dataloader']), top_k)
-    global_avg_val_metrics_restored, n_batches_restored = _epoch_validation(restored_model, iter(restore_dict['val_dataloader']), top_k)
+    global_avg_val_metrics_current, n_batches_current = _epoch_validation(model, iter(loader_current), top_k)
+    
+    jax.experimental.multihost_utils.sync_global_devices(
+        "sync_barrier_for_model_validation")
+    
+    global_avg_val_metrics_restored, n_batches_restored = _epoch_validation(restored_model, iter(loader_restored), top_k)
+    
+    jax.experimental.multihost_utils.sync_global_devices(
+        "sync_barrier_for_restored_model_validation")
     
     print(f'n_batches_current={n_batches_current}, n_batches_restored = {n_batches_restored}')
     
     all_similar = True
     for key in ("loss", "mrr", "ndcg", "recall"):
-        print(f'key={key}, model={global_avg_val_metrics_current[key]}, restored={global_avg_val_metrics_restored[key]}', flush=True)
+        print(f'worker_rank={jax.process_index()}: key={key}, model={global_avg_val_metrics_current[key]}, restored={global_avg_val_metrics_restored[key]}', flush=True)
         if not jnp.allclose(global_avg_val_metrics_current[key], global_avg_val_metrics_restored[key]):
             all_similar = False
     
     model.train()
     
+    print(f'worker_rank={jax.process_index()}:\n    summary of model={str(model)}\n    summary of restored={str(restore_dict["model"])}', flush=True)
+    
+    # print out model state
+    #_graphdef, model_state = nnx.split(model)
+    #_graphdef_restored, model_state_restored = nnx.split(restore_dict['model'])
+    #print(
+    #    f'worker_rank={jax.process_index()}:\n    summary of model_state={model_state}\n    summary of restored model_state={model_state_restored}',
+    #    flush=True)
+    check_model_state_equality(model, restore_dict['model'])
+    
     assert(all_similar)
     assert(n_batches_current == n_batches_restored)
     
-    print(f'checkpoint validated for {checkpoint_uri}')
+    print(f'worker_rank={jax.process_index()}:checkpoint validated for {checkpoint_uri}')
+
+def check_model_state_equality(model_a, model_b, rtol=1e-5, atol=1e-8) -> bool:
+    """
+    Compares two Flax NNX models or State objects to verify if their
+    internal structural shapes and array values are identical.
+    """
+    # 1. Extract the underlying nnx.State if passed as a full model instance
+    #state_a = nnx.state(model_a) if not isinstance(model_a,
+    #    nnx.State) else model_a
+    #state_b = nnx.state(model_b) if not isinstance(model_b,
+    #    nnx.State) else model_b
+    #_graphdef_a, state_a = nnx.split(model_a)
+    #_graphdef_b, state_b = nnx.split(model_b)
+    state_a = nnx.state(model_a) if not isinstance(model_a,
+        nnx.State) else model_a
+    state_b = nnx.state(model_b) if not isinstance(model_b,
+        nnx.State) else model_b
+    
+    # 2. Use the functional top-level helper to flatten the states safely
+    flat_a = dict(nnx.to_flat_state(state_a))
+    flat_b = dict(nnx.to_flat_state(state_b))
+    
+    # 3. Check for structural or key differences first
+    if flat_a.keys() != flat_b.keys():
+        missing_in_b = set(flat_a.keys()) - set(flat_b.keys())
+        missing_in_a = set(flat_b.keys()) - set(flat_a.keys())
+        print("worker_rank={jax.process_index()}: ❌ Model structures DO NOT match!")
+        if missing_in_b: print(f"   Missing in Restored: {missing_in_b}")
+        if missing_in_a: print(f"   Missing in Current: {missing_in_a}")
+        return False
+    
+    # 4. Element-wise value check across every array leaf
+    mismatched_keys = []
+    for key, val_a in flat_a.items():
+        val_b = flat_b[key]
+        # Pull raw JAX arrays out of NNX Variable wrappers (like nnx.Param)
+        arr_a = val_a.value if hasattr(val_a, 'value') else val_a
+        arr_b = val_b.value if hasattr(val_b, 'value') else val_b
+        if not jnp.allclose(arr_a, arr_b, rtol=rtol, atol=atol):
+            mismatched_keys.append(key)
+    if mismatched_keys:
+        print(f"worker_rank={jax.process_index()}: ❌ Model structures match, but values differ at {len(mismatched_keys)} parameter paths:")
+        for ii, path in enumerate(mismatched_keys[:5]):  # Limit output log spam
+        #for ii, path in enumerate(mismatched_keys):
+            print(f"worker_rank={jax.process_index()}:   -> Mismatch in layer path: {path}")
+        if len(mismatched_keys) > 5:
+            print(f"worker_rank={jax.process_index()}:   -> ... and {len(mismatched_keys) - 5} more paths.")
+        return False
+    
+    print("worker_rank={jax.process_index()}: ✅ Success! Both model states are mathematically identical.")
+    return True

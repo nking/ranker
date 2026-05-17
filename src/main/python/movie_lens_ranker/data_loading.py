@@ -30,7 +30,7 @@ def create_train_and_val_dataloaders(
         train_ratings_uri:str, val_ratings_uri:str,
         train_negatives_uri:str, val_negatives_uri:str,
         max_history:int, num_candidates:int,
-        num_epochs:int, batch_size:int, rngs:nnx.Rngs, seed:int=0) -> Tuple[DataLoader, DataLoader]:
+        num_epochs:int, batch_size:int, seed:int=0) -> Tuple[DataLoader, DataLoader]:
     
     all_movie_ids: List[int] = read_movies_array_record(movies_uri, batch_size=batch_size)
     
@@ -98,7 +98,7 @@ def _create_dataloader(
         batch_size=batch_size, shuffle=shuffle, seed=seed,
         shard_options=shard_opts)
     
-    # NOTE that train_history_dict, etc are passed by reference to the MapTransforms
+    # NOTE that train_history_dict, etc. are passed by reference to the MapTransforms
     dataloader = DataLoader(
         data_source=datasource,
         sampler=ra_sampler,
