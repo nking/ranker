@@ -1,7 +1,9 @@
-- use a CliffordNet layer instead of the GATv2.
+- consider using a CliffordNet layer (LION layer) instead of the GATv2.
   - requires a change in the bi-encoder to make embeddings
     that are multivectors and replaces the dot product
-    with inner and external (a.k.a. edge) product.
+    with inner and external (a.k.a. wedge) product.
+    - the 16 dimension user and movie embedding 
+      then becomes 120 in length as a bi-vector (C(16,2))
 
 - replace use of passwords in the .env and uris with
   a mock service for GCP Secret Manager.

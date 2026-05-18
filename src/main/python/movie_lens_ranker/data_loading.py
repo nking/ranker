@@ -1,13 +1,9 @@
 
 from typing import Tuple, List
-
-import jax
-import tensorstore as ts
+import os
 import grain.sharding
 from array_record.python import array_record_module
-from flax import nnx
 from grain import DataLoader
-from grain.sharding import ShardOptions
 
 from movie_lens_ranker.BatchSampler import BatchSampler
 from movie_lens_ranker.HardNegativeSamplingTransform import \
@@ -86,6 +82,10 @@ def _create_dataloader(
     shard_opts = grain.sharding.ShardByJaxProcess()
     print(f'shard_opts={shard_opts}')
     
+    read_opts = grain.ReadOptions(
+        num_threads = int(os.environ.get("grain_read_options_num_threads", 16))
+    )
+    
     # each worker will have its own copy of these:
     user_history = UserHistory(ratings_uri_list=ratings_uri, fixed_size=2048)
     
@@ -118,7 +118,8 @@ def _create_dataloader(
                 max_history=max_history, num_candidates=num_candidates),
         ],
         # worker_count=worker_count,
-        shard_options=shard_opts
+        shard_options=shard_opts,
+        #read_options=read_opts,
     )
     
     return dataloader

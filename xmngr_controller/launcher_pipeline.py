@@ -21,7 +21,6 @@ from json import dumps
 from xmanager import xm
 from xmanager import xm_local
 from xmanager.contrib import parameter_controller
-from dotenv import dotenv_values
 
 import logging
 from absl import logging as absl_logging, app
@@ -39,26 +38,43 @@ or:
 
 xmanager launch xmngr_controller/launcher_pipeline.py -- --xm_db_yaml_config_path=db_config.yaml
 """
+study_name = "GraphRanker_tuning_xmngr_2"
+
 import subprocess
 def reset_checkpoint_buckets():
-    command = [
-        "docker", "exec", "gcs_emulator",
-        "sh", "-c", "rm -rf /storage/checkpoint_bucket/*"
-    ]
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        print("empty checkpoint_bucket/* successful")
-    except subprocess.CalledProcessError as e:
-        print(f"Error resetting database: {e.stderr}")
+    for subdir in ("latest", "best"):
+        command = [
+            "docker", "exec", "gcs_emulator",
+            "sh", "-c", f"rm -rf /storage/checkpoint_bucket/{subdir}/{study_name}"
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            print("empty checkpoint_bucket/* successful")
+        except subprocess.CalledProcessError as e:
+            print(f"Error resetting database: {e.stderr}")
         
+async def check_await_status(handle):
+    try:
+        await handle.wait_until_complete()
+        logging.info(f"WorkUnit {handle.work_unit_id} finished successfully.")
+    except Exception as e:
+        logging.error(f"Error: {e}")
+        if handle is not None:
+            logging.warning("Cancelling running jobs")
+            # Force kill the docker containers so they don't get orphaned
+            await handle.cancel()
+            # Re-raise the exception to officially crash the xmanager script
+        raise e
+   
 #TODO: switch to coding for a GCS Secret Manager instead of embedding
 #passwords in uris. see todo.txt for API details
 def main(_):
+    from dotenv import dotenv_values
     
     with xm_local.create_experiment(experiment_title='xmngr_pipeline') as experiment:
         
@@ -69,6 +85,16 @@ def main(_):
         
         # default gateway used by docker is 172.17.0.1
         # can verify that with ip addr show docker0 | grep "inet "
+        # NOTE that the xla_force_host_platform_device_count
+        # sets the number of virtual/logical local devices for the CPU backend
+        # (which XLA internally refers to as the host platform).  this sets jax_local_device_count to that number.
+        # by default, jax.local_device_count() is 1.
+        # so it's a good idea to test the code for GPU ability by setting the xla host platform device flag.
+        # for example: with jax num processes = 2 we have:
+        #  worker process 0: creates 2 local virtual CPU devices.
+        #  worker process 1: creates 2 local virtual CPU devices.
+        # though producetion code in cloud is usally configured to 1 GPU per container so set the xla flag above to 1.
+        
         docker_bridge_gateway = "172.17.0.1"
         env_config = {
             **dotenv_values(".env_unittests"),
@@ -85,7 +111,7 @@ def main(_):
         run_config = {
             'LOGNAME': env_config.get('POSTGRES_USER'),
             'USER': env_config.get('POSTGRES_USER'),
-            "study_name": "GraphRanker_tuning_xmngr_2",
+            "study_name": study_name,
             "mlflow_experiment_name": "GraphRanker_tuning_xmngr_2",
             "mlflow_tracking_uri": f"postgresql://{env_config.get('POSTGRES_USER')}:{env_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db",
             "vizier_endpoint": f"{docker_bridge_gateway}:8000",
@@ -105,6 +131,8 @@ def main(_):
             "seed": 12345,
             "phase": "tune",
             'project_id': 'tune-xmngr-01',
+            "grain_num_threads_fetching_records": 2,
+            "grain_num_threads_computing_num_records": 2,
         }
         
         executable = experiment.package([
@@ -142,7 +170,7 @@ def main(_):
             NOTE that cpu=x cannot exceed the number of cores on the machine it is running on
             for this simulation.
             '''
-            resources = xm.JobRequirements(cpu=2, ram=4 * xm.GiB)
+            resources = xm.JobRequirements(cpu=2, ram=10 * xm.GiB)
             
             container_gateway = "0.0.0.0"
             jax_port = 8888
@@ -185,6 +213,7 @@ def main(_):
                             'JAX_COORDINATOR_ADDRESS': coordinator_addr,
                             # 'JAX_COORDINATOR_IP': container_ip,
                             'JAX_COORDINATOR_PORT': str(jax_port),
+                            "grain_read_options_num_threads": str(2),
                         },
                         args={
                             **run_config,
@@ -196,6 +225,7 @@ def main(_):
                 logging.info(f'adding tuning job_{i}')
                 tuning_handle = await experiment.add(xm.JobGroup(**group_jobs))
                 await tuning_handle.wait_until_complete()
+                #await check_await_status(tuning_handle)
                 logging.info(f'finished tuning job_{i}')
             logging.info(f"finished tuning {num_trials} trials")
             print('\a')
@@ -227,6 +257,7 @@ def main(_):
                         'JAX_COORDINATOR_ADDRESS': coordinator_addr,
                         # 'JAX_COORDINATOR_IP': container_ip,
                         'JAX_COORDINATOR_PORT': str(jax_port),
+                        "grain_read_options_num_threads": str(2),
                     },
                     args={
                         **run_config,
@@ -238,6 +269,7 @@ def main(_):
             logging.info(f'adding train job')
             handle = await experiment.add(xm.JobGroup(**group_jobs))
             await handle.wait_until_complete()
+            #await check_await_status(handle)
             logging.info(f'finished train job')
             print('\a')
             print('\a')
@@ -270,6 +302,7 @@ def main(_):
                         'JAX_COORDINATOR_ADDRESS': coordinator_addr,
                         # 'JAX_COORDINATOR_IP': container_ip,
                         'JAX_COORDINATOR_PORT': str(jax_port),
+                        "grain_read_options_num_threads": str(2),
                     },
                     args={
                         **run_config,
@@ -283,6 +316,7 @@ def main(_):
             logging.info(f'adding test job')
             handle = await experiment.add(xm.JobGroup(**group_jobs))
             await handle.wait_until_complete()
+            #await check_await_status(handle)
             logging.info(f'finished test job')
             print('\a')
             print('\a')
@@ -294,10 +328,10 @@ def main(_):
         logging.info("pipeline done.")
         
 if __name__ == '__main__':
-    # reset all of orbax checkpoint_bucket
-    #try:
-    #    reset_checkpoint_buckets()
-    #except Exception as ex:
-    #    pass
+    ## reset all of orbax checkpoint_bucket
+    try:
+        reset_checkpoint_buckets()
+    except Exception as ex:
+        pass
     
     app.run(main)

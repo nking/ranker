@@ -46,7 +46,7 @@ from vizier.service import clients as vz_clients
 
 from movie_lens_ranker.train import train_fn, test_fn
 from movie_lens_ranker.util import define_flags, get_recognized_keys, \
-    get_canonical_mlflow_run_name
+    get_canonical_mlflow_run_name, app_runner_is_missing_minimum_required_keys
 
 FLAGS = flags.FLAGS
 
@@ -468,14 +468,18 @@ def test_run(config):
     test_metrics = test_fn(config=config)
         
     print(f'TEST METRICS: {test_metrics}', flush=True)
-    
+   
 def main(_):
     config = FLAGS.flag_values_dict()
     
     if "debug" in config and config['debug']:
-        print(f'all args received from flgs: {config}', flush=True)
+        print(f'all args received from flags: {config}', flush=True)
     
     config = {k:v for k, v in config.items() if k in get_recognized_keys()}
+    
+    if app_runner_is_missing_minimum_required_keys(config):
+        print(f'warning: missing the minimum required flags')
+        return
     
     # work-around for xmanager encapsulating the json dumps string of array with extra quotes
     if "trial_ids" in config:

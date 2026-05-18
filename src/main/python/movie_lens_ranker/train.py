@@ -174,7 +174,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     :param optimizer:
     :return:
     """
-    debug_weight_before = jnp.linalg.norm(model.score_head.kernel.value)
+    debug_weight_before = jnp.linalg.norm(model.score_head.kernel.get_value())
     
     def loss_fn(model, padded_graph) -> Array:
         scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
@@ -191,7 +191,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     loss, grads = nnx.value_and_grad(loss_fn)(model, padded_graph)
     optimizer.update(model, grads)
     
-    debug_weight_after = jnp.linalg.norm(model.score_head.kernel.value)
+    debug_weight_after = jnp.linalg.norm(model.score_head.kernel.get_value())
     diff = jnp.abs(debug_weight_before - debug_weight_after)
     # if > 1E-4, is a significant change
     # if > 1, exploding gradient or learning rate issue
@@ -777,6 +777,24 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     train_dataloader = _dict['train_dataloader']
     val_dataloader = _dict['val_dataloader']
     
+    # =========================================================================
+    # DRY-RUN TO FORCE LAZY PARAMETER INITIALIZATION
+    # Pull one batch and pass it through the model to realize all internal
+    # attention kernels, weights, and biases before constructing the Orbax target.
+    # =========================================================================
+    try:
+        # Get a sample batch from the validation dataloader iterator safely
+        sample_iterator = iter(val_dataloader)
+        dummy_batch = next(sample_iterator)
+        model.eval()
+        _ = model(dummy_batch)
+        print(f"worker_rank ={jax.process_index()}: ✅ Skeleton model dry-run successful. Lazy parameters initialized.")
+    except Exception as e:
+        print(f"worker_rank ={jax.process_index()}: ⚠️ Warning: Dry-run forward pass encountered an issue: {e}")
+        raise e
+    # =========================================================================
+    
+    
     #restore state to those objects:
     _, model_state = nnx.split(model)
     _, opt_state = nnx.split(optimizer)
@@ -805,7 +823,7 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     nnx.update(rngs, restored['rngs'])
     global_step = int(restored['global_step']['global_step'].item())
     
-    print(f"Restored model at step {global_step}")
+    print(f"worker_rank ={jax.process_index()}: Restored model at step {global_step}")
     
     return {
         'model': model, 'optimizer': optimizer,
@@ -1171,6 +1189,7 @@ def check_model_state_equality(model_a, model_b, rtol=1e-5, atol=1e-8) -> bool:
     
     # 4. Element-wise value check across every array leaf
     mismatched_keys = []
+    mismatched_vals = []
     for key, val_a in flat_a.items():
         val_b = flat_b[key]
         # Pull raw JAX arrays out of NNX Variable wrappers (like nnx.Param)
@@ -1178,13 +1197,15 @@ def check_model_state_equality(model_a, model_b, rtol=1e-5, atol=1e-8) -> bool:
         arr_b = val_b.value if hasattr(val_b, 'value') else val_b
         if not jnp.allclose(arr_a, arr_b, rtol=rtol, atol=atol):
             mismatched_keys.append(key)
+            v = [f'({a:.3e} , {b:.3e})' for a, b in zip(np.asarray(arr_a).ravel()[:10], np.asarray(arr_b).ravel()[:10])]
+            mismatched_vals.append(",".join(v))
     if mismatched_keys:
         print(f"worker_rank={jax.process_index()}: ❌ Model structures match, but values differ at {len(mismatched_keys)} parameter paths:")
-        for ii, path in enumerate(mismatched_keys[:5]):  # Limit output log spam
-        #for ii, path in enumerate(mismatched_keys):
-            print(f"worker_rank={jax.process_index()}:   -> Mismatch in layer path: {path}")
-        if len(mismatched_keys) > 5:
-            print(f"worker_rank={jax.process_index()}:   -> ... and {len(mismatched_keys) - 5} more paths.")
+        #for ii, path in enumerate(mismatched_keys[:5]):  # Limit output log spam
+        for ii, path in enumerate(mismatched_keys):
+            print(f"worker_rank={jax.process_index()}:   -> Mismatch in layer path: {path}, values={mismatched_vals[ii]}")
+        #if len(mismatched_keys) > 5:
+        #    print(f"worker_rank={jax.process_index()}:   -> ... and {len(mismatched_keys) - 5} more paths.")
         return False
     
     print("worker_rank={jax.process_index()}: ✅ Success! Both model states are mathematically identical.")

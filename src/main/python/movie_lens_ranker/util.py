@@ -57,6 +57,18 @@ def get_recognized_keys():
         *hpo_config_keys,
     }
 
+def app_runner_is_missing_minimum_required_keys(config: Dict[str, Any]) -> bool:
+    """
+    a method mostly for use to silently return from requests by docker compose polling
+    :param config: dictionary of flags passed to app_runner
+    :return: False if has minumum required keys, else returns False
+    """
+    for key in ("study_name", "phase",  "mlflow_tracking_uri"):
+        if config.get(key, None) == None:
+            print(f'missing a key', flush=True)
+            return True
+    return False
+    
 def get_canonical_mlflow_run_name(config: Dict[str, Any]) -> str:
     if config['phase'].find('tune') == 0:
         run_name = f"trail_{config.get('trial_id', 0)}"
