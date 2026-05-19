@@ -18,7 +18,7 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
         Nodes 1 to H: History Movies (H = max_history).
         Nodes H+1 to H+C: Candidate Movies (C = num_candidates)
         Edges are the user ratings for the movie.
-        :param batch : dictionary containing ndarrays with follong keys
+        :param batch : dictionary containing ndarrays with following keys
             'user_id',
             'movie_id',
             'rating',
@@ -102,7 +102,7 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
             
             #  Construct the GraphsTuple
             results.append(jraph.GraphsTuple(
-                # modes arrays are length 1 + n_real_history + self.num_candidates
+                # odes arrays are length 1 + n_real_history + self.num_candidates
                 nodes={
                     "ids": node_ids,
                     "label": node_labels,

@@ -54,6 +54,11 @@ class TestJraphPaddedGraphTupleTransform(unittest.TestCase):
             batch_size=1024)
         
     def test_transform(self):
+        if True:
+            #no longer using this last transform in the grain data loaders.  the logic
+            #is now in the train loop before data parititoning.
+            return
+        
         batch_size = 1024
         max_history = 20
         num_candidates = 20

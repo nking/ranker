@@ -114,8 +114,9 @@ def _create_dataloader(
                 recommendations=recommendations,
                 num_candidates=num_candidates, seed=seed),
             SparseLocalSubgraphTransform(),
-            JraphPaddedGraphTupleTransform(batch_size=batch_size,
-                max_history=max_history, num_candidates=num_candidates),
+            #moving this logic to the train loop to allow for mulit-host partition of graphs
+            #JraphPaddedGraphTupleTransform(batch_size=batch_size,
+            #    max_history=max_history, num_candidates=num_candidates),
         ],
         # worker_count=worker_count,
         shard_options=shard_opts,

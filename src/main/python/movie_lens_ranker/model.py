@@ -5,6 +5,11 @@ from flax import nnx
 
 from movie_lens_ranker.data_loading import *
 import jax.numpy as jnp
+import jax
+
+import numpy as np
+mesh_2 = jax.sharding.Mesh(np.array(jax.local_devices()), axis_names=('global_2',))
+sharding_2 = jax.sharding.NamedSharding(mesh_2, jax.sharding.PartitionSpec('global_2'))
 
 class GraphRanker(nnx.Module):
     def __init__(self, user_movie_embeds: jnp.ndarray,
@@ -47,7 +52,9 @@ class GraphRanker(nnx.Module):
             jk="max",  # JumpingKnowledge aggregation
             rngs=rngs
         )
-        self.score_head = nnx.Linear(out_features * 2, 1, rngs=rngs)
+        self.score_head = nnx.Linear(out_features * 2, 1, rngs=rngs,
+            kernel_init=nnx.with_partitioning(nnx.initializers.lecun_normal(), sharding_2),)
+        #self.score_head.kernel.sharding = nnx.MeshRules(data='data')
     
     def __call__(self, graph: jraph.GraphsTuple) -> jnp.ndarray:
         """

@@ -33,9 +33,13 @@ from movie_lens_ranker.data_loading import create_train_and_val_dataloaders, \
     create_test_dataloader
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.util import read_embeddings, get_env_resources, \
-    stringify_mlflow_params, get_canonical_mlflow_run_name
+    stringify_mlflow_params, get_canonical_mlflow_run_name, \
+    calc_number_jax_graph_components
 
 env_resources, mesh = get_env_resources()
+global_sharding = jax.sharding.NamedSharding(mesh, P())
+mesh_local = jax.sharding.Mesh(np.array(jax.local_devices()), axis_names=('local_data',))
+data_sharding = jax.sharding.NamedSharding(mesh_local, P('local_data'))
 
 def convert_to_global(arr, mesh, sync:bool=True):
     """
@@ -63,7 +67,6 @@ def convert_to_global(arr, mesh, sync:bool=True):
     else:
         if not hasattr(arr, 'shape'):
             arr = jnp.asarray(arr)
-        global_sharding = jax.sharding.NamedSharding(mesh, P())
         global_shape = arr.shape
         dtype = arr.dtype
     
@@ -174,6 +177,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     :param optimizer:
     :return:
     """
+    
     debug_weight_before = jnp.linalg.norm(model.score_head.kernel.get_value())
     
     def loss_fn(model, padded_graph) -> Array:
@@ -188,6 +192,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         )
         return loss
     
+    #an optimized pmead averages all gradients:
     loss, grads = nnx.value_and_grad(loss_fn)(model, padded_graph)
     optimizer.update(model, grads)
     
@@ -430,8 +435,40 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     #NOTE: cannot improve efficiency for this outer loop because gradient loss needs to
     # be calculated and updated for each iteration.
     
-    #for batch_idx, padded_super_graph in enumerate(train_dataloader):
-    for batch_idx, padded_super_graph in enumerate(train_dataloader_iter):
+    n_local_devices = jax.local_device_count()
+    
+    sharded_batch_size = config_dict['batch_size'] // n_local_devices
+    jax_graph_comp_dict = calc_number_jax_graph_components(config_dict['batch_size'],
+        config_dict['max_history'], config_dict['num_candidates'])
+    
+    for batch_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
+        
+        # while grain has already partitioned the data among jax processes,
+        # we still need to further partition the data among local devices if there are more
+        # than 1.
+        batch = graphs_tuple_batch
+        
+        remainder = len(batch) % n_local_devices
+        if remainder != 0:
+            batch = batch[:-remainder]  # Drop trailing graphs to make it divisible
+
+        batch = jraph.batch(batch)
+        
+        #print(f"worker_rank={rank}:DEBUG: Actual nodes in this batch: {batch.n_node.sum()}")
+        #print(f"worker_rank={rank}:DEBUG: Actual edges in this batch: {batch.n_edge.sum()}")
+        #print(f"worker_rank={rank}:DEBUG: Actual graphs in this batch: {batch.n_node.shape[0]}, graphs_tuple_batch length={len(graphs_tuple_batch)}", flush=True)
+        #print(f"worker_rank={rank}:DEBUG: Limit max_nodes: {jax_graph_comp_dict['max_nodes']}")
+        #print(f"worker_rank={rank}:DEBUG: Limit max_edges: {jax_graph_comp_dict['max_edges']}", flush=True)
+        
+        padded_super_graph_0 = jraph.pad_with_graphs(
+            batch,
+            n_node=jax_graph_comp_dict['max_nodes'],
+            n_edge=jax_graph_comp_dict['max_edges'],
+            n_graph = n_local_devices + batch.n_node.shape[0] #config_dict['batch_size']
+        )
+        
+        padded_super_graph = jax.device_put(padded_super_graph_0, data_sharding) #can handle pytrees
+        
         local_step = batch_idx * TRAIN_BATCH_SIZE
         global_step = local_step * NUM_TRAIN_SHARDS
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
@@ -578,7 +615,7 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         user_embeddings_uri=config['user_embeddings_uri'],
         movie_embeddings_uri=config['movie_embeddings_uri'],
         batch_size=1024)
-   
+    
     model = GraphRanker(user_movie_embeds=embeddings,
         num_candidates=config['num_candidates'],
         hidden_features=config['hidden_dim'],
@@ -1015,7 +1052,7 @@ def export_model(trained_model: GraphRanker, batch_size:int, max_history:int,
               senders=array( shape=(max_edges,), dtype=int32),
               globals=None,
               n_node=array( shape=(max_graphs,), dtype=int32),
-               n_edge=array( shape=(max_graphs,), dtype=int32))
+              n_edge=array( shape=(max_graphs,), dtype=int32))
                
     TODO: still need to write a NumPy or C++ method to replace the grain DataLoader transformations
     for production environment.  The data it needs should be placed in a graph database
