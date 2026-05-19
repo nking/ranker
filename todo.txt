@@ -4,6 +4,17 @@
     with inner and external (a.k.a. wedge) product.
     - the 16 dimension user and movie embedding 
       then becomes 120 in length as a bi-vector (C(16,2))
+      -> the addition of the wedge product makes the resulting
+         bivector far more expressive, so it might be that the
+         geometric algebra bin-encoder should only use n=6 or 7
+         instead of 16 to avoid over-fitting.
+         -> an n=6 representation bi-vector and a cross-encoder
+            built with a geom product layer and a spin layer
+            would have comparable runtime and space compexity
+            as the euclidean gatv2 cross-encoder with d=16 vectors.
+            one would expect the GA cross-encoder to be more
+            expressive
+         -> jax + jaxga or numga would allow efficient use of accelerators.
 
 - replace use of passwords in the .env and uris with
   a mock service for GCP Secret Manager.
