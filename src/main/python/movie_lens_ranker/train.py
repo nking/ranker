@@ -36,8 +36,8 @@ from movie_lens_ranker.util import read_embeddings, get_env_resources, \
     calc_number_jax_graph_components, get_model_mesh
 
 env_resources, mesh = get_env_resources()
-mesh_local = jax.sharding.Mesh(np.array(jax.local_devices()), axis_names=('local_data',))
-data_sharding = jax.sharding.NamedSharding(mesh_local, P('local_data'))
+#mesh_local = jax.sharding.Mesh(np.array(jax.local_devices()), axis_names=('local_data',))
+#data_sharding = jax.sharding.NamedSharding(mesh_local, P('local_data'))
 
 def convert_to_global(arr, mesh, sync:bool=True):
     """
@@ -263,8 +263,9 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
     :param jax_graph_comp_dict: dictionary formed from method calc_number_jax_graph_components
     :return: a dictionary of the globally averaged metrics "loss", "mrr", "ndcg", "recall", the number of samples used
     """
+    global_data_pspec = P(('processes', 'local_devices'))
+    model_mesh = get_model_mesh()
     global_avg_metrics_batches = {"loss":[], "mrr":[], "ndcg":[], "recall":[]}
-    n_local_devices = jax.local_device_count()
     #the validation set is 1/10th the size of train, here will eval in 1 big batch if possible, else will need to loop
     # over and average results
     n_samples_tot = 0
@@ -274,13 +275,18 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
         n_samples_tot += n_samples
         
         #shard the data to local devices:
-        padded_super_graph = jax.device_put(padded_super_graph_0, data_sharding)
+        #padded_super_graph = jax.device_put(padded_super_graph_0, data_sharding)
+        padded_super_graph = jax.tree_util.tree_map(
+            lambda x: jax.experimental.multihost_utils.host_local_array_to_global_array(
+                x, model_mesh, global_data_pspec),
+            padded_super_graph_0
+        )
         
         val_metrics = eval_step(model, padded_super_graph, top_k)
         
         # val_metrics['loss'] is now an array of shape (Num_Batches,)
         local_avg_val_metrics = jax.tree.map(jnp.mean, val_metrics)
-        #average over all devices:
+        #average over all devices. the jax.lax internal to aggregate_metric acts as a barrier
         global_avg_metrics = jax.tree.map(aggregate_metric, local_avg_val_metrics)
         for key in global_avg_metrics:
             global_avg_metrics_batches[key].append(global_avg_metrics[key].item())
@@ -423,6 +429,9 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     #NOTE: cannot improve efficiency for this outer loop because gradient loss needs to
     # be calculated and updated for each iteration.
     
+    global_data_pspec = P(('processes', 'local_devices'))
+    model_mesh = get_model_mesh()
+    
     n_local_devices = jax.local_device_count()
     
     sharded_batch_size = config_dict['batch_size'] // n_local_devices
@@ -430,14 +439,19 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         config_dict['max_history'], config_dict['num_candidates'])
     
     for batch_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
-        
-        padded_super_graph_0, n_samples = pad_graph_tuple_batch(graphs_tuple_batch, jax_graph_comp_dict)
-        
-        padded_super_graph = jax.device_put(padded_super_graph_0, data_sharding) #can handle pytrees
-        
         local_step = batch_idx * TRAIN_BATCH_SIZE
         global_step = local_step * NUM_TRAIN_SHARDS
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
+        
+        padded_super_graph_0, n_samples = pad_graph_tuple_batch(graphs_tuple_batch, jax_graph_comp_dict)
+        
+        #padded_super_graph = jax.device_put(padded_super_graph_0, data_sharding) #can handle pytrees
+        # Map the promotion function over the entire GraphsTuple PyTree
+        padded_super_graph = jax.tree_util.tree_map(
+            lambda x: jax.experimental.multihost_utils.host_local_array_to_global_array(
+                x, model_mesh,global_data_pspec),
+            padded_super_graph_0
+        )
         
         loss = train_step(model, padded_super_graph, optimizer)
         
@@ -483,7 +497,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             
             if save_checkpoints:
                 #orbax for checkpointing.  saves latest 2
-                convert_fn = partial(convert_to_global, mesh=mesh)
+                convert_fn = partial(convert_to_global, mesh=model_mesh)
                 _graphdef, model_state = nnx.split(model)
                 _, opt_state = nnx.split(optimizer)
                 global_model_state = jax.tree_util.tree_map(convert_fn, model_state)
@@ -776,6 +790,8 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     """
     n_keep = 2 if checkpoint_uri.find('latest') > -1 else 1
     
+    model_mesh = get_model_mesh()
+    
     mngr = ocp.CheckpointManager(checkpoint_uri,
         item_handlers={
             'model': ocp.StandardCheckpointHandler(),
@@ -792,7 +808,7 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     if epoch is None:
         raise FileNotFoundError(f"No checkpoint found at {checkpoint_uri}")
     
-    restore_fn = partial(convert_to_global, mesh=mesh, sync=False)
+    restore_fn = partial(convert_to_global, mesh=model_mesh, sync=False)
     
     # restore config, then rngs, so can restore model and dataloaders from them
     restored_config = mngr.restore(epoch, args=ocp.args.Composite(config=ocp.args.JsonRestore()))
@@ -1169,7 +1185,7 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
     
     model.train()
     
-    print(f'worker_rank={jax.process_index()}:\n    summary of model={str(model)}\n    summary of restored={str(restore_dict["model"])}', flush=True)
+    #print(f'worker_rank={jax.process_index()}:\n    summary of model={str(model)}\n    summary of restored={str(restore_dict["model"])}', flush=True)
     
     # print out model state
     #_graphdef, model_state = nnx.split(model)
