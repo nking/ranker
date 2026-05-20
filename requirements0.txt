@@ -1,0 +1,8 @@
+jax-ai-stack==2025.10.28
+rax==0.4.0
+jraph @ git+https://github.com/deepmind/jraph.git@51f5990104f7374492f8f3ea1cbc47feb411c69c
+jraphx==0.0.4
+mlflow-skinny==3.11.1
+psycopg2-binary==2.9.12
+gcsfs==2026.2.0
+google-vizier[jax]==0.1.24
