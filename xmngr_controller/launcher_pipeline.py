@@ -29,7 +29,8 @@ absl_logging.set_verbosity(absl_logging.DEBUG)
 logging.basicConfig(level=logging.DEBUG)
 
 """
-launcher for simulating 2 jax processes running the pipeline tune, train, test
+launcher for simulating a multi-host, multi-process environment for running the
+GraphRanker pipeline tune, train, and test
 
 start db services with:
     ./run_compose_dbs.sh
@@ -37,6 +38,44 @@ or:
     docker compose -f docker-compose-dbs.yaml up -d
 
 xmanager launch xmngr_controller/launcher_pipeline.py -- --xm_db_yaml_config_path=db_config.yaml
+
+--------------------------------
+the multi-host aspect is simulated using the jax JAX_COORDINATOR_ADDRESS and JAX_COORDINATOR_PORT
+ below in the tune group jobs
+ 
+in jax distr:
+- a Host is a CPU (Node/Machine) that can manage
+  several local devices (accelerators such as TPU or GPU chips)
+- a Process is a jax program running on a host.
+  in the SPMD grain model, each process id gets 1/(num_processes)
+  of the data.
+  jax.devices = the total of each host's jax_processes.
+- Local Devices: These are the specific accelerators (e.g., GPU 0 and GPU 1)
+  that a single JAX process can directly control without needing
+  to communicate over the network.
+- Global Devices: The collection of all devices available across the
+  entire distributed cluster (all processes and all hosts).
+
+JAX_NUM_PROCESSES sets the number of process per host.  in this launcher we are using those
+processes as each being a host too.
+
+xla_force_host_platform_device_count sets the number of local devices for each process.
+it's simulating the TPU or GPU chips, etc.
+
+If we set xla_force_host_platform_device_count to 3 and JAX_NUM_PROCESSES to 2, then
+train_fn sees:
+  visit by process id == 1:
+      1 [parameter_controller] [job_0_worker_1]
+      2    jax_process_index=1;
+      3    jax.local_devices=[CpuDevice(id=2048), CpuDevice(id=2049), CpuDevice(id=2050)];
+      4    jax.devices=[CpuDevice(id=0), CpuDevice(id=1), CpuDevice(id=2), CpuDevice(id=2048), CpuDevice(id=2049), CpuDevice(id=2050)]
+      5
+  visit by process id == 0
+      6 [parameter_controller] [job_0_worker_0]
+      7    jax_process_index=0;
+      8    jax.local_devices=[CpuDevice(id=0), CpuDevice(id=1), CpuDevice(id=2)];
+      9    jax.devices=[CpuDevice(id=0), CpuDevice(id=1), CpuDevice(id=2), CpuDevice(id=2048), CpuDevice(id=2049), CpuDevice(id=2050)]
+
 """
 study_name = "GraphRanker_tuning_xmngr_2"
 
@@ -81,6 +120,7 @@ def main(_):
         num_trials = 4  # 20
         num_trials_per_worker = 2
         num_processes = 2
+        num_hosts = 2
         print(f'JAX_NUM_PROCESSES={num_processes}', flush=True)
         
         # default gateway used by docker is 172.17.0.1
@@ -102,11 +142,12 @@ def main(_):
             'PYTHONUNBUFFERED': '1',
             # 'JAX_COORDINATOR_ADDRESS': f'{docker_bridge_gateway}:8888',
             'JAX_NUM_PROCESSES': str(num_processes),
-            'XLA_FLAGS': f'--xla_force_host_platform_device_count={num_processes}',
+            'XLA_FLAGS': f'--xla_force_host_platform_device_count={num_hosts}',
             # Add other flags like this:
             # 'XLA_FLAGS': '--xla_force_host_platform_device_count=2 --xla_cpu_enable_fast_math=true',
             'PYTHONIOENCODING': 'UTF-8',
             'JAX_LOG_LEVEL': 'debug',
+            'jax_distributed_debug':"True"
         }
         run_config = {
             'LOGNAME': env_config.get('POSTGRES_USER'),

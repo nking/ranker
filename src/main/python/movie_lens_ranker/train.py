@@ -10,7 +10,6 @@ import mlflow
 import optax
 from math import log
 import jax
-import jax.tree_util as jtu
 from jax.sharding import PartitionSpec as P
 from jax import shard_map, Array
 import numpy as np
@@ -23,7 +22,7 @@ from flax import nnx
 import rax
 import grain
 from flax.typing import Array
-from grain._src.python.data_loader import DataLoader, DataLoaderIterator
+from grain._src.python.data_loader import DataLoaderIterator
 
 from movie_lens_ranker.BatchSampler import BatchSampler
 
@@ -34,10 +33,9 @@ from movie_lens_ranker.data_loading import create_train_and_val_dataloaders, \
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.util import read_embeddings, get_env_resources, \
     stringify_mlflow_params, get_canonical_mlflow_run_name, \
-    calc_number_jax_graph_components
+    calc_number_jax_graph_components, get_model_mesh
 
 env_resources, mesh = get_env_resources()
-global_sharding = jax.sharding.NamedSharding(mesh, P())
 mesh_local = jax.sharding.Mesh(np.array(jax.local_devices()), axis_names=('local_data',))
 data_sharding = jax.sharding.NamedSharding(mesh_local, P('local_data'))
 
@@ -55,7 +53,7 @@ def convert_to_global(arr, mesh, sync:bool=True):
     
     During Save, sync=True: The workers need identical metadata, but independent data shards.
     we wrap the local states into unified NamedSharding global arrays so that worker 0
-    can write it's data to disk nd worker 1 can write its, ...
+    can write its data to disk nd worker 1 can write its, ...
     During restore, sync=False: orbax reads a single file structure
     from storage and needs to split those bytes among workers.
     """
@@ -69,12 +67,12 @@ def convert_to_global(arr, mesh, sync:bool=True):
             arr = jnp.asarray(arr)
         global_shape = arr.shape
         dtype = arr.dtype
+        global_sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
     
     if not sync:
         # Return an abstract metadata mold. This completely avoids device errors
         # and guarantees Orbax returns a true global array spanning [0, 1, 2048, 2049]
-        return jax.ShapeDtypeStruct(shape=global_shape, dtype=dtype,
-            sharding=global_sharding)
+        return jax.ShapeDtypeStruct(shape=global_shape, dtype=dtype, sharding=global_sharding)
     
     is_key = jnp.issubdtype(dtype, jax.dtypes.prng_key)
     if is_key:
@@ -94,8 +92,7 @@ def convert_to_global(arr, mesh, sync:bool=True):
     def data_callback(index):
         return arr_to_broadcast[index]
     
-    return jax.make_array_from_callback(global_shape, global_sharding,
-        data_callback)
+    return jax.make_array_from_callback(global_shape, global_sharding, data_callback)
 
 def get_nontrainable_train_config(movies_uri:str,
         recommendations_uri:str, recommendations_ts_uri:str,
@@ -206,14 +203,13 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     return loss
 
 @nnx.jit
-def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) -> \
-dict[str, Array]:
+def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) -> dict[str, Array]:
     """
     train step over a batch, where padded_graph contains super graph of the batch
     :param model:
     :param padded_graph:
     :param top_k:
-    :return:
+    :return: dictionary of "loss", "mrr", "ndcg", "recall"
     """
     def loss_fn(model, padded_graph) -> Tuple[Array, Dict[str, Array]]:
         scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
@@ -248,36 +244,6 @@ def aggregate_metric(scalar_metric):
     # context set by jax.set_mesh() during compilation.
     return jax.lax.pmean(scalar_metric, axis_name='data')
 
-def _epoch_validation_chunked(model, val_dataloader, top_k):
-    all_metrics = []
-    current_chunk = []
-    chunk_size = 8
-    
-    for i, batch in enumerate(val_dataloader):
-        current_chunk.append(batch)
-        
-        # When chunk is full, process it
-        if len(current_chunk) == chunk_size:
-            mega_batch = jtu.tree_map(lambda *xs: jnp.stack(xs),
-                *current_chunk)
-            # Process the chunk in one vectorized GPU call
-            chunk_metrics = vectorized_epoch_eval(model, mega_batch, top_k)
-            all_metrics.append(chunk_metrics)
-            current_chunk = []  # Reset
-    
-    # Process any remaining batches in the last partial chunk
-    if current_chunk:
-        mega_batch = jtu.tree_map(lambda *xs: jnp.stack(xs), *current_chunk)
-        all_metrics.append(vectorized_epoch_eval(model, mega_batch, top_k))
-    
-    # Average across all chunks
-    # We stack all the results (e.g., [8, 8, 8, 4]) and take the global mean
-    final_metrics = jtu.tree_map(
-        lambda *xs: jnp.mean(jnp.concatenate([x.reshape(-1) for x in xs])),
-        *all_metrics
-    )
-    return final_metrics
-
 @nnx.jit
 def vectorized_epoch_eval(model, mega_batch, top_k):
     # mega_batch here is a chunk of N batches stacked
@@ -285,54 +251,76 @@ def vectorized_epoch_eval(model, mega_batch, top_k):
     return v_eval(model, mega_batch, top_k)
 
 def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterator,
-        top_k: int) -> Tuple[jax.tree.map, int]:
+        top_k: int, jax_graph_comp_dict:Dict[str, int]) -> Tuple[jax.tree.map, int]:
     """
     calc metrics for val dataset. Note, if this method consumes too much memory, use the
-    _epoch_validation_chunked instead.
+    _epoch_validation_chunked instead.   Note that the method uses SPMD paradigm.
     For evaluation on validation metrics, be sure to invoke model.eval() before using this method.
     
     :param model: the GraphRanker model instance
     :param val_dataloader_iter: iterator over the validation dataset
     :param top_k: the @K to be used in metrics NDCG@K, recall@K, MRR@K
-    :return: the jax tree map of metrics, the number of batches used
+    :param jax_graph_comp_dict: dictionary formed from method calc_number_jax_graph_components
+    :return: a dictionary of the globally averaged metrics "loss", "mrr", "ndcg", "recall", the number of samples used
     """
-    # 1. Collect all batches from the loader into a list
-    # (Assuming memory permits holding one epoch of padded graphs)
-    all_batches = [batch for batch in val_dataloader_iter]
+    global_avg_metrics_batches = {"loss":[], "mrr":[], "ndcg":[], "recall":[]}
+    n_local_devices = jax.local_device_count()
+    #the validation set is 1/10th the size of train, here will eval in 1 big batch if possible, else will need to loop
+    # over and average results
+    n_samples_tot = 0
+    for graphs_tuple_batch in val_dataloader_iter:
+        
+        padded_super_graph_0, n_samples = pad_graph_tuple_batch(graphs_tuple_batch, jax_graph_comp_dict)
+        n_samples_tot += n_samples
+        
+        #shard the data to local devices:
+        padded_super_graph = jax.device_put(padded_super_graph_0, data_sharding)
+        
+        val_metrics = eval_step(model, padded_super_graph, top_k)
+        
+        # val_metrics['loss'] is now an array of shape (Num_Batches,)
+        local_avg_val_metrics = jax.tree.map(jnp.mean, val_metrics)
+        #average over all devices:
+        global_avg_metrics = jax.tree.map(aggregate_metric, local_avg_val_metrics)
+        for key in global_avg_metrics:
+            global_avg_metrics_batches[key].append(global_avg_metrics[key].item())
+            
+    #NOTE: at expense of RAM, could instead: stack all the padded graphs (put in a list
+    # the mega_batch = jax.tree_util.tree_map(lambda *xs: jnp.stack(xs), *list_of_padded_graphs))
+    # and use one vectorized call val_metrics = vectorized_epoch_eval
+    # then the local_avg_val_metrics and global_avg_metrics as above.
     
-    # 2. Stack the list of GraphsTuples into a single vectorized GraphsTuple
-    # Every leaf will now have shape (Num_Batches, Padded_Size, ...)
-    mega_batch = jtu.tree_map(lambda *xs: jnp.stack(xs), *all_batches)
+    out = {key : float(np.average(global_avg_metrics_batches[key], axis=0)) for key in global_avg_metrics_batches}
     
-    val_metrics = vectorized_epoch_eval(model, mega_batch, top_k)
-    # val_metrics['loss'] is now an array of shape (Num_Batches,)
-    local_avg_val_metrics = jax.tree.map(jnp.mean, val_metrics)
-    global_avg_metrics = jax.tree.map(aggregate_metric, local_avg_val_metrics)
-    return global_avg_metrics, len(all_batches)
+    return out, n_samples_tot
 
-def _epoch_validation_simplest(model: GraphRanker, val_dataloader: DataLoader, top_k: int) -> Dict[str, Array]:
-    epoch_val_loss = []
-    epoch_val_mrr = []
-    epoch_val_ndcg = []
-    epoch_val_recall = []
-    for val_local_step, val_padded_super_graph in enumerate(val_dataloader):
-        val_metrics = eval_step(model, val_padded_super_graph, top_k)
-        # jax.debug.print('val_metrics={val_metrics}', val_metrics=val_metrics, ordered=True)
-        epoch_val_mrr.append(val_metrics['mrr'])
-        epoch_val_ndcg.append(val_metrics['ndcg'])
-        epoch_val_loss.append(val_metrics["loss"])
-        epoch_val_recall.append(val_metrics['recall'])
-    #jaxlib._jax.ArrayImpl;  shape=()
-    avg_val_loss = jnp.mean(jnp.array(epoch_val_loss))
-    avg_val_mrr = jnp.mean(jnp.array(epoch_val_mrr))
-    avg_val_ndcg = jnp.mean(jnp.array(epoch_val_ndcg))
-    avg_val_recall = jnp.mean(jnp.array(epoch_val_recall))
+def pad_graph_tuple_batch(graph_tuple_batch: jraph.GraphsTuple, jax_graph_comp_dict:Dict[str, int],
+    drop_remainder:bool=True) -> Tuple[jraph.GraphsTuple, int]:
+    """
+    pad a batch from the grain data loaders for use in sharding over local devices
+    :param graph_tuple_batch:
+    :param jax_graph_comp_dict: dictionary created from calc_number_jax_graph_components
+    :return: the padded graph tuple, ready for harding across local devices
+    """
+    n_local_devices = jax.local_device_count()
+    batch = graph_tuple_batch
     
-    #jax.debug.print("avg_val_loss shape={}", jnp.shape(avg_val_loss))
+    if drop_remainder:
+        remainder = len(batch) % n_local_devices
+        if remainder != 0:
+            batch = batch[:-remainder]  # Drop trailing graphs to make it divisible
+        
+    n_samples = len(batch)
     
-    local_metrics = {'loss': avg_val_loss, 'ndcg': avg_val_ndcg, 'mrr': avg_val_mrr, 'recall': avg_val_recall}
+    batch = jraph.batch(batch)
     
-    return local_metrics
+    padded_super_graph_0 = jraph.pad_with_graphs(
+        batch,
+        n_node=jax_graph_comp_dict['max_nodes'],
+        n_edge=jax_graph_comp_dict['max_edges'],
+        n_graph=n_local_devices + n_samples
+    )
+    return padded_super_graph_0, n_samples
 
 def _train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
@@ -443,29 +431,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     
     for batch_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
         
-        # while grain has already partitioned the data among jax processes,
-        # we still need to further partition the data among local devices if there are more
-        # than 1.
-        batch = graphs_tuple_batch
-        
-        remainder = len(batch) % n_local_devices
-        if remainder != 0:
-            batch = batch[:-remainder]  # Drop trailing graphs to make it divisible
-
-        batch = jraph.batch(batch)
-        
-        #print(f"worker_rank={rank}:DEBUG: Actual nodes in this batch: {batch.n_node.sum()}")
-        #print(f"worker_rank={rank}:DEBUG: Actual edges in this batch: {batch.n_edge.sum()}")
-        #print(f"worker_rank={rank}:DEBUG: Actual graphs in this batch: {batch.n_node.shape[0]}, graphs_tuple_batch length={len(graphs_tuple_batch)}", flush=True)
-        #print(f"worker_rank={rank}:DEBUG: Limit max_nodes: {jax_graph_comp_dict['max_nodes']}")
-        #print(f"worker_rank={rank}:DEBUG: Limit max_edges: {jax_graph_comp_dict['max_edges']}", flush=True)
-        
-        padded_super_graph_0 = jraph.pad_with_graphs(
-            batch,
-            n_node=jax_graph_comp_dict['max_nodes'],
-            n_edge=jax_graph_comp_dict['max_edges'],
-            n_graph = n_local_devices + batch.n_node.shape[0] #config_dict['batch_size']
-        )
+        padded_super_graph_0, n_samples = pad_graph_tuple_batch(graphs_tuple_batch, jax_graph_comp_dict)
         
         padded_super_graph = jax.device_put(padded_super_graph_0, data_sharding) #can handle pytrees
         
@@ -489,7 +455,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             train_metrics = eval_step(model, padded_super_graph, top_k)
             # val_dataloader is also sharded, so don't isolate this to only shard 0.
             # Also, this is synced across all shards, so all shards have same conditional logic for global_avg_val_metrics below here
-            global_avg_val_metrics, n_batches = _epoch_validation(model, iter(val_dataloader), top_k)
+            global_avg_val_metrics, n_val_samples = _epoch_validation(model, iter(val_dataloader), top_k, jax_graph_comp_dict)
             model.train()
             
             global_avg_val_loss = global_avg_val_metrics["loss"]
@@ -509,10 +475,10 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 f"train_{mrr_text}":train_metrics['mrr'].item(),
                 f"train_{ndcg_text}" : train_metrics['ndcg'].item(),
                 f"train_{recall_text}" : train_metrics['recall'].item(),
-                "val_loss":global_avg_val_loss.item(),
-                f"val_{mrr_text}":global_avg_val_mrr.item(),
-                f"val_{ndcg_text}":global_avg_val_ndcg.item(),
-                f"val_{recall_text}":global_avg_val_recall.item()
+                "val_loss":global_avg_val_loss,
+                f"val_{mrr_text}":global_avg_val_mrr,
+                f"val_{ndcg_text}":global_avg_val_ndcg,
+                f"val_{recall_text}":global_avg_val_recall
             }
             
             if save_checkpoints:
@@ -543,7 +509,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                     validate_checkpoint_restores = False #only need to check it once
             
             if global_avg_val_ndcg > best_ndcg + 1e-6:
-                best_ndcg = global_avg_val_ndcg.item()
+                best_ndcg = global_avg_val_ndcg
                 epochs_without_improvement = 0
                 if rank == 0:
                     print(f"  New best val NDCG! ({global_avg_val_ndcg})")
@@ -579,7 +545,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 if trial is not None:
                     trial.add_measurement(
                         vz.Measurement(
-                            metrics={f'ndcg_{top_k}': float(global_avg_val_ndcg.item())},
+                            metrics={f'ndcg_{top_k}': global_avg_val_ndcg},
                             steps=epoch,
                             elapsed_secs=(time.perf_counter() - start_time)
                         ))
@@ -616,19 +582,43 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         movie_embeddings_uri=config['movie_embeddings_uri'],
         batch_size=1024)
     
-    model = GraphRanker(user_movie_embeds=embeddings,
-        num_candidates=config['num_candidates'],
-        hidden_features=config['hidden_dim'],
-        num_layers=config['num_layers'],
-        out_features=config['out_dim'],
-        heads=config['num_heads'],
-        edge_embed_dim=config['edge_embed_dim'],
-        dropout_rate=config['dropout_rate'], rngs=rngs)
-    
-    optimizer = nnx.Optimizer(model,
-        optax.adamw(config['learning_rate'],
-            weight_decay=config['weight_decay']), wrt=nnx.Param)
-    
+    nnx.use_eager_sharding(True)
+    model_mesh = get_model_mesh()
+    with jax.set_mesh(model_mesh):
+        model = GraphRanker(user_movie_embeds=embeddings,
+            num_candidates=config['num_candidates'],
+            hidden_features=config['hidden_dim'],
+            num_layers=config['num_layers'],
+            out_features=config['out_dim'],
+            heads=config['num_heads'],
+            edge_embed_dim=config['edge_embed_dim'],
+            dropout_rate=config['dropout_rate'], rngs=rngs)
+        
+        optimizer = nnx.Optimizer(model,
+            optax.adamw(config['learning_rate'],
+                weight_decay=config['weight_decay']), wrt=nnx.Param)
+        
+        def to_named_sharding(spec):
+            # If the layer had no sharding annotation, spec will be None.
+            # We replace it with P() to ensure it is fully replicated across the mesh.
+            if spec is None:
+                spec = P()
+            return jax.sharding.NamedSharding(model_mesh, spec)
+        
+        model_state = nnx.state(model)  # The model's state, a pure pytree.
+        pspecs = nnx.get_partition_spec(model_state)  # Strip out the annotations from state.
+        sharding_tree = jax.tree.map(to_named_sharding, pspecs)
+        sharded_model_state = jax.device_put(model_state, sharding_tree)
+        #sharded_model_state = jax.lax.with_sharding_constraint(model_state, pspecs)
+        nnx.update(model, sharded_model_state)  # The model is sharded now!
+        
+        opt_state = nnx.state(optimizer)
+        pspecs = nnx.get_partition_spec(opt_state)
+        sharding_tree = jax.tree.map(to_named_sharding, pspecs)
+        sharded_opt_state = jax.device_put(opt_state, sharding_tree)
+        #sharded_opt_state = jax.lax.with_sharding_constraint(opt_state, pspecs)
+        nnx.update(optimizer, sharded_opt_state)
+        
     return {"rngs": rngs, "model": model, "optimizer": optimizer,
         'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader}
 
@@ -814,23 +804,8 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     train_dataloader = _dict['train_dataloader']
     val_dataloader = _dict['val_dataloader']
     
-    # =========================================================================
-    # DRY-RUN TO FORCE LAZY PARAMETER INITIALIZATION
-    # Pull one batch and pass it through the model to realize all internal
-    # attention kernels, weights, and biases before constructing the Orbax target.
-    # =========================================================================
-    try:
-        # Get a sample batch from the validation dataloader iterator safely
-        sample_iterator = iter(val_dataloader)
-        dummy_batch = next(sample_iterator)
-        model.eval()
-        _ = model(dummy_batch)
-        print(f"worker_rank ={jax.process_index()}: ✅ Skeleton model dry-run successful. Lazy parameters initialized.")
-    except Exception as e:
-        print(f"worker_rank ={jax.process_index()}: ⚠️ Warning: Dry-run forward pass encountered an issue: {e}")
-        raise e
-    # =========================================================================
-    
+    #model_mesh = get_model_mesh()
+    #graphdef_model, model_state = nnx.get_abstract_model(lambda: model, model_mesh)
     
     #restore state to those objects:
     _, model_state = nnx.split(model)
@@ -877,6 +852,10 @@ def test_fn(config: dict):
     if "phase" not in config:
         raise ValueError("config requires a 'phase' parameter")
     
+    for key in ('seed', 'ratings_test_uri', 'train_negatives_uri'):
+        if key not in config:
+            raise ValueError(f"key {key} is missing from config")
+    
     # fixed top_k for consistent stats with retrieval and reranker
     config['top_k'] = 20
     
@@ -913,35 +892,42 @@ def test_fn(config: dict):
             )
             config['mlflow_run_id'] = mlflow_run.info.run_id
             mlflow.set_tag("phase", config["phase"])  # do not move this before start_run
-            
-            #these uris are all in config too, excepting test_ratings
-            test_dataloader = create_test_dataloader(
-                movies_uri = restore_dict['config']['movies_uri'],
-                recommendations_uri = restore_dict['config']['recommendations_uri'],
-                recommendations_ts_uri = restore_dict['config']['recommendations_ts_uri'],
-                ratings_uri = config['ratings_test_uri'],
-                negatives_uri = config['train_negatives_uri'],
-                max_history = restore_dict['config']['max_history'],
-                num_candidates = restore_dict['config']['num_candidates'],
-                batch_size = restore_dict['config']['batch_size'],
-                seed = config.get('seed', 0))
-            
-            if not isinstance(test_dataloader._sampler, BatchSampler):
-                raise ValueError(
-                    "test_dataloader sampler must be an instance of BatchSampler")
-                    
-            test_metrics, n_batches = _epoch_validation(model, iter(test_dataloader), config['top_k'])
-            
-            out_dict = {f"test_{key}_{config['top_k']}" : value for key, value in test_metrics.items()}
         
+        max_history = restore_dict['config']['max_history']
+        num_candidates = restore_dict['config']['num_candidates']
+        batch_size = restore_dict['config']['batch_size']
+        
+        #these uris are all in config too, excepting test_ratings
+        test_dataloader = create_test_dataloader(
+            movies_uri = restore_dict['config']['movies_uri'],
+            recommendations_uri = restore_dict['config']['recommendations_uri'],
+            recommendations_ts_uri = restore_dict['config']['recommendations_ts_uri'],
+            ratings_uri = config['ratings_test_uri'],
+            negatives_uri = config['train_negatives_uri'],
+            max_history = max_history,
+            num_candidates = num_candidates,
+            batch_size = batch_size,
+            seed = config.get('seed', 0))
+        
+        if not isinstance(test_dataloader._sampler, BatchSampler):
+            raise ValueError(
+                "test_dataloader sampler must be an instance of BatchSampler")
+        
+        jax_graph_comp_dict = calc_number_jax_graph_components(batch_size, max_history, num_candidates)
+        
+        global_test_metrics, n_val_samples = _epoch_validation(model, iter(test_dataloader), config['top_k'], jax_graph_comp_dict)
+    
+        out_dict = {f"test_{key}_{config['top_k']}" : value for key, value in global_test_metrics.items()}
+    
+        if worker_rank == 0:
             if mlflow_run is not None:
                 for key, value in out_dict.items():
                     mlflow.log_metric(key, float(value))
         
-            return out_dict
+        return out_dict
         
     finally:
-        if mlflow_run is not None:
+        if worker_rank == 0 and mlflow_run is not None:
             mlflow.end_run()
 
 def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=False):
@@ -1151,25 +1137,29 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
     print(f'worker_rank={jax.process_index()}: global_step={global_step}, restored global_step={restore_dict["global_step"]}', flush=True)
     restored_model = restore_dict['model']
     restored_model.eval()
-    
     model.eval()
+    
+    jax_graph_comp_dict = calc_number_jax_graph_components(
+        restore_dict['config']['batch_size'],
+        restore_dict['config']['max_history'],
+        restore_dict['config']['num_candidates'])
     
     import copy
     loader_current = copy.deepcopy(val_data_loader)
     loader_restored = copy.deepcopy(val_data_loader)
     
     # iter(x) makes a new iterator state
-    global_avg_val_metrics_current, n_batches_current = _epoch_validation(model, iter(loader_current), top_k)
+    global_avg_val_metrics_current, n_val_samples_current = _epoch_validation(model, iter(loader_current), top_k, jax_graph_comp_dict)
     
     jax.experimental.multihost_utils.sync_global_devices(
         "sync_barrier_for_model_validation")
     
-    global_avg_val_metrics_restored, n_batches_restored = _epoch_validation(restored_model, iter(loader_restored), top_k)
+    global_avg_val_metrics_restored, n_val_samples_restored = _epoch_validation(restored_model, iter(loader_restored), top_k, jax_graph_comp_dict)
     
     jax.experimental.multihost_utils.sync_global_devices(
         "sync_barrier_for_restored_model_validation")
     
-    print(f'n_batches_current={n_batches_current}, n_batches_restored = {n_batches_restored}')
+    print(f'n_val_samples_current={n_val_samples_current}, n_val_samples_restored = {n_val_samples_restored}')
     
     all_similar = True
     for key in ("loss", "mrr", "ndcg", "recall"):
@@ -1190,7 +1180,7 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
     check_model_state_equality(model, restore_dict['model'])
     
     assert(all_similar)
-    assert(n_batches_current == n_batches_restored)
+    assert(n_val_samples_current == n_val_samples_restored)
     
     print(f'worker_rank={jax.process_index()}:checkpoint validated for {checkpoint_uri}')
 

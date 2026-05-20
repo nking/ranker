@@ -1,13 +1,8 @@
-grain:
-    - sharding splits data across Processes (Pods/Nodes)
-    - a.k.a. coarse-grained sharding
-jax:
-    - via shmap, pmap
-    - sharding splits data within 1 process across its
-      devices (cores, TPUs, GPUs)
+google grain SPMD model shards the data across each jax process
+  - each jax process gets 1/(jax.process_count()) of all data.
+  - the data is further sharded among local_devices by
+    code in train.py
 
-e.g. a cluster of TPUs running 128 processes (shards)
-     and each shard having 8 TPU cores.
-    - grain distributes 1/128 of data files to each process
-    - jax distributes that 1/128 of data across the
-      8 local TPU cores.
+The model is not sharded.  Programmatically, the gradients and loss are synchronized
+across all devices, not just local devices, in order to update the
+model and optimizer.

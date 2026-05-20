@@ -1,0 +1,103 @@
+in jax distr:
+- a Host is a CPU (Node/Machine) that can manage
+  several local devices (accelerators such as TPU or GPU chips)
+- a Process is a jax program running on a host.
+  in the SPMD grain model, each process id gets 1/(num_processes)
+  of the data.
+  jax.devices = the total of each host's jax_processes.
+- Local Devices: These are the specific accelerators (e.g., GPU 0 and GPU 1) 
+  that a single JAX process can directly control without needing 
+  to communicate over the network.  
+- Global Devices: The collection of all devices available across the 
+  entire distributed cluster (all processes and all hosts).  
+
+in dev environment, to simulate SPMD with multiple accellerator
+chips per process:
+    setting number of process to 2 using:  JAX_NUM_PROCESSES
+       (which is 2 processes per host)
+    setting number of local devices per process to 3 using:  xla_force_host_platform_device_count
+
+results in train_fn seeing:
+ 1 [parameter_controller] [job_0_worker_1] 
+  2    jax_process_index=1; 
+  3    jax.local_devices=[CpuDevice(id=2048), CpuDevice(id=2049), CpuDevice(id=2050)]; 
+  4    jax.devices=[CpuDevice(id=0), CpuDevice(id=1), CpuDevice(id=2), CpuDevice(id=2048), CpuDevice(id=2049), CpuDevice(id=2050)]
+  5 
+  6 [parameter_controller] [job_0_worker_0] 
+  7    jax_process_index=0; 
+  8    jax.local_devices=[CpuDevice(id=0), CpuDevice(id=1), CpuDevice(id=2)]; 
+  9    jax.devices=[CpuDevice(id=0), CpuDevice(id=1), CpuDevice(id=2), CpuDevice(id=2048), CpuDevice(id=2049), CpuDevice(id=2050)]
+
+In addition, the xmanager launcher_pipeline.py simulates multi-host so that
+the multi-host, multi-process aspects of the code can be tested.
+
+-------------------------------------------------------------
+A look at distributed processing architectures
+    
+kaggle examples first:
+   - TPU v3-8 VM on Kaggle 
+     hosts all 8 cores locally on the same virtual machine
+     jax.device_count(): 
+        Returns the total number of hardware accelerator 
+        cores across your entire network. 
+        = 8
+     jax.local_device_count(): 
+        Returns the number of accelerator cores directly 
+        attached to the current host process. 
+        = 8
+     jax.process_count(): 
+        = 1
+     grain dataloader partitions the data across the 1 processs,
+     and then jax slices the data over the 8 global jax.devices()
+
+     for batch in grain_dataloader:
+         # push 1/8th of the data to each of the 8 TPU cores.
+         # where mesh = Mesh(devices=jax.devices(), axis_names=('data',)) ...
+         sharded_inputs = jax.device_put(batch, data_sharding)
+         state, loss = train_step(state, sharded_inputs)
+
+=============================
+
+
+# NOTE that the xla_force_host_platform_device_count
+        # sets the number of virtual/logical local devices for the CPU backend
+        # (which XLA internally refers to as the host platform).  this sets jax_local_device_count to that number.
+        # by default, jax.local_device_count() is 1.
+        # so it's a good idea to test the code for GPU ability by setting the xla host platform device flag.
+        # for example: with jax num processes = 2 we have:
+        #  worker process 0: creates 2 local virtual CPU devices.
+        #  worker process 1: creates 2 local virtual CPU devices.
+        # though producetion code in cloud is usally configured to 1 GPU per container so set the xla flag above to 1.
+
+                  [ Total Global Dataset (Batch Size: 64) ]
+                                   │
+                ┌──────────────────┴──────────────────┐
+        Host 0 (Grain slice 1/2)              Host 1 (Grain slice 1/2)
+         [ NumPy Array (32) ]                  [ NumPy Array (32) ]
+                 │                                     │
+         jax.device_put(..., P('data'))        jax.device_put(..., P('data'))
+         ┌───────┴───────┐                     ┌───────┴───────┐
+   Local Dev 0     Local Dev 1           Local Dev 0     Local Dev 1
+    Shard (16)      Shard (16)            Shard (16)      Shard (16)
+
+        `
+==========
+why multi-host sharding synchronization is needed:
+- a TPU Pod or a distributed GKE setup need multi-host sharding synchronization
+before oprations such as checkpoint saves or restores because each worker
+may have made different progress through their respective lazily instantiated
+model graphs, for example, hence have different structures that have been instantiated.  
+The process of saving a checkpoint needs all workers to agree on the same
+overall structure for what is being saved, so synchronization needs to occur
+before orbax can write.
+- to facilitate elastic training, where for example, a model is training on 
+a 16-node TPU cluster that becomes unavailable, and training is resumed on
+a 32-node TPU cluster.  the global_model_target and mesh implemented in train.py
+handles the rerouting of the 16 original shards into the 32 current shards.
+- note that orbax under the hood uses a coordinator-worker architecture.
+only host 0 writes the metadata and config files and workers write their
+specific byte-ranges of the sharded tensor arrays asynchronously.
+- note that the optimizer might be taking 2-3 times more space than the
+model weights and so the same synchronization is required for them.
+
+==========================================

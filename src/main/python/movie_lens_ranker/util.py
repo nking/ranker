@@ -80,6 +80,12 @@ def get_canonical_mlflow_run_name(config: Dict[str, Any]) -> str:
         raise ValueError(f"Invalid phase={config['phase']}")
     return run_name
     
+def get_model_mesh():
+    device_grid = jax._src.mesh_utils.create_device_mesh((jax.process_count(), jax.local_device_count()))
+    model_mesh = jax.sharding.Mesh(device_grid, axis_names=('processes', 'local_devices'))
+    #data_sharding = jax.sharding.NamedSharding(model_mesh, P('local_data'))
+    return model_mesh
+
 def get_env_resources():
     # 'cpu', 'gpu', or 'tpu'
     backend = jax.extend.backend.get_backend().platform
