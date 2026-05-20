@@ -1,4 +1,4 @@
-- consider using a CliffordNet layer (LION layer) instead of the GATv2.
+- consider using a CliffordNet layer instead of the GATv2.
   - requires a change in the bi-encoder to make embeddings
     that are multivectors and replaces the dot product
     with inner and external (a.k.a. wedge) product.
@@ -6,7 +6,7 @@
       then becomes 120 in length as a bi-vector (C(16,2))
       -> the addition of the wedge product makes the resulting
          bivector far more expressive, so it might be that the
-         geometric algebra bin-encoder should only use n=6 or 7
+         geometric algebra bi-encoder should only use n=6 or 7
          instead of 16 to avoid over-fitting.
          -> an n=6 representation bi-vector and a cross-encoder
             built with a geom product layer and a spin layer

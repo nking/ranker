@@ -33,10 +33,7 @@ to run the unit tests:
     in src/test/resources/README.txt
     TODO: reconsider committing them in this project
 (2) install the dependencies
-    the easiest way is to install this project:
-        pip install --editable .
-    else you can find the required libraries in pyproject.toml
-    or setup.py or requirements.txt
+    see scripts/init_ranker_venv.sh 
 (3) install docker or equivalent and start it
     see https://download.docker.com and instructions
 (4) prepare input data from step (1) for reading by local blob storage:
@@ -66,11 +63,14 @@ to run the unit tests:
        docker compose down
        docker compose up -d
 
--- currently just testing integration of all services
-- for xmanager,
-   will need to have docker-compose-data.yaml run before the
-   piepline, already existing,
-  and it won't include the train_fn app.
+- there is a unittest called test_Ranker.py which is an integration
+  test of app_rnner for a single process single host environment.
+- there is a mulit-host, multi-process test in
+  xmngr/launcher_pipeline.py
+  it requires a separate venv to install xmanager into.
+  see scripts/init_xmanager_venv.sh
+
+- there will be a kubeflow pipeline using Trainer API v2
 
 Local testing:
 
@@ -115,5 +115,12 @@ some details about the model
   TODO: finish details here...
 
   TODO: considering a CliffordNet version, but it needs
-        a bi-encoder that uses geometric algebra
-        and the retrieval needs adaptations.
+        upstream of it, a bi-encoder that uses geometric algebra
+        and it requires adaptations to the retrieval.
+        - this Geometric Algebra (GA) cross encoder would
+          have a geom product layer and a spin layer
+        - presumably can use a smaller number of axes in the
+          input bivector embeddings (n=6 bivector as comparable to the length=16 euclidean vector)
+          and get a more expressive result for similar final runtime complexity
+          and space complexity.
+
