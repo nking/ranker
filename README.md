@@ -65,10 +65,14 @@ to run the unit tests:
 
 - there is a unittest called test_Ranker.py which is an integration
   test of app_rnner for a single process single host environment.
-- there is a mulit-host, multi-process test in
+- there is a multi-host, multi-process test in
   xmngr/launcher_pipeline.py
   it requires a separate venv to install xmanager into.
   see scripts/init_xmanager_venv.sh
+  NOTE: on a single CPU, it is better to run using jax process count = 1
+  due to expenses of context switching for this app.  The script tests that the code
+  would still function correctly if 2 of the CPU's cores are used.
+  There are use cases when jax process count > 1 are a good idea.
 
 - there will be a kubeflow pipeline using Trainer API v2
 

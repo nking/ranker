@@ -123,3 +123,12 @@ orbax checkpoint has
 
 mflow and vizier need a multithread capable sql database
 orbax and the input data files need an object store
+
+-------------
+
+consider ways to reduce the runtime execution
+- if had enough RAM, could change the _epoch_validation back to a vectorized
+  operation instead of chunked.
+
+- different architectures:
+  - the re-ranker fine-tunes a LiT5 reranker

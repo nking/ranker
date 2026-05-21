@@ -495,7 +495,7 @@ def main(_):
     print(f'jax_process_index={jax.process_index()}; '
           f'jax.local_devices={jax.local_devices()}; '
           f'jax.devices={jax.devices()}', flush=True)
-    
+
     if config['phase'] == 'tune':
         tune_run(config)
     elif config['phase'].find('test') == 0:
