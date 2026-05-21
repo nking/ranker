@@ -1,0 +1,113 @@
+The graph data is enrichment of the train data for objective
+of contrastive learning.  The training dataset is
+a tuple of the user_id, movie_id, rating, timestamp.
+
+The steps to making the enriched graph:
+(1) extract a window of user's rating history:
+       :return: a dictionary containing numpy arrays
+             'user_id'.
+            'movie_id',
+            'rating',
+            'timestamp',
+            "history_movie_ids",
+            "history_ratings",
+            "history_length"
+(2) map a user's local history to the same local history enriched with negative sampling
+        :return: dictionary of np.ndarrays:
+            'user_id',
+            'movie_id',
+            'rating',
+            'timestamp',
+            "history_movie_ids",
+            "history_ratings",
+            "history_length",
+            "candidate_ids",
+            "labels"
+        Note that candidate_ids is guaranteed to not have padding values, they're all real movie_ids
+(3) create a local subgraph for the record in which all indexes are relative to just these local
+        variables, not the global embedding indices.
+       The returned Graph Topology:
+        Node 0: The User.
+        Nodes 1 to H: History Movies (H = max_history).
+        Nodes H+1 to H+C: Candidate Movies (C = num_candidates)
+        Edges are the user ratings for the movie.
+        # History -> User (Inward): Senders: [1, 2, ... H], Receiver: [0, 0, ... 0]
+        # User -> Candidates (Outward): Sender: [0, 0, ... 0], Receivers: [H+1, ... H+C]
+        list or results for each user:
+             jraph.GraphsTuple(
+                # nodes arrays are length 1 + n_real_history + self.num_candidates
+                nodes={
+                    "ids": node_ids,
+                    "label": node_labels,
+                    "type": np.array(
+                        [0] + [1] * n_real_history + [2] * n_candidates),
+                    "candidate_mask": node_is_candidate
+                },
+                # edges, senders, receivers are length  n_real_history + self.num_candidates
+                edges={"rating": edge_features},
+                senders=senders,
+                receivers=receivers,
+                n_node=np.array([total_nodes]),
+                n_edge=np.array([len(senders)]),
+                globals=None
+            ))
+(4) make a single super graph of the graph tuples in a batch
+    while padding all graph elements across the batches to the same length 
+    for efficient jax processing, e.g. all node arrays are same length
+    in padded graphs which are then combined into the padded super graph.
+.
+==========================================================================
+
+The GATv2 uses dynamic graph attention:
+- the GATv2 calculates for each query (target node),
+  an attention score for the keys (connected neighbors).
+
+  attention:
+    a_i_j = softmax_j( a^T * LeakyReLU(W * (h_i || h_j)) )
+       where 
+         W is the weight matrix.  dimensions are [d_out * 2*d_in]
+            where d_in is the length of h_i which is also len h_j
+         h_i is a user node feature, that is, the user embedding
+         h_j is a movie node feature, that is, the movie embedding
+         h_i || h_j is the concatentation of h_i with h_j
+         i, j is an edge in the graph
+     dimensions:
+         a_i_j = softmax_j( a^T * LeakyReLU(W * (h_i || h_j)) )
+                                            [d_out x 2*d_in] * [2*d_in x 1]
+                                            [d_out x 1]
+  then 
+     each node i updates its representation, that is, creates a
+     better h_i, by calculating a weighted sum across neighbor nodes
+     but doing so over several multi-head attention and concat the results.
+       for a single attention head:
+         h'_i = sigma( sum_{j in N(i)}( a_i_j * W * h_j) )
+             where 
+               sigma is the final activation function like an ELU or ReLU
+       each MHA has it's own unique W.
+       for K heads, the W's can be called W_k each... 
+
+     if the input embeddings, h_i, h_j are each length 16 and if K=4,
+     the output embedding length is 64.
+     this is the length of the hidden layers.
+
+     the final layer averages instead of concatenates inside the sigma acivation.
+     
+  when edge attributes are included, like the ratings, the attention is
+  expanded to include a weight matrix for the edge terms:
+    a_i_j = softmax_j( a^T * LeakyReLU(W * (h_i || h_j) + W_e * e_i_j) )
+       where
+          W_e is eight matrix for edges.  dimensions: [d_out x d_edge]
+          e_i_j is the edge attribute like ratings
+    though some implementations might do away with W_e and instead 
+    concatenate e_i_j right after h_j before mult by W.
+
+    the new representation becomes:
+         h'_i = sigma( sum_{j in N(i)}( a_i_j * W * h_j + W_e * e_i_j) )
+
+The GATv2 learning:
+   its inductive and is not memorizing the network layouts, but instead is learning:
+      W (and W_e):
+         how to extract meaningful signal from node (and edge) attributes
+      a
+         how to weight the similarity between 2 sets of features
+

@@ -20,7 +20,7 @@ class GraphRanker(nnx.Module):
         :param num_candidates: number per user of negatives + positive to use for their final graph
         :param hidden_features: size of hidden layers per head in the GATv2 layer
         :param num_layers: number of layers in the GATv2 layer
-        :param out_features: utput dimension of the score head dense layer
+        :param out_features: output dimension of the score head dense layer
         :param heads: number of attention heads in the GATv2 layer
         :param edge_embed_dim: typically a value in range 4 to 16. size of output of GATv2 layer
         :param dropout_rate: the dropout probability of a layer in the GATv2 layer
