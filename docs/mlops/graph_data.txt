@@ -111,3 +111,40 @@ The GATv2 learning:
       a
          how to weight the similarity between 2 sets of features
 
+   the output of the GATv2 in inference is:
+      z_i is an output embedding of length d_out
+
+   z_i can be used in different ways:
+      (1) node level predictions:
+        a classificaiton label, or a score or a probability distribution
+        - is z_i an outlier in context of financial contexts
+        - z_i can implied hobbies or interest in social network context
+      (2) edge-level predictions (link prediction):
+        predicts the likelihood or strength of pairs of embeddings z_i and z_j
+        as a probabiltiy score between 0 and 1.
+        - recommendation systems
+          query_i will 'like' candidate_j?
+        - knowledge graphs
+      (3) graph level predictions:
+        aggregates all z_i in a graph and uses a global pooling layer to 
+        take average or max to create a single vector representing the entire graph.
+        - chemistry and molecular design
+          will a molecule bind to a target receptor
+        - source code analysis
+          does the control flow graph of code contain a security 
+          vulnerability
+          protein_i will interact with drug_j to cure a disease?
+
+the GraphRanker model in this project start as a graph classification
+and trains for constrative Listwise learning using pairwise matching and scores.
+
+At inference time, GraphRanker returns for each input graph, K scores
+for K candidates.
+    each scalar gives the affinity between the user and candidate.
+      score(Q_i, C_i_j) = Linear(  z_q_i || z_c_i_j )
+    the scores are relative to the other candidates in the query graph.
+
+    relative probabilities could be made by using softmax over the graph's
+    candidate scores.
+
+

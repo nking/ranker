@@ -115,17 +115,44 @@ some details about the model
   - complexity is O(V*F + E*F) where
     V is number of nodes, E is number of edges and F is number of
     features.
-  - e(h_i, h_j) = a^T * leaky_relu(W * (h_i concat h_j))
-    where a is the attention vector.
-  TODO: finish details here...
+  - The model takes in a user's query graph which is the user query
+    enriched by the user's watch history and candidate movies.
+    During training, the candidate movies are negatives for the
+    constrastive listwise learning.
+    During inference, the candidate movies are from the retrieval
+    stage of the recommendation system.
+
+    The GATV2 takes the embeddings created by the bi-encoder and
+    takes the ratings as edge attributes, and learns a weight matrix
+    over a specified number of hops in the query graph network
+    nodes, and learns an edge weight matrix, and learns the attention
+    that node_i pays to node_j.
+    The learning is about interactions between elements in the embeddings
+    rather than interactions between ids, and so the results are inductive
+    and can be applied to inputs that have not been seen before.
+
+    The GATv2 is followed by a linear layer with output dimension 1 in order
+    to produce scores for each candidate.
+
+    The results are useful relative to the input graph, that is, for ranking
+    the candidates of the user query.
 
   TODO: considering a CliffordNet version, but it needs
         upstream of it, a bi-encoder that uses geometric algebra
         and it requires adaptations to the retrieval.
-        - this Geometric Algebra (GA) cross encoder would
-          have a geom product layer and a spin layer
-        - presumably can use a smaller number of axes in the
-          input bivector embeddings (n=6 bivector as comparable to the length=16 euclidean vector)
+        - this Geometric Algebra (GA) cross encoder would have layers:
+          (1) a geometric product layer to characterize the interaction
+             where the GP is dot product + wedge product between a
+             query and candidate bi-vectors
+          (2) a linear layer to characterize scaling and shear and also
+              an adapter between the output of layer 1 and input of layer 3
+          (3) a rotor layer to characterize rotation of embedding axes
+              and replace the GATv2 attention.
+        presumably I can use a smaller number of axes in the
+          input bivector embeddings (n=6 bivector as comparable to the 
+          length=16 euclidean vector, considering the combinatorial C(n, 2))
           and get a more expressive result for similar final runtime complexity
           and space complexity.
-
+          ==> that the runtime and space complexities are of same order as
+              the prototype GraphRanker means that the model would need to
+              train in a cluster, preferably with accelerators.
