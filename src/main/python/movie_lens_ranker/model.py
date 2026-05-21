@@ -50,12 +50,11 @@ class GraphRanker(nnx.Module):
             jk="max",  # JumpingKnowledge aggregation
             rngs=rngs
         )
-        # pure data parralellism, no sharding of the model:
+        # pure data paralellism, no sharding of the model:
         self.score_head = nnx.Linear(out_features * 2, 1, rngs=rngs,
             kernel_init=nnx.initializers.lecun_normal(),
             bias_init=nnx.initializers.zeros_init(),
         )
-        #self.score_head.kernel.sharding = nnx.MeshRules(data='data')
     
     def __call__(self, graph: jraph.GraphsTuple) -> jnp.ndarray:
         """
