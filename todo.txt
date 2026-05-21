@@ -9,12 +9,15 @@
          geometric algebra bi-encoder should only use n=6 or 7
          instead of 16 to avoid over-fitting.
          -> an n=6 representation bi-vector and a cross-encoder
-            built with a geom product layer and a spin layer
+            built with a geom product layer, lnear layer, and a rotor layer
             would have comparable runtime and space compexity
             as the euclidean gatv2 cross-encoder with d=16 vectors.
             one would expect the GA cross-encoder to be more
             expressive
          -> jax + jaxga or numga would allow efficient use of accelerators.
+
+- add ability to introduce a delay to some of the gradient computations on one worker
+  to test that synchronization occurs even when one Pod might be busier than others.
 
 - replace use of passwords in the .env and uris with
   a mock service for GCP Secret Manager.
