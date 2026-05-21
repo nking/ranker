@@ -70,7 +70,8 @@ to run the unit tests:
   it requires a separate venv to install xmanager into.
   see scripts/init_xmanager_venv.sh
   NOTE: on a single CPU, it is better to run using jax process count = 1
-  due to expenses of context switching for this app.  The script tests that the code
+  due to expenses of context switching and communication overhead for this app.  
+  The script tests that the code
   would still function correctly if 2 of the CPU's cores are used.
   There are use cases when jax process count > 1 are a good idea.
 
