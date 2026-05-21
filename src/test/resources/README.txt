@@ -3,8 +3,7 @@ msgpack serialized rows containing
 [int, list[int]] of user_id, recommended_movie_ids.
 The files were written in repository
 github.com/nking/retrieval.git
-in file src/test/python/movie_lens_retrieval/test_Retriever.py
-in method test_eval_all 
+in file src/test/python/movie_lens_retrieval/write_user_recommendations_and_negatives.py
 
 ratings_<*>.array_record are a list of
 msgpack serialized rows containing
