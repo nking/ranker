@@ -12,12 +12,21 @@
     - movies catalog
       - created rec sys/tfx pipelines project
         - formats are array_record
+    - in production:
+       perform the ETL above using ApacheBeam/Spark (possibly via Dataflow)
+       with BigQuery and Google Cloud Storage as target destinations.
+       - track data lineage with Knowledge Catalog (formerly Dataplex Universal
+         and Data Catalog)
 - ingestion
     - input array records
       - grain dataloaders (backend fake gcs server, hosted by a container)
         - train dataloaders are configured to use SPMD across all jax
           processes.  the same model and hyperparameters (HP) are trained
           on data partitioned to the shard.
+      - array record files that are not the training, validation, or test
+        datasets are also defined by uris and read by 
+        array_record_module.ArrayRecordReader
+    - in production, these could be read from GCS or BigQuery
 - tracking:
   - HPO (tune) 
     - metrics per trial and per epoch:
@@ -30,19 +39,23 @@
       - Orbax (backend fake gcs server, hosted by a container)
     - best checkpoint
       - Orbax (backend fake gcs server, hosted by a container)
+  - in production, can use cloud services for the above
 
 ======================
-MLFlow:
+MLFlow runs are organized this way:
   - experiment:
      - experiment_name: study_name
      - parent run: 
          - run_name: "tune"
-         - each trial run: 
-            - run_name: "trial_{trial_id}"
-         - train run: 
-            - run_name: "train_{train_id}"
-         - test run: 
-            - run_name: "test_{test_id}"
+         - if phase="tune"
+           - each trial run: 
+              - run_name: "trial_{trial_id}"
+         - if phase="train_best" or "train_given"
+           - train run: 
+              - run_name: "train_{train_id}"
+         - if phase="test_best" or "test_given"
+           - test run: 
+              - run_name: "test_{test_id}"
 OR 
    if no tune phase preceeded a trial run
   - experiment:
@@ -63,8 +76,12 @@ OR
 ========================================
 
 using SPMD paradigm for model training with grain dataloading
+    in grain:
+       shard_opts = grain.sharding.ShardByJaxProcess()
 
-    shard_opts = grain.sharding.ShardByJaxProcess()
+    but also, in the train loop, one must synchronize between
+    local devices using jax.device_put else, will be doing 
+    redundant work on the devices for that process.
 
 xax.local_device_count():
     The number of accelerators attached to this specific 
@@ -80,7 +97,8 @@ jax.process_count():
       if the device count is same across all nodes
 
 =========================================
-in general, see test_Ranker.py for details
+in general can see how to dig out results from mlflow,
+google-vizier trials, and optuna checkpoints in test_Ranker.py
 
 To find the best results for a trial:
    - vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
@@ -135,7 +153,7 @@ software to consider:
     - batch and streaming parallel data processing across
       distributed clusters.
     - massive scalability
-    - cavears scheduling overhead makes it unsuitable for
+    - caveats scheduling overhead makes it unsuitable for
       production environment.
     => good for training, but bad for production.
        great tool to use on data before grain DataLoader ingestion
@@ -150,7 +168,7 @@ software to consider:
     - high scalability
     => not good for training nor production for this project
   - pure NumPy/C++
-    - custom made for the production inputs to replace
+    - custom made code for the production inputs to replace
       what the custom grain DataLoader does.
     => needed for production
   - a graph database
