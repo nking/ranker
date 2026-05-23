@@ -19,19 +19,12 @@ kind: ConfigMap
 metadata:
   name: app-runner-env
 data:
-  # Static values from your docker-compose environment block
-  TENSORSTORE_GCS_NO_AUTH: "true"
-  NO_GCE_CHECK: "true"
-  GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS: "true"
-  GOOGLE_AUTH_EXTERNAL_ACCOUNT_TOKEN_PROHIBIT: "true"
-  
   # Placeholders for the variables .env file
   POSTGRES_USER: "your-db-user"
   POSTGRES_PASSWORD: "your-db-password"
   UID: "1000"
   GID: "1000"
   GOOGLE_CLOUD_PROJECT: "local-kfp-dev"
-  GCSFS_ENDPOINT_URL: "http://gcs:4443"
   GCSFS_ENDPOINT_URL: "http://gcs:4443"
   TENSORSTORE_GCS_HTTP_URL: "http://gcs:4443"
   STORAGE_EMULATOR_HOST: "http://gcs:4443"
@@ -45,7 +38,7 @@ data:
   GOOGLE_AUTH_EXTERNAL_ACCOUNT_TOKEN_PROHIBIT: "true"
   GOOGLE_APPLICATION_CREDENTIALS: ""
   TENSORSTORE_GCS_REQUEST_CONCURRENCY: "32"
-
+---
 # ==========================================
 # 1. GCS EMULATOR
 # ==========================================
