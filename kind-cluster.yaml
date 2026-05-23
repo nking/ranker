@@ -1,0 +1,38 @@
+# USAGE:
+#    export PROJECT_ROOT=$(pwd); envsubst '$PROJECT_ROOT' < kind-cluster.yaml | kind create cluster --config -
+
+# definiation: https://pkg.go.dev/sigs.k8s.io/kind/pkg/apis/config/v1alpha4#Cluster
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: GraphRanker_tune_train_test_cluster
+nodes:
+- role: control-plane
+  extraPortMappings:
+  # 1. Map the PostgreSQL Database
+  - containerPort: 30432  # The NodePort we will set in the K8s service
+    hostPort: 5432       # The port on your Ubuntu host
+    listenAddress: "172.17.0.1" # Binds explicitly to the docker0 interface IP
+    protocol: TCP
+  # 2. Map the GCS Emulator (if you need outside access for tools/Xmanager)
+  - containerPort: 30443
+    hostPort: 4443
+    listenAddress: "172.17.0.1"
+    protocol: TCP
+  # 3. Map the OSS Vizier Server (if you need outside access for tools/Xmanager)
+  - containerPort: 30444
+    hostPort: 8000
+    listenAddress: "172.17.0.1"
+    protocol: TCP
+  extraMounts:
+  - hostPath: ${PROJECT_ROOT}/src
+    containerPath: /app/src
+    readOnly: true
+- role: worker
+- role: worker
+networking:
+  apiServerAddress: "127.0.0.1"
+  apiServerPort: 6443
+#featureGates:
+#see https://kubernetes.io/docs/reference/command-line-tools-reference/feature-gates/
+#runtimeConfig:
+#https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/

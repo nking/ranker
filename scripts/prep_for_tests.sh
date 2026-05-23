@@ -8,7 +8,7 @@ chmod -R 775 ../fake_gcs_server_buckets
 
 #make sure docker is running
 systemctl status docker.service
-#sudo systemctl start docker.service
+#systemctl start docker.service
 
 #this is now handled in docker-compose.yaml:
 # start the fake_gcs_server with paths relative to this directory

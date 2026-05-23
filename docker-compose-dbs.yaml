@@ -89,6 +89,7 @@ services:
       - VIZIER_DATABASE_URL=sqlite:////app/data/vizier.db
     user: "${UID}:${GID}"
     ports:
+      #HOST:CONTAINER
       - "172.17.0.1:8000:8080"
     restart: unless-stopped
     volumes:

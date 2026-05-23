@@ -1,0 +1,286 @@
+# USAGE:
+#   export PROJECT_ROOT=$(pwd) && envsubst '$PROJECT_ROOT' < k8s-manifests.yaml | kubectl apply -f -
+# Sets the variable, pipes the YAML through envsubst, and passes it to kubectl via stdin (-)
+# to add another env var, separate the exports by semi-colons
+#
+# ALSO:
+#  need to give kind the app image:
+#     docker build -t ranker-app:local -f Dockerfile_cpu .
+#     kind load docker-image ranker-app:local
+#
+# To access gcs-service:4443 or db-service:5432 from the host machine 
+# (outside the cluster) during development, map these specific ports 
+# in the kind cluster-config.yaml using the extraPortMappings directive 
+# booting the cluster.
+#
+# 1. CONFIGMAP (Replaces your .env file and static environment variables)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-runner-env
+data:
+  # Static values from your docker-compose environment block
+  TENSORSTORE_GCS_NO_AUTH: "true"
+  NO_GCE_CHECK: "true"
+  GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS: "true"
+  GOOGLE_AUTH_EXTERNAL_ACCOUNT_TOKEN_PROHIBIT: "true"
+  
+  # Placeholders for the variables .env file
+  POSTGRES_USER: "your-db-user"
+  POSTGRES_PASSWORD: "your-db-password"
+  UID: "1000"
+  GID: "1000"
+  GOOGLE_CLOUD_PROJECT: "local-kfp-dev"
+  GCSFS_ENDPOINT_URL: "http://gcs:4443"
+  GCSFS_ENDPOINT_URL: "http://gcs:4443"
+  TENSORSTORE_GCS_HTTP_URL: "http://gcs:4443"
+  STORAGE_EMULATOR_HOST: "http://gcs:4443"
+  CLOUD_STORAGE_EMULATOR_HOST: "http://gcs:4443"
+  CLOUD_STORAGE_EMULATOR_ENDPOINT: "http://gcs:4443"
+  TENSORSTORE_GCS_NO_AUTH: "1"
+  NO_GCE_CHECK: "true"
+  GCS_LAMBDA_TOKEN: ""
+  GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS: "true"
+  STORAGE_EMULATOR_HOST_HTTP: "true"
+  GOOGLE_AUTH_EXTERNAL_ACCOUNT_TOKEN_PROHIBIT: "true"
+  GOOGLE_APPLICATION_CREDENTIALS: ""
+  TENSORSTORE_GCS_REQUEST_CONCURRENCY: "32"
+
+# ==========================================
+# 1. GCS EMULATOR
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gcs-emulator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gcs-emulator
+  template:
+    metadata:
+      labels:
+        app: gcs-emulator
+    spec:
+      containers:
+      - name: gcs-emulator
+        image: fsouza/fake-gcs-server:1.54.0
+        env:
+        - name: CLOUD_STORAGE_EMULATOR_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-runner-env
+              key: CLOUD_STORAGE_EMULATOR_HOST
+        command: ["sh", "-c"]
+        args: 
+        - |
+          echo 'Cleaning old checkpoints...';
+          rm -rf /storage/fake_gcs_server_buckets/checkpoint_bucket/*;
+          exec ${PROJECT_ROOT}/fake-gcs-server -scheme http -backend filesystem -data /storage -public-host gcs:4443 -external-url http://gcs:4443
+        ports:
+        - containerPort: 4443
+        volumeMounts:
+        - name: gcs-storage
+          mountPath: /storage
+        readinessProbe: # Replaces the Docker healthcheck
+          httpGet:
+            path: /storage/v1/b
+            port: 4443
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: gcs-storage
+        hostPath:
+          #if doesn't exist, use scripts/prep_for_tests.sh
+          path: ${PROJECT_ROOT}/fake-gcs-server
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gcs-service
+spec:
+  selector:
+    app: gcs-emulator
+  ports:
+    - protocol: TCP
+      port: 4443  # internal cluster port used by other pods
+      targetPort: 4443 # postgres container listnes on this port
+      nodePort: 30433  # MUST match the containerPort in kind-cluster.yaml
+---
+# ==========================================
+# 2. POSTGRES DATABASE
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-db-store
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: local-db-store
+  template:
+    metadata:
+      labels:
+        app: local-db-store
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:12-alpine
+        command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=20", "-c", "work_mem=4MB"]
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: Graph-Ranker-db-credentials
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: Graph-Ranker-db-credentials
+              key: password
+        - name: POSTGRES_DB
+          value: "postgres"
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: pg-data
+          mountPath: /var/lib/postgresql/data
+        - name: pg-init
+          mountPath: /docker-entrypoint-initdb.d/init-databases.sh
+          readOnly: true
+      volumes:
+      - name: pg-data
+        hostPath:
+          path: ${PROJECT_ROOT}/bin/postgres_data
+          type: DirectoryOrCreate
+      - name: pg-init
+        hostPath:
+          path: ${PROJECT_ROOT}/init-databases.sh
+          type: File
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-service
+spec:
+  type: NodePort # opens a static port on the node
+  selector:
+    app: local-db-store
+  ports:
+    - protocol: TCP
+      port: 5432  # internal cluster port used by other pods
+      targetPort: 5432 # postgres container listnes on this port
+      nodePort: 30432  # MUST match the containerPort in kind-cluster.yaml
+---
+# ==========================================
+# 3. VIZIER SERVER
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vizier-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vizier-server
+  template:
+    metadata:
+      labels:
+        app: vizier-server
+    spec:
+      containers:
+      - name: vizier-server
+        image: vizier-server:local # Must be built and loaded into kind first
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: VIZIER_DATABASE_URL
+          value: "sqlite:////app/data/vizier.db"
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: vizier-data
+          mountPath: /app/data
+      volumes:
+      - name: vizier-data
+        hostPath:
+          path: ${PROJECT_ROOT}/sqlite_data
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vizier-service
+spec:
+  selector:
+    app: vizier-server
+  ports:
+    - protocol: TCP
+      port: 8000  # internal cluster port used by other pods
+      targetPort: 8080 # postgres container listens on this port
+      nodePort: 30434  # MUST match the containerPort in kind-cluster.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-runner
+  template:
+    metadata:
+      labels:
+        app: app-runner
+    spec:
+      # Replaces user: "${UID}:${GID}"
+      # Uncomment and replace with your actual Linux UID/GID (e.g., 1000)
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      # InitContainer to replicate 'depends_on: condition: service_healthy'
+      # This waits for the database service to be reachable on port 5432
+      initContainers:
+      - name: wait-for-dependencies
+        image: busybox:1.36
+        command: ['sh', '-c', 'until nc -z db-service 5432 && nc -z vizier-service 8080 && nc -z gcs-service 8080; do echo waiting for services; sleep 2; done;']
+
+      containers:
+      - name: app-runner
+        image: app-runner:local # use a distinct tag other than latest
+        imagePullPolicy: Never #will never look outside of local
+        #if image is missing, see instructions at top of this file
+        
+        # Pull in all variables from the ConfigMap
+        envFrom:
+        - configMapRef:
+            name: app-runner-env
+            
+        # Replaces volumes: - ./src:/app/src
+        volumeMounts:
+        - name: source-code
+          mountPath: /app/src
+          
+      volumes:
+      - name: source-code
+        hostPath:
+          path: ${PROJECT_ROOT}/src # MUST be an absolute path
+          type: Directory
+
+---
+# 4. SERVICE (Optional: To expose your app internally to the cluster)
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-runner-service
+spec:
+  selector:
+    app: app-runner
+  ports:
+    - protocol: TCP
+      port: 8080 # The port other pods will use to talk to this app
+      targetPort: 8080 # The actual port your Python app listens on inside the container
