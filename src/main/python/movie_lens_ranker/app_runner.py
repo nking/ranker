@@ -13,26 +13,13 @@ def safe_jax_init():
     
     try:
         is_local_simulation = os.environ.get("LOCAL_KIND_SIMULATION") == "true"
-        is_orchestrator_managed = "JAX_COORDINATOR_ADDRESS" in os.environ
         
-        if is_local_simulation and not is_orchestrator_managed:
-            print("🛠️ Detected local StatefulSet simulation. Applying manual routing...", flush=True)
-            # Safely parse process_id from StatefulSet pod name (e.g., app-runner-0)
-            pod_name = os.environ.get("POD_NAME", "app-runner-0")
-            process_id = int(pod_name.split("-")[-1])
-            # Symmetrical routing fix
-            #if process_id == 0:
-            #    coord_addr = "0.0.0.0:8888"
-            #else:
-            #    coord_addr = "app-runner-0.jax-coordinator-service:8888"
-            coord_addr = "app-runner-0.jax-coordinator-service:8888"
-            num_processes = int(os.environ.get("JAX_NUM_PROCESSES", 1))
-            
-            print(f"Initializing JAX manually: coord={coord_addr}, rank={process_id}/{num_processes}")
+        if is_local_simulation:
+            print("🛠️ Detected local StatefulSet simulation. Applying manual jax initialization...", flush=True)
             jax.distributed.initialize(
-                coordinator_address=coord_addr,
-                num_processes=num_processes,
-                process_id=process_id
+                coordinator_address=os.environ.get("JAX_COORDINATOR_ADDRESS"),
+                num_processes=int(os.environ.get("JAX_NUM_PROCESSES", 1)),
+                process_id=int(os.environ.get("POD_ID"))
             )
         else:
             if 'JAX_COORDINATOR_ADDRESS' in os.environ:

@@ -119,6 +119,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        - name: POD_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
         - name: XLA_FLAGS
           value: "--xla_force_host_platform_device_count=2"
         # JAX multi-process requires a coordinator address and that is handled in the app's safe_jax_init which is acting as the missing k8s operator in that sense.
@@ -133,6 +137,8 @@ spec:
           value: "eth0"
         - name: GLOO_ADDRESS_FAMILY
           value: "2" #IPV4
+        - name: JAX_COORDINATOR_ADDRESS
+          value: "app-runner-0.jax-coordinator-service:8888"
         #for debugging:
         - name: ABSL_MIN_LOG_LEVEL
           value: "0"  # 0 is INFO, 1 is WARNING, 2 is ERROR, 3 is FATAL
