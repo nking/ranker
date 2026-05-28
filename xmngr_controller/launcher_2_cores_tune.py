@@ -51,6 +51,7 @@ def main(_):
                 'PYTHONIOENCODING': 'UTF-8',
                 'TF_CPP_MIN_LOG_LEVEL': '0',
                 'JAX_LOG_LEVEL': 'debug',
+                "LOCAL_SIMULATION": "True"
             }
     
             # Add the explicit environment overrides from your yaml

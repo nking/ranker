@@ -119,15 +119,15 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        - name: POD_ID
+        - name: JAX_PROCESS_ID
           valueFrom:
             fieldRef:
               fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
         - name: XLA_FLAGS
           value: "--xla_force_host_platform_device_count=2"
         # JAX multi-process requires a coordinator address and that is handled in the app's safe_jax_init which is acting as the missing k8s operator in that sense.
-        - name: LOCAL_KIND_SIMULATION
-          value: "true"
+        - name: LOCAL_SIMULATION
+          value: "True"
         # In K8s, we set up a headless service pointing to Pod 0,
         # or pass the Service name here.
         # Point to Pod 0 using the predictable StatefulSet DNS network

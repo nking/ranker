@@ -154,7 +154,8 @@ def main(_):
             # 'XLA_FLAGS': '--xla_force_host_platform_device_count=2 --xla_cpu_enable_fast_math=true',
             'PYTHONIOENCODING': 'UTF-8',
             'JAX_LOG_LEVEL': 'debug',
-            'jax_distributed_debug':"True"
+            'jax_distributed_debug':"True",
+            "LOCAL_SIMULATION" : "True"
         }
         run_config = {
             'LOGNAME': env_config.get('POSTGRES_USER'),

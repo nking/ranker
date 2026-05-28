@@ -12,43 +12,23 @@ import jax
 def safe_jax_init():
     
     try:
-        is_local_simulation = os.environ.get("LOCAL_KIND_SIMULATION") == "true"
-        
-        if is_local_simulation:
-            print("🛠️ Detected local StatefulSet simulation. Applying manual jax initialization...", flush=True)
+        if "LOCAL_SIMULATION" in os.environ and os.environ.get("LOCAL_SIMULATION") == "True":
+            print("🛠️ Detected local simulation. Applying manual jax initialization...", flush=True)
             jax.distributed.initialize(
                 coordinator_address=os.environ.get("JAX_COORDINATOR_ADDRESS"),
                 num_processes=int(os.environ.get("JAX_NUM_PROCESSES", 1)),
-                process_id=int(os.environ.get("POD_ID"))
+                process_id=int(os.environ.get("JAX_PROCESS_ID"))
             )
-        else:
-            if 'JAX_COORDINATOR_ADDRESS' in os.environ:
-                #xmanager launched:
-                num_processes = int(os.environ.get('JAX_NUM_PROCESSES', 1))
-                process_id = int(os.environ.get('JAX_PROCESS_ID', 0))
-                
-                # Catch the missing environment variable trap
-                if num_processes == 1 and 'POD_NAME' in os.environ:
-                    print("WARNING: Running in K8s but JAX_NUM_PROCESSES is 1. Ensure this is set in your ConfigMap for multi-pod training!")
-                
-                print(f"Initializing JAX explicitly: "
-                      f"coordinator={os.environ['JAX_COORDINATOR_ADDRESS']}, "
-                      f"total_processes={num_processes}, process_id={process_id}")
-                jax.distributed.initialize(
-                    coordinator_address=os.environ.get('JAX_COORDINATOR_ADDRESS'),
-                    num_processes=num_processes,
-                    process_id=process_id
-                )
-            
-            # Try jax[k8s] auto-discovery if no coordinator is provided
-            elif 'KUBERNETES_SERVICE_HOST' in os.environ:
-                print("Initializing JAX via jax[k8s] auto-discovery...")
-                jax.distributed.initialize()
-            
-            # Standard local run (e.g., unit tests on your laptop)
-            else:
-                print("No distributed environment detected. Running locally.")
+    
+        # Try jax[k8s] auto-discovery if no coordinator is provided
+        elif 'KUBERNETES_SERVICE_HOST' in os.environ:
+            print("Initializing JAX via jax[k8s] auto-discovery...")
+            jax.distributed.initialize()
         
+        # Standard local run (e.g., unit tests on your laptop)
+        else:
+            print("No distributed environment detected. Running locally.")
+    
     except RuntimeError as e:
         #absorb the error to avoid failure from more than one init attempt
         print(f'WARNING while trying to initialize JAX distributed: {e}')
