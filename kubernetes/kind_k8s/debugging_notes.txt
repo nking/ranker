@@ -1,0 +1,86 @@
+pod deployment timed out before finishing:
+
+list pods to get names:
+
+kubectl get pods -n ranker-ns
+NAME                              READY   STATUS              RESTARTS   AGE
+gcs-emulator-86dc958869-znrjm     0/1     ContainerCreating   0          76s
+local-db-store-544bc7f67f-rb6mk   0/1     ContainerCreating   0          76s
+vizier-server-548fd878c6-c24c4    0/1     ImagePullBackOff    0          76s
+
+
+describe the pod which just failed (local-db-store pod):
+
+kind_k8s$ kubectl describe pod local-db-store-544bc7f67f-rb6mk -n ranker-ns
+Name:             local-db-store-544bc7f67f-rb6mk
+Namespace:        ranker-ns
+Priority:         0
+Service Account:  default
+Node:             graphranker-tune-train-test-cluster-worker/172.20.0.4
+Start Time:       Tue, 26 May 2026 11:40:05 -0700
+Labels:           app=local-db-store
+                  pod-template-hash=544bc7f67f
+Annotations:      <none>
+Status:           Pending
+IP:               
+IPs:              <none>
+Controlled By:    ReplicaSet/local-db-store-544bc7f67f
+Containers:
+  postgres:
+    Container ID:  
+    Image:         postgres:12-alpine
+    Image ID:      
+    Port:          5432/TCP
+    Host Port:     0/TCP
+    Command:
+      postgres
+      -c
+      shared_buffers=128MB
+      -c
+      max_connections=20
+      -c
+      work_mem=4MB
+    State:          Waiting
+      Reason:       ContainerCreating
+    Ready:          False
+    Restart Count:  0
+    Environment:
+      POSTGRES_USER:      <set to the key 'username' in secret 'graphranker-db-credentials'>  Optional: false
+      POSTGRES_PASSWORD:  <set to the key 'password' in secret 'fraphranker-db-credentials'>  Optional: false
+      POSTGRES_DB:        postgres
+    Mounts:
+      /docker-entrypoint-initdb.d/init-databases.sh from pg-init (ro)
+      /var/lib/postgresql/data from pg-data (rw)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-cvfhm (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   False 
+  Initialized                 True 
+  Ready                       False 
+  ContainersReady             False 
+  PodScheduled                True 
+Volumes:
+  pg-data:
+    Type:          HostPath (bare host directory volume)
+    Path:          /home/nichole/projects/github/ranker/bin/postgres_data
+    HostPathType:  DirectoryOrCreate
+  pg-init:
+    Type:          HostPath (bare host directory volume)
+    Path:          /home/nichole/projects/github/ranker/init-databases.sh
+    HostPathType:  File
+  kube-api-access-cvfhm:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   BestEffort
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type     Reason       Age                 From               Message
+  ----     ------       ----                ----               -------
+  Normal   Scheduled    2m4s                default-scheduler  Successfully assigned ranker-ns/local-db-store-544bc7f67f-rb6mk to graphranker-tune-train-test-cluster-worker
+  Warning  FailedMount  60s (x8 over 2m4s)  kubelet            MountVolume.SetUp failed for volume "pg-init" : hostPath type check failed: /home/nichole/projects/github/ranker/init-databases.sh is not a file
+

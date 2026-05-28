@@ -17,22 +17,22 @@ docker run -d --name fake-gcs-server -p 127.0.0.1:4443:4443 fsouza/fake-gcs-serv
 
 #to preload data: (downloads image fsouza/fake-gcs-server if needed):
 # cd to base of project and:
-mkdir -p fake_gcs_server_buckets/data
-cp -rf src/test/resources/data/* fake_gcs_server_buckets/data/
+mkdir -p fake-gcs-server/data
+cp -rf src/test/resources/data/* fake-gcs-server/data/
 docker run -d --name fake-gcs-server \
   -u $(id -u):$(id -g) \
   -p 127.0.0.1:4443:4443 \
-  -v ${PWD}/fake_gcs_server_buckets:/storage \
+  -v ${PWD}/fake-gcs-server:/storage \
   fsouza/fake-gcs-server \
   -scheme http \
   -backend filesystem \
   -data /storage \
   -public-host 127.0.0.1:4443
-#Note, wasn't successful making readable softlinks to fake_gcs_server_buckets
+#Note, wasn't successful making readable softlinks to fake-gcs-server
 
 # if see error about permissions, make sure you are part of the
 # docker group and that the group associated with
-# fake_gcs_server_buckets and its contents is docker
+# fake-gcs-server and its contents is docker
 # and that the permissions are 775 (might be possible to use 770)
 
 # to check fake-gcs-server:

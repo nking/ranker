@@ -10,27 +10,62 @@ from typing import Dict, Union, Any
 import jax
 
 def safe_jax_init():
-    # Check if we are in a distributed environment (e.g., K8s, Vertex, Slurm)
-    # Different orchestrators use different keys, but these are common:
-    is_distributed = any(k in os.environ for k in [
-        'KUBERNETES_SERVICE_HOST',
-        'SLURM_JOB_ID', 'PADDLE_TRAINER_ENDPOINTS'
-    ])
-   
+    
     try:
-        if is_distributed:
-            # Let JAX auto-detect cluster settings
-            jax.distributed.initialize()
-        else:
-            # Force local-only initialization for unit tests
+        is_local_simulation = os.environ.get("LOCAL_KIND_SIMULATION") == "true"
+        is_orchestrator_managed = "JAX_COORDINATOR_ADDRESS" in os.environ
+        
+        if is_local_simulation and not is_orchestrator_managed:
+            print("🛠️ Detected local StatefulSet simulation. Applying manual routing...", flush=True)
+            # Safely parse process_id from StatefulSet pod name (e.g., app-runner-0)
+            pod_name = os.environ.get("POD_NAME", "app-runner-0")
+            process_id = int(pod_name.split("-")[-1])
+            # Symmetrical routing fix
+            #if process_id == 0:
+            #    coord_addr = "0.0.0.0:8888"
+            #else:
+            #    coord_addr = "app-runner-0.jax-coordinator-service:8888"
+            coord_addr = "app-runner-0.jax-coordinator-service:8888"
+            num_processes = int(os.environ.get("JAX_NUM_PROCESSES", 1))
+            
+            print(f"Initializing JAX manually: coord={coord_addr}, rank={process_id}/{num_processes}")
             jax.distributed.initialize(
-                coordinator_address=os.environ.get('JAX_COORDINATOR_ADDRESS', 'localhost:8888'),
-                num_processes=int(os.environ.get('JAX_NUM_PROCESSES', 1)),
-                process_id=int(os.environ.get('JAX_PROCESS_ID', 0))
+                coordinator_address=coord_addr,
+                num_processes=num_processes,
+                process_id=process_id
             )
+        else:
+            if 'JAX_COORDINATOR_ADDRESS' in os.environ:
+                #xmanager launched:
+                num_processes = int(os.environ.get('JAX_NUM_PROCESSES', 1))
+                process_id = int(os.environ.get('JAX_PROCESS_ID', 0))
+                
+                # Catch the missing environment variable trap
+                if num_processes == 1 and 'POD_NAME' in os.environ:
+                    print("WARNING: Running in K8s but JAX_NUM_PROCESSES is 1. Ensure this is set in your ConfigMap for multi-pod training!")
+                
+                print(f"Initializing JAX explicitly: "
+                      f"coordinator={os.environ['JAX_COORDINATOR_ADDRESS']}, "
+                      f"total_processes={num_processes}, process_id={process_id}")
+                jax.distributed.initialize(
+                    coordinator_address=os.environ.get('JAX_COORDINATOR_ADDRESS'),
+                    num_processes=num_processes,
+                    process_id=process_id
+                )
+            
+            # Try jax[k8s] auto-discovery if no coordinator is provided
+            elif 'KUBERNETES_SERVICE_HOST' in os.environ:
+                print("Initializing JAX via jax[k8s] auto-discovery...")
+                jax.distributed.initialize()
+            
+            # Standard local run (e.g., unit tests on your laptop)
+            else:
+                print("No distributed environment detected. Running locally.")
+        
     except RuntimeError as e:
-        # Handle the "already initialized" error gracefully
-        print(f'WARNING while trying to initialize jax distributed: {e}')
+        #absorb the error to avoid failure from more than one init attempt
+        print(f'WARNING while trying to initialize JAX distributed: {e}')
+
 safe_jax_init()
 
 import jax.numpy as jnp
@@ -233,7 +268,7 @@ def tune_run(config):
     
     study = None
     if worker_rank == 0:
-        
+        print(f"worker_{worker_rank}: creating MLFlow parent run")
         mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
         #create an ML-Flow parent study if it does not exist
         experiment = mlflow.get_experiment_by_name(name=config['study_name'])
@@ -264,6 +299,7 @@ def tune_run(config):
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
         config['mlflow_experiment_name'] = config['study_name']
         config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
+        print(f"worker_{worker_rank}: done creating MLFlow parent run")
         
     if "debug" in config and config['debug']:
         print(f'args received by tune_fn: {config}', flush=True)
@@ -271,9 +307,12 @@ def tune_run(config):
     trial_ids = json.loads(config['trial_ids'])
     n_large = len(trial_ids) > 10
     
-    jax.experimental.multihost_utils.sync_global_devices( "sync_barrier_for_trials")
+    print(f"worker_{worker_rank}: waiting at barrier for vizier")
+    jax.experimental.multihost_utils.sync_global_devices( "sync_barrier_for_vizier")
+    print(f"worker_{worker_rank}: passed barrier for vizier before create study")
     
     if worker_rank == 0:
+        print(f"worker_{worker_rank}: creating vizier study", flush=True)
         study = setup_vizier_study(project_id=config['project_id'], study_name=config['study_name'],
             endpoint=config['vizier_endpoint'], top_k=config['top_k'], use_batching_alg=n_large)
         unique_id = uuid.uuid4().hex[:8]
@@ -281,17 +320,24 @@ def tune_run(config):
         client_id = f"{resource_name}_{unique_id}"
         #suggested_trials = study.suggest(count=len(trial_ids), client_id=study._client._client_id)
         suggested_trials = study.suggest(count=len(trial_ids), client_id=client_id)
-    
+        print(f"worker_{worker_rank}: has suggested trials", flush=True)
+        
     trial_suggestion = None
     hparams = {}
     for i in range(len(trial_ids)):
+        trial_id = trial_ids[i]
         if worker_rank == 0:
             trial_suggestion = suggested_trials[i]
             hparams = {k: v for k, v in trial_suggestion.parameters.items()}
-            
-        jax.experimental.multihost_utils.sync_global_devices("sync_barrier_for_trial")
-    
+        
+        print(f"worker_{worker_rank}: wait at barrier for trial_id={trial_id}")
+        jax.experimental.multihost_utils.sync_global_devices(f"sync_barrier_for_trial_{{trial_id}}")
+        print(f"worker_{worker_rank}: passed barrier for trial_id={trial_id}")
+
         hparams = sync_hyperparams(hparams)
+        
+        print(f"worker_{worker_rank}: synchronized params for trial_id={trial_id}", flush=True)
+
         config2 = {
             **config,
             **hparams,
@@ -299,12 +345,11 @@ def tune_run(config):
         for k, v in config2.items():
             if k.find('?') > -1:
                 print(f"problem key from trial: {k}={v}", flush=True)
-        trial_id = trial_ids[i]
+        
         config2['trial_id'] = trial_id
         
         # NOTE: if have a comb of infeasible params or failure in which trial should not be
         # repeated, mark the trial using trial.infeasible() and continue w/o running train_fn
-        os.environ.get("JAX_COORDINATOR_ADDRESS")
         
         # if worker_Rank !=0, then mlflow_run_id is ""
         best_val_ndcg_k, mlflow_run_id = train_fn(config2, trial=trial_suggestion, save_checkpoints=False)
@@ -494,7 +539,7 @@ def main(_):
     
     print(f'jax_process_index={jax.process_index()}; '
           f'jax.local_devices={jax.local_devices()}; '
-          f'jax.devices={jax.devices()}', flush=True)
+          f'jax.devices={jax.devices()}, phase={config["phase"]}', flush=True)
 
     if config['phase'] == 'tune':
         tune_run(config)

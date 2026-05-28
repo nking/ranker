@@ -1,0 +1,52 @@
+Kind (Kubernetes IN Docker) is a tool for running local Kubernetes 
+clusters using Docker containers as "nodes."
+
+Because Kind containers share the Linux kernel with your host 
+
+machine (assuming you are on Linux or using Docker Desktop), 
+there is virtually zero virtualization overhead. This makes 
+it the fastest way to boot a cluster for development and CI/CD.
+``
+requires go and docker, then kubectl
+
+Install:
+- go install sigs.k8s.io/kind@v0.31.0 (for go 1.17+). 
+  This put kind in $(go env GOPATH)/bin.
+  which is $HOME/go/bin on my machine, but might be different for others
+  - edit ~/.bashrc to include export PATH=$PATH:$HOME/go/bin
+    source ~/.bashrc
+- install kubectl:
+   sudo snap install kubectl --classic
+
+to run:
+   ./run_app.sh
+
+documentation:
+  https://kind.sigs.k8s.io/
+
+====================
+
+check that nodes are alive and talking to each other:
+  kubectl get nodes
+     (Should see control-plane and 2 worker nodes) 
+
+ list the deployments:
+       kubectl get deployments
+          this should list all replica pods
+
+ check same for services:
+      kubectl get services
+        this should list the service and the default kubernetes
+
+  kubectl describe deployment gcs-emulator
+
+  see debugging_notes.txt too
+
+  kubectl rollout history deployment gcs-emulator
+  kubectl rollout history deployment local-db-store
+  kubectl rollout history deployment local-db-store
+  kubectl rollout history deployment vizier-server
+  kubectl rollout history statefulset app-runner
+
+  kubectl delete -f app_kube_config.yaml
+

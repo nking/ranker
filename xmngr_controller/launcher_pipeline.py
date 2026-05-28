@@ -1,4 +1,11 @@
 #adapted from https://github.com/google-deepmind/xmanager/blob/63a2ee86bca0fa847787f362f421b8bc4d2a6eb8/examples/parameter_controller/launcher.py#L86
+# USAGE:
+#    in a terminal, cd to project base directory, 
+#    activate the xmanager venv, 
+#    bring up the db services with: docker compose -f docker-compose-dbs.yaml up -d
+#    then invoke xmanager launch:
+#         xmanager launch xmngr_controller/launcher_pipeline.py -- --xm_db_yaml_config_path=db_config.yaml
+#
 # which has the following copyright:
 #
 # Copyright 2021 DeepMind Technologies Limited
@@ -84,7 +91,7 @@ def reset_checkpoint_buckets():
     for subdir in ("latest", "best"):
         command = [
             "docker", "exec", "gcs_emulator",
-            "sh", "-c", f"rm -rf /storage/checkpoint_bucket/{subdir}/{study_name}"
+            "sh", "-c", f"rm -rf /storage/checkpoint-bucket/{subdir}/{study_name}"
         ]
         try:
             result = subprocess.run(
@@ -93,7 +100,7 @@ def reset_checkpoint_buckets():
                 text=True,
                 check=True
             )
-            print("empty checkpoint_bucket/* successful")
+            print("empty checkpoint-bucket/* successful")
         except subprocess.CalledProcessError as e:
             print(f"Error resetting database: {e.stderr}")
         
@@ -156,8 +163,8 @@ def main(_):
             "mlflow_experiment_name": "GraphRanker_tuning_xmngr_2",
             "mlflow_tracking_uri": f"postgresql://{env_config.get('POSTGRES_USER')}:{env_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db",
             "vizier_endpoint": f"{docker_bridge_gateway}:8000",
-            "latest_checkpoint_uri": "gs://checkpoint_bucket/latest",
-            "best_checkpoint_uri": "gs://checkpoint_bucket/best",
+            "latest_checkpoint_uri": "gs://checkpoint-bucket/latest",
+            "best_checkpoint_uri": "gs://checkpoint-bucket/best",
             "movies_uri": "gs://data/movies-00000-of-00001.array_record",
             "recommendations_uri": "gs://data/recommended_movies.array_record",
             "recommendations_ts_uri": "gs://data/recommended_movies_timestamps.array_record",
@@ -221,6 +228,7 @@ def main(_):
             # can find network name in docker-compose-dbs.yaml
             for i in range(0, num_trials, num_trials_per_worker):
                 work_unit_id += 1
+                #jax process 0 and 1 need to be in same GroupJob to partition the work correctly:
                 group_jobs = {}
                 trial_ids = [ii for ii in range(i, i + num_trials_per_worker)]
                 group_coordinator_port = jax_port + i * num_processes
@@ -369,7 +377,7 @@ def main(_):
         logging.info("pipeline done.")
         
 if __name__ == '__main__':
-    ## reset all of orbax checkpoint_bucket
+    ## reset all of orbax checkpoint-bucket
     try:
         reset_checkpoint_buckets()
     except Exception as ex:

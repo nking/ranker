@@ -1,0 +1,168 @@
+# USAGE:
+#   export PROJECT_ROOT=$(pwd)/../../ && envsubst '$PROJECT_ROOT' < app-runner.yaml | kubectl apply -f -
+# Sets the variable, pipes the YAML through envsubst, and passes it to kubectl via stdin (-)
+# to add another env var, separate the exports by semi-colons
+#
+# ALSO:
+#  need to give kind the app image:
+#     docker build -t ranker-app:latest -f Dockerfile_cpu .
+#     kind load docker-image ranker-app:latest
+#
+# To access gcs-service:4443 or db-service:5432 from the host machine 
+# (outside the cluster) during development, map these specific ports 
+# in the kind cluster-config.yaml using the extraPortMappings directive 
+# booting the cluster.
+#
+#for the app we use a StatefulSet instead of a Deployment because a Deployment assigns random hashes
+#to the pd names making the names and ipaddresses non-deterministic.
+#A StatefulSet in contrast, provides predictable, ordered networking.  requesting 2 replicase will
+#result in names app-runner-0 and app-runner-1,  A headless service is needed for app-runner-1 to talk
+# to app-runner-0, because it creates and internal DNS record for the StatefulSet.
+# 4. HEADLESS SERVICE (For JAX Coordination DNS)
+apiVersion: v1
+kind: Service
+metadata:
+  name: jax-coordinator-service
+  namespace: ranker-ns
+spec:
+  clusterIP: None # <-- 'None' makes it headless
+  selector:
+    app: app-runner
+  ports:
+    - port: 8888
+      name: jax-coord
+---
+#the pod ame for a StatefulSet is formed by the metadata.name then the replica number.  e.g. app-runner-0 and app-runner-1 here
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: app-runner
+  namespace: ranker-ns
+spec:
+  serviceName: "jax-coordinator-service" # Links to the Headless Service
+  replicas: 2 # set to 2 to test multiple jax processes
+  selector:
+    matchLabels:
+      app: app-runner
+  template:
+    metadata:
+      labels:
+        app: app-runner
+    spec:
+      # Force 1 Process per Host
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - app-runner
+            topologyKey: "kubernetes.io/hostname"
+
+      # Replaces user: "${UID}:${GID}"
+      # Uncomment and replace with your actual Linux UID/GID (e.g., 1000)
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      # InitContainer to replicate 'depends_on: condition: service_healthy'
+      # This waits for the database service to be reachable on port 5432
+      initContainers:
+      - name: wait-for-dependencies
+        image: busybox:1.36
+        command: ['sh', '-c', 'until nc -z db-service 5432 && nc -z vizier-service 8000 && nc -z gcs-service 4443; do echo waiting for services; sleep 2; done;']
+
+      containers:
+      - name: app-runner
+        image: ranker-app:latest # build and load into kind before using this yaml
+        imagePullPolicy: Never #will never look outside of local
+        #if image is missing, see instructions at top of this file
+        # Pull in all variables from the ConfigMap
+        args:
+          - "--LOGNAME=runner"
+          - "--USER=runner"
+          - "--study_name=GraphRanker_tuning_kind"
+          - "--mlflow_experiment_name=GraphRanker_tuning_kind"
+          - "--mlflow_tracking_uri=postgresql://runner:password123@db-service:5432/mlflow_db"
+          - "--vizier_endpoint=vizier-service:8000"
+          - "--latest_checkpoint_uri=gs://checkpoint-bucket/latest"
+          - "--best_checkpoint_uri=gs://checkpoint-bucket/best"
+          - "--movies_uri=gs://data/movies-00000-of-00001.array_record"
+          - "--recommendations_uri=gs://data/recommended_movies.array_record"
+          - "--recommendations_ts_uri=gs://data/recommended_movies_timestamps.array_record"
+          - "--ratings_train_uri=gs://data/small/ratings_train_liked.array_record"
+          - "--ratings_val_uri=gs://data/small/ratings_val_liked.array_record"
+          - "--train_negatives_uri=gs://data/train_negatives.array_record"
+          - "--val_negatives_uri=gs://data/val_negatives.array_record"
+          - "--movie_embeddings_uri=gs://data/movie_emb-00000-of-00001.array_record"
+          - "--user_embeddings_uri=gs://data/user_emb-00000-of-00001.array_record"
+          - "--num_epochs=2"
+          - "--batch_size=64"
+          - "--seed=12345"
+          - "--phase=tune"
+          - "--project_id=tune-kind-01"
+          - "--grain_num_threads_fetching_records=2"
+          - "--grain_num_threads_computing_num_records=2"
+          - "--debug=True"
+        envFrom:
+        - configMapRef:
+            name: app-runner-env
+        env:
+        # Explicitly exposes the Pod's actual IP to the environment
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        # Inject the exact Pod Name (e.g., 'app-runner-0') using Downward API
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: XLA_FLAGS
+          value: "--xla_force_host_platform_device_count=2"
+        # JAX multi-process requires a coordinator address and that is handled in the app's safe_jax_init which is acting as the missing k8s operator in that sense.
+        - name: LOCAL_KIND_SIMULATION
+          value: "true"
+        # In K8s, we set up a headless service pointing to Pod 0,
+        # or pass the Service name here.
+        # Point to Pod 0 using the predictable StatefulSet DNS network
+        - name: JAX_NUM_PROCESSES
+          value: "2"
+        - name: GLOO_SOCKET_IFNAME
+          value: "eth0"
+        - name: GLOO_ADDRESS_FAMILY
+          value: "2" #IPV4
+        #for debugging:
+        - name: ABSL_MIN_LOG_LEVEL
+          value: "0"  # 0 is INFO, 1 is WARNING, 2 is ERROR, 3 is FATAL
+        - name: GLOG_minloglevel
+          value: "0"
+        - name: TENSORSTORE_VERBOSE_LOGGING
+          value: "1"
+
+        # Replaces volumes: - ./src:/app/src
+        volumeMounts:
+        - name: source-code
+          mountPath: /app/src
+          
+      volumes:
+      - name: source-code
+        hostPath:
+          path: /app/src  # This path MUST exist on the Worker Node
+          type: Directory
+
+---
+# SERVICE (Optional: To expose the app internally to the cluster)
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-runner-service
+  namespace: ranker-ns
+spec:
+  selector:
+    app: app-runner
+  ports:
+    - protocol: TCP
+      port: 8080 # The port other pods will use to talk to this app
+      targetPort: 8080 # The actual port the Python app listens on inside the container

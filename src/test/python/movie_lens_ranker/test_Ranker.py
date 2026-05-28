@@ -5,24 +5,13 @@ import logging
 #os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=4'
 import jax
 def safe_jax_init():
-    # Check if we are in a distributed environment (e.g., K8s, Vertex, Slurm)
-    # Different orchestrators use different keys, but these are common:
-    is_distributed = any(k in os.environ for k in [
-        'KUBERNETES_SERVICE_HOST',
-        'SLURM_JOB_ID', 'PADDLE_TRAINER_ENDPOINTS'
-    ])
-   
     try:
-        if is_distributed:
-            # Let JAX auto-detect cluster settings
-            jax.distributed.initialize()
-        else:
-            # Force local-only initialization for unit tests
-            jax.distributed.initialize(
-                coordinator_address=os.environ.get('JAX_COORDINATOR_ADDRESS', 'localhost:8888'),
-                num_processes=int(os.environ.get('JAX_NUM_PROCESSES', 1)),
-                process_id=int(os.environ.get('JAX_PROCESS_ID', 0))
-            )
+        # Force local-only initialization for unit tests
+        jax.distributed.initialize(
+            coordinator_address=os.environ.get('JAX_COORDINATOR_ADDRESS', 'localhost:8888'),
+            num_processes=int(os.environ.get('JAX_NUM_PROCESSES', 1)),
+            process_id=int(os.environ.get('JAX_PROCESS_ID', 0))
+        )
     except RuntimeError as e:
         # Handle the "already initialized" error gracefully
         print(f'WARNING while trying to initialize jax distributed: {e}')
@@ -130,7 +119,7 @@ def reset_mlflow_db():
 def reset_checkpoint_buckets():
     command = [
         "docker", "exec", "gcs_emulator",
-        "sh", "-c", "rm -rf /storage/checkpoint_bucket/*"
+        "sh", "-c", "rm -rf /storage/checkpoint-bucket/*"
     ]
     try:
         result = subprocess.run(
@@ -139,7 +128,7 @@ def reset_checkpoint_buckets():
             text=True,
             check=True
         )
-        print("empty checkpoint_bucket/* successful")
+        print("empty checkpoint-bucket/* successful")
     except subprocess.CalledProcessError as e:
         print(f"Error resetting database: {e.stderr}")
     
@@ -236,7 +225,7 @@ class TestRanker(unittest.TestCase):
             else:
                 print(f"Failed with status code: {response.status_code}")
                 print(f"Response: {response.text}")
-                print(f'is the fake_gcs_server container not running?')
+                print(f'is the fake-gcs-server container not running?')
                 return
             wait_for_postgres_vizier_mlflow_dbs()
         except requests.exceptions.RequestException as e:
@@ -250,7 +239,7 @@ class TestRanker(unittest.TestCase):
         seed = 234
         
         # tensorstore keeps trying to authenticate with google so for tests we'll use the abs path to checkpoint dir
-        checkpoint_dir = 'gs://checkpoint_bucket'
+        checkpoint_dir = 'gs://checkpoint-bucket'
         latest_checkpoint_uri = f'{checkpoint_dir}/latest'
         best_checkpoint_uri = f'{checkpoint_dir}/best'
         
@@ -302,7 +291,7 @@ class TestRanker(unittest.TestCase):
         except Exception as ex:
             pass
         
-        #reset orbax checkpoint_bucket
+        #reset orbax checkpoint-bucket
         try:
             reset_checkpoint_buckets()
         except Exception as ex:

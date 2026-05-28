@@ -13,7 +13,7 @@ services:
       #- "127.0.0.1:4443:4443"
       - "172.17.0.1:4443:4443"
     volumes:
-      - ./fake_gcs_server_buckets:/storage
+      - ./fake-gcs-server:/storage
     # We use -external-url to ensure TensorStore/Orbax get the right redirect address
     command: >
       -scheme http 
@@ -26,7 +26,7 @@ services:
     entrypoint: >
       sh -c "
       echo 'Cleaning old checkpoints...';
-      rm -rf /storage/checkpoint_bucket/*;
+      rm -rf /storage/checkpoint-bucket/*;
       exec /bin/fake-gcs-server -scheme http -backend filesystem -data /storage -public-host gcs:4443 -external-url http://gcs:4443
       "
     healthcheck:
@@ -94,4 +94,4 @@ services:
     restart: unless-stopped
     volumes:
       #map to a volume to perist data
-      - ./sqlite_data:/app/data
+      - ./sqlite-data:/app/data

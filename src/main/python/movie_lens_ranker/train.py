@@ -378,10 +378,10 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     
     print(f'VAL_BATCH_SIZE={VAL_BATCH_SIZE}, TOTAL_RECORDS_VAL={TOTAL_RECORDS_VAL}, NUM_VAL_SHARDS={NUM_VAL_SHARDS}', flush=True)
     print(f'STEPS_PER_EPOCH_GLOBAL_VAL={STEPS_PER_EPOCH_GLOBAL_VAL}')
-    print(f'STEPS_PER_EPOCH_LOCAL_VAL={STEPS_PER_EPOCH_LOCAL_VAL}')
+    print(f'STEPS_PER_EPOCH_LOCAL_VAL={STEPS_PER_EPOCH_LOCAL_VAL}', flush=True)
     
     if save_checkpoints:
-        print(f'worker_rank={rank}: constructing checkpoint managers')
+        print(f'worker_rank={rank}: constructing checkpoint managers', flush=True)
         mngr_latest = ocp.CheckpointManager(latest_checkpoint_uri,
             item_handlers={
                 'model': ocp.StandardCheckpointHandler(),
@@ -438,6 +438,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     jax_graph_comp_dict = calc_number_jax_graph_components(config_dict['batch_size'],
         config_dict['max_history'], config_dict['num_candidates'])
     
+    print(f'worker_{rank}: in _train_f, begin loop over train dataloader', flush=True)
+    
     for batch_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
         local_step = batch_idx * TRAIN_BATCH_SIZE
         global_step = local_step * NUM_TRAIN_SHARDS
@@ -453,25 +455,41 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             padded_super_graph_0
         )
         
+        if "debug" in config_dict and config_dict['debug'] and batch_idx == 0:
+            print(f'worker_{rank}: before train_step', flush=True)
+        
         loss = train_step(model, padded_super_graph, optimizer)
         
+        if "debug" in config_dict and config_dict['debug'] and batch_idx == 0:
+            print(f'worker_{rank}: after train_step', flush=True)
+            
         epoch_avg_train_loss.append(loss)
         
         if batch_idx % 5 == 0 and rank==0:
-            print(f"batch {batch_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}")
+            print(f"batch {batch_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}", flush=True)
         
         if (batch_idx + 1) % STEPS_PER_EPOCH_GLOBAL == 0:
             #finished a train epoch.  calc avg train loss and val metrics
             avg_train_loss = jnp.mean(jnp.array(epoch_avg_train_loss))
             epoch_avg_train_loss.clear()
             
+            if "debug" in config_dict and config_dict['debug']:
+                print(f'worker_{rank}: before eval_step', flush=True)
+                
             model.eval()
             train_metrics = eval_step(model, padded_super_graph, top_k)
+            
+            if "debug" in config_dict and config_dict['debug']:
+                print(f'worker_{rank}: after eval_step', flush=True)
+                
             # val_dataloader is also sharded, so don't isolate this to only shard 0.
             # Also, this is synced across all shards, so all shards have same conditional logic for global_avg_val_metrics below here
             global_avg_val_metrics, n_val_samples = _epoch_validation(model, iter(val_dataloader), top_k, jax_graph_comp_dict)
             model.train()
             
+            if "debug" in config_dict and config_dict['debug']:
+                print(f'worker_{rank}: after _epoch_validation', flush=True)
+                
             global_avg_val_loss = global_avg_val_metrics["loss"]
             global_avg_val_mrr = global_avg_val_metrics['mrr']
             global_avg_val_ndcg = global_avg_val_metrics['ndcg']
@@ -482,7 +500,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                   f"| train MRR@{top_k} {train_metrics['mrr']:.4f} "
                   f"| train recall_{top_k} {train_metrics['recall']:.4f}"
                   f"avg val loss {global_avg_val_loss:.4f} | val NDCG@{top_k} {global_avg_val_ndcg:.4f} "
-                  f"| val MRR@{top_k} {global_avg_val_mrr:.4f} | val recall_{top_k} {global_avg_val_recall:.4f}")
+                  f"| val MRR@{top_k} {global_avg_val_mrr:.4f} | val recall_{top_k} {global_avg_val_recall:.4f}", flush=True)
             
             metrics_dict = {
                 "train_loss":avg_train_loss.item(),
@@ -554,6 +572,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 break
             
             if rank == 0:
+                print(f'worker_{rank}: log MLFlow metrics', flush=True)
+                
                 mlflow.log_metrics(metrics_dict, step=epoch)
                 #check for whether Vizier pruning suggests a stop of this trial
                 if trial is not None:
@@ -576,6 +596,10 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
     if rngs is None:
         raise ValueError('rngs cannot be None')
     
+    worker_rank = jax.process_index()
+    
+    print(f'worker_{worker_rank}: before create_train_and_val_dataloaders', flush=True)
+    
     train_dataloader, val_dataloader = create_train_and_val_dataloaders(
         movies_uri=config['movies_uri'],
         recommendations_uri=config['recommendations_uri'],
@@ -590,6 +614,8 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         batch_size=config['batch_size'],
         seed=config.get('seed', 0),)
     
+    print(f'worker_{worker_rank}: before read_embeddings', flush=True)
+
     # NOTE: these are prepended with a row of zeros so that user_ids and movie_ids are direct indexes to the embeddings
     embeddings = read_embeddings(
         user_embeddings_uri=config['user_embeddings_uri'],
@@ -599,6 +625,8 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
     nnx.use_eager_sharding(True)
     model_mesh = get_model_mesh()
     with jax.set_mesh(model_mesh):
+        print(f'worker_{worker_rank}: before model', flush=True)
+        
         model = GraphRanker(user_movie_embeds=embeddings,
             num_candidates=config['num_candidates'],
             hidden_features=config['hidden_dim'],
@@ -607,6 +635,8 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
             heads=config['num_heads'],
             edge_embed_dim=config['edge_embed_dim'],
             dropout_rate=config['dropout_rate'], rngs=rngs)
+        
+        print(f'worker_{worker_rank}: before optimizer', flush=True)
         
         optimizer = nnx.Optimizer(model,
             optax.adamw(config['learning_rate'],
@@ -618,6 +648,8 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
             if spec is None:
                 spec = P()
             return jax.sharding.NamedSharding(model_mesh, spec)
+        
+        print(f'worker_{worker_rank}: before model synchronization', flush=True)
         
         model_state = nnx.state(model)  # The model's state, a pure pytree.
         pspecs = nnx.get_partition_spec(model_state)  # Strip out the annotations from state.
@@ -632,6 +664,8 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         sharded_opt_state = jax.device_put(opt_state, sharding_tree)
         #sharded_opt_state = jax.lax.with_sharding_constraint(opt_state, pspecs)
         nnx.update(optimizer, sharded_opt_state)
+        
+        print(f'worker_{worker_rank}: after model synchronization', flush=True)
         
     return {"rngs": rngs, "model": model, "optimizer": optimizer,
         'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader}
@@ -652,6 +686,8 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     config['top_k'] = 20
     
     worker_rank = jax.process_index()
+
+    print(f'worker_{worker_rank}: train_fn', flush=True)
     
     if worker_rank == 0:
         for key in {"phase", "mlflow_experiment_name", "mlflow_experiment_id",
@@ -661,7 +697,12 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     
     rngs = nnx.Rngs(config.get('seed', 0))
     
+    print(f'worker_{worker_rank}: before build_model_optimizer_and_dataloaders', flush=True)
+    
     _dict = build_model_optimizer_and_dataloaders(config, rngs=rngs)
+    
+    print(f'worker_{worker_rank}: after build_model_optimizer_and_dataloaders', flush=True)
+    
     model = _dict['model']
     optimizer = _dict['optimizer']
     train_dataloader = _dict['train_dataloader']
@@ -673,14 +714,15 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     run_name = get_canonical_mlflow_run_name(config)
     
     try:
+        print(f'worker_{worker_rank}: before worker 0 starts MLFlow experiment',
+            flush=True)
         if worker_rank == 0:
-            print(f"mlflow set experiment: {config['mlflow_experiment_name']}")
-            print(f"mlflow set experiment: {config['mlflow_experiment_name']}")
+            print(f"mlflow set experiment: {config['mlflow_experiment_name']}", flush=True)
             mlflow.set_experiment(
                 experiment_name=config['mlflow_experiment_name'],
             )
             # don't use nested=True because the parent isn't in the same thread in production
-            print(f"mlflow start run: {run_name}")
+            print(f"mlflow start run: {run_name}", flush=True)
             mlflow_run = mlflow.start_run(
                 run_name=run_name,
                 #tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
@@ -690,7 +732,7 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
             mlflow.set_tag("phase", config["phase"]) #do not move this before start_run
             mlflow.log_params(stringify_mlflow_params(config))
             mlflow.log_text(str(model), "model_summary.txt")
-        
+            print(f'worker_{worker_rank}: started MLFlow run_id={mlflow_run.info.run_id}', flush=True)
         if save_checkpoints:
             # paradigm is that we save checkpoints for "train" phase, but not HPO trial phases
             sfx = f"{config['study_name']}/{run_name}"
@@ -704,10 +746,11 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
                     trial.update_metadata(
                         vz.Metadata({'best_checkpoint_uri': config['best_checkpoint_uri']}))
         
-        print(
-            f"expect the model training to start w/ loss = {-log(1. / config['num_candidates'])}")
+        print( f"expect the model training to start w/ loss = {-log(1. / config['num_candidates'])}", flush=True)
         
         validate_checkpoint_restores = config.get('validate_checkpoint_restores', False)
+        
+        print(f'worker_{worker_rank}: before _train_fn', flush=True)
         
         best_val_ndcg_k = _train_fn(model=model, train_dataloader=train_dataloader,
             val_dataloader=val_dataloader,
@@ -720,12 +763,15 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
             save_checkpoints=save_checkpoints,
             validate_checkpoint_restores=validate_checkpoint_restores)
         
+        print(f'worker_{worker_rank}: after _train_fn', flush=True)
+        
         if "debug" in config and config['debug'] and save_checkpoints:
             print(f"checkpoints save to directories:\n  {config.get('best_checkpoint_uri','')}"
                   f"\n  {config.get('latest_checkpoint_uri','')}")
             
         return best_val_ndcg_k, config.get('mlflow_run_id', "")
     finally:
+        print(f'worker_{worker_rank}: finally clause in train_fn', flush=True)
         if worker_rank==0 and mlflow_run is not None:
             mlflow.log_metric(f"final_ndcg_{config['top_k']}", float(best_val_ndcg_k))
             mlflow.end_run()

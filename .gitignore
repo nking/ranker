@@ -3,7 +3,7 @@ __pycache__/
 *.py[codz]
 *$py.class
 
-fake_gcs_server_buckets/
+fake-gcs-server/
 .env
 .env_db
 

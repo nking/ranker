@@ -53,7 +53,7 @@ def main(argv: Sequence[str]) -> None:
     raise app.UsageError('Too many command-line arguments.')
   
   #local to host:
-  #my_local_db = 'sqlite:///sqlite_data/vizier.db'
+  #my_local_db = 'sqlite:///sqlite-data/vizier.db'
   #local to container:
   my_local_db = 'sqlite:////app/data/vizier.db'
   

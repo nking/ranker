@@ -18,92 +18,6 @@ https://github.com/nking/retrieval.git
 part 3 can be found at:
 https://github.com/nking/reranker.git
 
-instructions:
-  set up a virtual environment using conda or virtualenv
-  with python version 3.12 
-     e.g. conda create --name ranker_py312 python=3.12
-  
-  activate the virtual environment
-     e.g. conda activate ranker_py312
-
-to run the unit tests:
-(1) generate the data:
-    The data are only present as DVC commits because some are
-    large files.  The files can be recreated following notes
-    in src/test/resources/README.txt
-    TODO: reconsider committing them in this project
-(2) install the dependencies
-    see scripts/init_ranker_venv.sh 
-(3) install docker or equivalent and start it
-    see https://download.docker.com and instructions
-(4) prepare input data from step (1) for reading by local blob storage:
-    cd scripts
-    sh < prep_for_tests.sh
-(5) there are a couple of ways to start the services depending on what
-    the goal is:
-    (a) to run test_Ranker.py test_run_train_with_optuna
-        you can start the db services alone:
-           docker compose -f docker-compose-dbs.yaml up -d --build
-        then run the tests
-        then when done:
-           docker compose down
-    (b) to start the dbs and the container app:
-            docker compose -f docker-compose.yaml build app
-        or 
-            docker compose -f docker-compose.yaml build --no-cache app
-        then to run a trial train with a small sample over 2 epochs: 
-            sh < check_can_run.sh
-
-    NOTE that once the app image is built, no need to rebuild the image.
-    changing parameters in the docker-compose*.yaml can be run with:
-       docker compose up -d
-    if you update code in the app service:
-       docker compose up -d --build
-    if have trouble cleaning up networks use
-       docker compose down
-       docker compose up -d
-
-- there is a unittest called test_Ranker.py which is an integration
-  test of app_rnner for a single process single host environment.
-- there is a multi-host, multi-process test in
-  xmngr/launcher_pipeline.py
-  it requires a separate venv to install xmanager into.
-  see scripts/init_xmanager_venv.sh
-  NOTE: on a single CPU, it is better to run using jax process count = 1
-  due to expenses of context switching and communication overhead for this app.  
-  The script tests that the code
-  would still function correctly if 2 of the CPU's cores are used.
-  There are use cases when jax process count > 1 are a good idea.
-
-- there will be a kubeflow pipeline using Trainer API v2
-
-Local testing:
-
-  pycharm:
-
-    using right click menu, mark the source tree directory:
-      src/main/python
-
-    using right click menu, mark the test tree directory:
-      src/test/python/movie_lens_ranker
-
-    then pycharm tests will correctly resolve paths.
-
-  bash or other shell environment:
-
-    python and pytest can be used from the project's base
-    directory
-
-to build the docker image and run the container locally:
-.. in progress
-  docker compose up
-
-and when done:
-#stop process, but keep containers using:
-  docker compose stop
-#stop process, remove containers, keep volumne safe
-  docker compose down
-
 --------------------------------------------------
 some details about the model
 
@@ -156,3 +70,127 @@ some details about the model
           ==> that the runtime and space complexities are of same order as
               the prototype GraphRanker means that the model would need to
               train in a cluster, preferably with accelerators.
+--------------------------------------------------
+
+Instructions:
+  set up a virtual environment using conda or virtualenv
+  with python version 3.12 
+     e.g. conda create --name ranker_py312 python=3.12
+  
+  activate the virtual environment
+     e.g. conda activate ranker_py312
+
+Running the code:
+- there is a unittest called test_Ranker.py which is an integration
+  test of app_runner for a single process single host environment.
+  see Running Unit Tests below
+
+- there is a multi-host, multi-process script in
+  xmngr/launcher_pipeline.py
+  it requires a separate venv to install xmanager into.
+  see scripts/init_xmanager_venv.sh
+
+  see Running xmanager launch below
+
+- there is a script to setup and run a k8s cluster using kind
+  see Running k82/kind below
+
+- there will be a Kubeflow Pipeline (KFP) to run the code
+  see Running KFP below
+
+-----------------------------------------------------------------------
+For all means of running the code, these are the first steps
+
+(1) generate the data:
+    The data are only present as DVC commits because some are
+    large files.  The files can be recreated following notes
+    in src/test/resources/README.txt
+    TODO: reconsider committing them in this project
+(2) install the dependencies
+    see scripts/init_ranker_venv.sh 
+(3) install docker or equivalent and start it
+    see https://download.docker.com and instructions
+(4) prepare input data from step (1) for reading by local blob storage:
+    cd scripts
+    sh < prep_for_tests.sh
+(5) there are a couple of ways to start the services depending on what
+    the goal is:
+    (a) to run test_Ranker.py test_run_train_with_optuna
+        you can start the db services alone:
+           docker compose -f docker-compose-dbs.yaml up -d --build
+        then run the tests
+        then when done:
+           docker compose down
+    (b) to build the container images for the dbs and the GraphRanker app:
+            docker compose -f docker-compose.yaml build app
+        or 
+            docker compose -f docker-compose.yaml build --no-cache app
+        then to run a trial train with a small sample over 2 epochs: 
+            sh < check_can_run.sh
+
+    NOTE that once the app image is built, no need to rebuild the image.
+    changing parameters in the docker-compose*.yaml can be run with:
+       docker compose up -d
+    if you update code in the app service:
+       docker compose up -d --build
+    if have trouble cleaning up networks use
+       docker compose down
+       docker compose up -d
+
+-----------------------------------------------------------------------
+Running Unit Tests:
+
+- activate the ranker venv
+- make sure the data are built and container images are built, following
+  instructions above
+- run the db containers:
+     docker compose -f docker-compose-dbs.yaml up -d
+
+Local testing:
+  pycharm:
+    using right click menu, mark the source tree directory:
+      src/main/python
+    using right click menu, mark the test tree directory:
+      src/test/python/movie_lens_ranker
+    then pycharm tests will correctly resolve paths.
+
+  bash or other shell environment:
+    python and pytest can be used from the project's base
+    directory
+
+-----------------------------------------------------------------------
+Running xmanager launcher:
+- activate the xmanager venv
+      to create: follow steps in scripts/init_xmanager_venv.sh
+- make sure the data are built and container images are built, following
+  instructions above
+- cd to project base directory (this directory)
+- bring up the db services with: 
+      docker compose -f docker-compose-dbs.yaml up -d
+- then invoke xmanager launch:
+      xmanager launch xmngr_controller/launcher_pipeline.py -- --xm_db_yaml_config_path=db_config.yaml
+
+  NOTE: on a single CPU, it is better to run using jax process count = 1
+  due to expenses of context switching and communication overhead for this app.  
+  The xmanager launcher_pipeline.py script tests that the code
+  would still function correctly if 2 of the CPU's cores are used.
+
+  Note: on a computer with 32 GB RAM and a 2.8GHz processor with 4 cores
+     this will take 45 minutes.
+     (if num_process is set to 1 and the XLA flag xla_force_host_platform_device_count
+     is set to 1, it will take 7 minutes)
+
+-----------------------------------------------------------------------
+Running k8s/kind script:
+
+- cd to project's base directory (this directory)
+- make sure the db service images and the app image are built
+  and that the main app image is tagged. by default ranker should be tagged latest
+  ut if not:
+  docker build -t ranker-app:latest -f Dockerfile_cpu .
+- cd to kubernetes/kind_k8s
+- ./run_app.sh
+
+-----------------------------------------------------------------------
+Running KFP:
+   ... next ...

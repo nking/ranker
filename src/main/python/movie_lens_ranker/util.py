@@ -340,6 +340,7 @@ def _read_embeddings(embeddings_uri:str, batch_size:int=1024) ->  jnp.ndarray:
         #just in case the array_record was not written in order, sort by id
         embeddings = [val for _, val in sorted(zip(ids, embeddings))]
     except Exception as e:
+        print(f'error in _read_embeddings: {e}', flush=True)
         raise e
     finally:
         if reader is not None:
@@ -418,6 +419,7 @@ def read_movies_array_record(movies_uri:str, batch_size:int=1048) -> List[int]:
     movie_ids = []
     reader = None
     try:
+        print(f'about to read movies_uri={movies_uri}', flush=True)
         reader = array_record_module.ArrayRecordReader(movies_uri)
         n_records = reader.num_records()
         for i in range(0, n_records, batch_size):
@@ -429,6 +431,7 @@ def read_movies_array_record(movies_uri:str, batch_size:int=1048) -> List[int]:
         #not necessary, but might as well sort in case written out of order
         movie_ids.sort()
     except Exception as e:
+        print(f'Error in read_movies_array_record: {e}', flush=True)
         raise e
     finally:
         if reader is not None:
@@ -476,6 +479,7 @@ def build_history_lookup(ratings_uri_list: Union[str, List[str]], batch_size: in
                     lookup[u]["rating"].append(record[2])
                     lookup[u]["ts"].append(record[3])
         except Exception as e:
+            print(f'Error in build_history_lookup: {e}', flush=True)
             raise e
         finally:
             if reader is not None:

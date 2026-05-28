@@ -32,7 +32,7 @@ print('SUCCESS: Database upgraded and version stamped')"
 
 docker exec -it gcs_emulator ls -R /storage/data
 
-docker exec -it gcs_emulator ls -R /storage/checkpoint_bucket
+docker exec -it gcs_emulator ls -R /storage/checkpoint-bucket
 ------------------------------------
 
 docker compose run --rm --entrypoint python3 app -c "

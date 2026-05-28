@@ -2,15 +2,15 @@
 
 export $(grep -v '^#' .env | xargs)
 
-rm -rf ./fake_gcs_server_buckets/checkpoint_bucket/*
+rm -rf ./fake-gcs-server/checkpoint-bucket/*
 
 docker compose run --rm app \
 --study_name="GraphRanker_tuning_cli" \
 --mlflow_experiment_name="GraphRanker_tuning_cli" \
 --vizier_endpoint="172.17.0.1:8000" \
 --mlflow_tracking_uri="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@172.17.0.1:5432/mlflow_db" \
---latest_checkpoint_uri="gs://checkpoint_bucket/latest" \
---best_checkpoint_uri="gs://checkpoint_bucket/best" \
+--latest_checkpoint_uri="gs://checkpoint-bucket/latest" \
+--best_checkpoint_uri="gs://checkpoint-bucket/best" \
 --movies_uri="gs://data/movies-00000-of-00001.array_record" \
 --recommendations_uri="gs://data/recommended_movies.array_record" \
 --recommendations_ts_uri="gs://data/recommended_movies_timestamps.array_record" \

@@ -1,10 +1,10 @@
 # USAGE:
-#    export PROJECT_ROOT=$(pwd); envsubst '$PROJECT_ROOT' < kind-cluster.yaml | kind create cluster --config -
+#    export PROJECT_ROOT=$(pwd)/../../; envsubst '$PROJECT_ROOT' < kind-cluster.yaml | kind create cluster --config -
 
 # definiation: https://pkg.go.dev/sigs.k8s.io/kind/pkg/apis/config/v1alpha4#Cluster
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-name: GraphRanker_tune_train_test_cluster
+name: graphranker-tune-train-test-cluster
 nodes:
 - role: control-plane
   extraPortMappings:
@@ -14,12 +14,12 @@ nodes:
     listenAddress: "172.17.0.1" # Binds explicitly to the docker0 interface IP
     protocol: TCP
   # 2. Map the GCS Emulator (if you need outside access for tools/Xmanager)
-  - containerPort: 30443
+  - containerPort: 30433
     hostPort: 4443
     listenAddress: "172.17.0.1"
     protocol: TCP
   # 3. Map the OSS Vizier Server (if you need outside access for tools/Xmanager)
-  - containerPort: 30444
+  - containerPort: 30434
     hostPort: 8000
     listenAddress: "172.17.0.1"
     protocol: TCP
@@ -27,8 +27,27 @@ nodes:
   - hostPath: ${PROJECT_ROOT}/src
     containerPath: /app/src
     readOnly: true
+  - hostPath: ${PROJECT_ROOT}/fake-gcs-server
+    containerPath: /mnt/gcs-data
+    readOnly: false 
+
+# 2 hosts:
 - role: worker
+  extraMounts:
+  - hostPath: ${PROJECT_ROOT}/src
+    containerPath: /app/src
+    readOnly: true
+  - hostPath: ${PROJECT_ROOT}/fake-gcs-server
+    containerPath: /mnt/gcs-data
+    readOnly: false
 - role: worker
+  extraMounts:
+  - hostPath: ${PROJECT_ROOT}/src
+    containerPath: /app/src
+    readOnly: true
+  - hostPath: ${PROJECT_ROOT}/fake-gcs-server
+    containerPath: /mnt/gcs-data
+    readOnly: false
 networking:
   apiServerAddress: "127.0.0.1"
   apiServerPort: 6443

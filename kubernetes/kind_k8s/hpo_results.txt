@@ -1,0 +1,26 @@
+looking for study_name GraphRanker_tuning_kind at endpoint vizier-service:8000
+Traceback (most recent call last):
+  File "/home/nichole/projects/github/ranker/kubernetes/kind_k8s/extract_hpo_results.py", line 137, in <module>
+    main()
+  File "/home/nichole/projects/github/ranker/kubernetes/kind_k8s/extract_hpo_results.py", line 96, in main
+    study = vz_clients.Study.from_owner_and_id(owner=os.environ['project_id'],
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/vizier/_src/service/clients.py", line 233, in from_owner_and_id
+    return cls.from_resource_name(resource.name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/vizier/_src/service/clients.py", line 209, in from_resource_name
+    client = vizier_client.VizierClient(name, UNUSED_CLIENT_ID)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<attrs generated methods vizier._src.service.vizier_client.VizierClient>", line 38, in __init__
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/vizier/_src/service/vizier_client.py", line 90, in create_vizier_servicer_or_stub
+    return stubs_util.create_vizier_server_stub(endpoint)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/vizier/_src/service/stubs_util.py", line 81, in create_vizier_server_stub
+    _create_channel(endpoint, timeout)
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/vizier/_src/service/stubs_util.py", line 34, in _create_channel
+    grpc.channel_ready_future(channel).result(timeout=timeout)
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/grpc/_utilities.py", line 160, in result
+    self._block(timeout)
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/grpc/_utilities.py", line 105, in _block
+    raise grpc.FutureTimeoutError()
+grpc.FutureTimeoutError

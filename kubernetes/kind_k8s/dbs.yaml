@@ -1,23 +1,29 @@
 # USAGE:
-#   export PROJECT_ROOT=$(pwd) && envsubst '$PROJECT_ROOT' < k8s-manifests.yaml | kubectl apply -f -
+#   export PROJECT_ROOT=$(pwd)/../../ && envsubst '$PROJECT_ROOT' < dbsr.yaml | kubectl apply -f -
 # Sets the variable, pipes the YAML through envsubst, and passes it to kubectl via stdin (-)
 # to add another env var, separate the exports by semi-colons
-#
-# ALSO:
-#  need to give kind the app image:
-#     docker build -t ranker-app:local -f Dockerfile_cpu .
-#     kind load docker-image ranker-app:local
 #
 # To access gcs-service:4443 or db-service:5432 from the host machine 
 # (outside the cluster) during development, map these specific ports 
 # in the kind cluster-config.yaml using the extraPortMappings directive 
 # booting the cluster.
+# booting the cluster.
 #
-# 1. CONFIGMAP (Replaces your .env file and static environment variables)
+# this file is read by kubectl.
+# no need for persistent volumes for use in run_app.shl, but could be changed for that.
+#
+#defin a namespace:
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ranker-ns
+---
+# CONFIGMAP (Replaces your .env file and static environment variables)
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: app-runner-env
+  namespace: ranker-ns
 data:
   # Placeholders for the variables .env file
   POSTGRES_USER: "your-db-user"
@@ -25,11 +31,11 @@ data:
   UID: "1000"
   GID: "1000"
   GOOGLE_CLOUD_PROJECT: "local-kfp-dev"
-  GCSFS_ENDPOINT_URL: "http://gcs:4443"
-  TENSORSTORE_GCS_HTTP_URL: "http://gcs:4443"
-  STORAGE_EMULATOR_HOST: "http://gcs:4443"
-  CLOUD_STORAGE_EMULATOR_HOST: "http://gcs:4443"
-  CLOUD_STORAGE_EMULATOR_ENDPOINT: "http://gcs:4443"
+  GCSFS_ENDPOINT_URL: "http://gcs-service:4443"
+  TENSORSTORE_GCS_HTTP_URL: "http://gcs-service:4443"
+  STORAGE_EMULATOR_HOST: "http://gcs-service:4443"
+  CLOUD_STORAGE_EMULATOR_HOST: "http://gcs-service:4443"
+  CLOUD_STORAGE_EMULATOR_ENDPOINT: "http://gcs-service:4443"
   TENSORSTORE_GCS_NO_AUTH: "1"
   NO_GCE_CHECK: "true"
   GCS_LAMBDA_TOKEN: ""
@@ -39,13 +45,36 @@ data:
   GOOGLE_APPLICATION_CREDENTIALS: ""
   TENSORSTORE_GCS_REQUEST_CONCURRENCY: "32"
 ---
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pg-init-script
+  namespace: ranker-ns
+data:
+  init-databases.sh: |
+    #!/bin/bash
+    set -e
+    
+    # Connect to the default 'postgres' db to create the others
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
+        SELECT 'CREATE DATABASE mlflow_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'mlflow_db')\gexec
+        GRANT ALL PRIVILEGES ON DATABASE mlflow_db TO "$POSTGRES_USER";
+        SELECT 'CREATE DATABASE xmngr_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'xmngr_db')\gexec
+        GRANT ALL PRIVILEGES ON DATABASE xmngr_db TO "$POSTGRES_USER";
+    EOSQL
+---
 # ==========================================
-# 1. GCS EMULATOR
+# GCS EMULATOR
+# ==========================================
+# ==========================================
+# GCS EMULATOR
 # ==========================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gcs-emulator
+  namespace: ranker-ns
 spec:
   replicas: 1
   selector:
@@ -59,6 +88,7 @@ spec:
       containers:
       - name: gcs-emulator
         image: fsouza/fake-gcs-server:1.54.0
+        imagePullPolicy: IfNotPresent
         env:
         - name: CLOUD_STORAGE_EMULATOR_HOST
           valueFrom:
@@ -69,14 +99,15 @@ spec:
         args: 
         - |
           echo 'Cleaning old checkpoints...';
-          rm -rf /storage/fake_gcs_server_buckets/checkpoint_bucket/*;
-          exec ${PROJECT_ROOT}/fake-gcs-server -scheme http -backend filesystem -data /storage -public-host gcs:4443 -external-url http://gcs:4443
+          rm -rf /storage/fake-gcs-server/checkpoint-bucket/*;
+          # Fixed from ${PROJECT_ROOT}/fake-gcs-server to the internal container path
+          exec /bin/fake-gcs-server -scheme http -backend filesystem -data /storage -public-host gcs-service:4443 -external-url http://gcs-service:4443
         ports:
         - containerPort: 4443
         volumeMounts:
         - name: gcs-storage
-          mountPath: /storage
-        readinessProbe: # Replaces the Docker healthcheck
+          mountPath: /storage   # Clean mount point mapping
+        readinessProbe: 
           httpGet:
             path: /storage/v1/b
             port: 4443
@@ -85,15 +116,16 @@ spec:
       volumes:
       - name: gcs-storage
         hostPath:
-          #if doesn't exist, use scripts/prep_for_tests.sh
-          path: ${PROJECT_ROOT}/fake-gcs-server
-          type: Directory
+          path: /mnt/gcs-data  # Points to the containerPath defined in kind-cluster.yaml
+          type: Directory      # Confirms the directory exists on the Kind Node
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: gcs-service
+  namespace: ranker-ns
 spec:
+  type: NodePort
   selector:
     app: gcs-emulator
   ports:
@@ -109,6 +141,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: local-db-store
+  namespace: ranker-ns
 spec:
   replicas: 1
   selector:
@@ -122,17 +155,18 @@ spec:
       containers:
       - name: postgres
         image: postgres:12-alpine
-        command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=20", "-c", "work_mem=4MB"]
+        imagePullPolicy: IfNotPresent
+        args: ["-c", "shared_buffers=128MB", "-c", "max_connections=20", "-c", "work_mem=4MB"]
         env:
         - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:
-              name: Graph-Ranker-db-credentials
+              name: graphranker-db-credentials
               key: username
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: Graph-Ranker-db-credentials
+              name: graphranker-db-credentials
               key: password
         - name: POSTGRES_DB
           value: "postgres"
@@ -142,22 +176,21 @@ spec:
         - name: pg-data
           mountPath: /var/lib/postgresql/data
         - name: pg-init
-          mountPath: /docker-entrypoint-initdb.d/init-databases.sh
+          mountPath: /docker-entrypoint-initdb.d/
           readOnly: true
       volumes:
       - name: pg-data
-        hostPath:
-          path: ${PROJECT_ROOT}/bin/postgres_data
-          type: DirectoryOrCreate
+        emptyDir: {}
       - name: pg-init
-        hostPath:
-          path: ${PROJECT_ROOT}/init-databases.sh
-          type: File
+        configMap:
+          name: pg-init-script
+          defaultMode: 0755 # Gives the script executable permissions
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: db-service
+  namespace: ranker-ns
 spec:
   type: NodePort # opens a static port on the node
   selector:
@@ -175,6 +208,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: vizier-server
+  namespace: ranker-ns
 spec:
   replicas: 1
   selector:
@@ -187,8 +221,8 @@ spec:
     spec:
       containers:
       - name: vizier-server
-        image: vizier-server:local # Must be built and loaded into kind first
-        imagePullPolicy: IfNotPresent
+        image: ranker-vizier_server:latest # Must be built and loaded into kind first
+        imagePullPolicy: Never
         env:
         - name: VIZIER_DATABASE_URL
           value: "sqlite:////app/data/vizier.db"
@@ -200,14 +234,16 @@ spec:
       volumes:
       - name: vizier-data
         hostPath:
-          path: ${PROJECT_ROOT}/sqlite_data
+          path: ${PROJECT_ROOT}/sqlite-data
           type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: vizier-service
+  namespace: ranker-ns
 spec:
+  type: NodePort
   selector:
     app: vizier-server
   ports:
@@ -215,65 +251,3 @@ spec:
       port: 8000  # internal cluster port used by other pods
       targetPort: 8080 # postgres container listens on this port
       nodePort: 30434  # MUST match the containerPort in kind-cluster.yaml
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: app-runner
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: app-runner
-  template:
-    metadata:
-      labels:
-        app: app-runner
-    spec:
-      # Replaces user: "${UID}:${GID}"
-      # Uncomment and replace with your actual Linux UID/GID (e.g., 1000)
-      securityContext:
-        runAsUser: 1000
-        runAsGroup: 1000
-      # InitContainer to replicate 'depends_on: condition: service_healthy'
-      # This waits for the database service to be reachable on port 5432
-      initContainers:
-      - name: wait-for-dependencies
-        image: busybox:1.36
-        command: ['sh', '-c', 'until nc -z db-service 5432 && nc -z vizier-service 8080 && nc -z gcs-service 8080; do echo waiting for services; sleep 2; done;']
-
-      containers:
-      - name: app-runner
-        image: app-runner:local # use a distinct tag other than latest
-        imagePullPolicy: Never #will never look outside of local
-        #if image is missing, see instructions at top of this file
-        
-        # Pull in all variables from the ConfigMap
-        envFrom:
-        - configMapRef:
-            name: app-runner-env
-            
-        # Replaces volumes: - ./src:/app/src
-        volumeMounts:
-        - name: source-code
-          mountPath: /app/src
-          
-      volumes:
-      - name: source-code
-        hostPath:
-          path: ${PROJECT_ROOT}/src # MUST be an absolute path
-          type: Directory
-
----
-# 4. SERVICE (Optional: To expose your app internally to the cluster)
-apiVersion: v1
-kind: Service
-metadata:
-  name: app-runner-service
-spec:
-  selector:
-    app: app-runner
-  ports:
-    - protocol: TCP
-      port: 8080 # The port other pods will use to talk to this app
-      targetPort: 8080 # The actual port your Python app listens on inside the container

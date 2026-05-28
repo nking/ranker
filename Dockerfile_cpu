@@ -5,6 +5,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+RUN python3 -m pip install --no-cache-dir --upgrade pip==24.0 setuptools==69.0.0 wheel==0.42.0
+
 WORKDIR /app
 
 COPY requirements0.txt ./
@@ -13,7 +15,11 @@ RUN chown -R 1000:1000 /app
 #TODO: move numpy to requirements0.txt
 
 #bring in most of the libraries to avoid rebuilding entire image for changes below
+RUN python3 -m pip install "jraph @ git+https://github.com/deepmind/jraph.git@51f5990104f7374492f8f3ea1cbc47feb411c69c" --prefix=/usr/local
 RUN python3 -m pip install --no-cache-dir -r requirements0.txt --prefix=/usr/local
+
+#note: this could be put in a separate Dockerfile just for k8s/kind builds:
+RUN python3 -m pip install --no-cache-dir -v "jax[k8s]" --prefix=/usr/local
 
 #only copying src/main/python/movie_lens_ranker.  see .dockerignore
 COPY ./src ./src

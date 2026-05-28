@@ -1,10 +1,10 @@
 #!/bin/bash
 #from this directory, invoke:
-mkdir -p ../fake_gcs_server_buckets/data
-mkdir -p ../fake_gcs_server_buckets/checkpoint_bucket
-mkdir -p ../fake_gcs_server_buckets/mlflow_artifact_bucket
-cp -rf ../src/test/resources/data/* ../fake_gcs_server_buckets/data/
-chmod -R 775 ../fake_gcs_server_buckets
+mkdir -p ../fake-gcs-server/data
+mkdir -p ../fake-gcs-server/checkpoint-bucket
+mkdir -p ../fake-gcs-server/mlflow_artifact_bucket
+cp -rf ../src/test/resources/data/* ../fake-gcs-server/data/
+chmod -R 775 ../fake-gcs-server
 
 #make sure docker is running
 systemctl status docker.service
@@ -15,7 +15,7 @@ systemctl status docker.service
 #docker run -d --name fake-gcs-server \
 #  -u $(id -u):$(id -g) \
 #  -p 127.0.0.1:4443:4443 \
-#  -v ${PWD}/../fake_gcs_server_buckets:/storage \
+#  -v ${PWD}/../fake-gcs-server:/storage \
 #  fsouza/fake-gcs-server \
 #  -scheme http \
 #  -backend filesystem \

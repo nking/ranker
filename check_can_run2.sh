@@ -19,8 +19,8 @@ docker compose run --rm app \
 --mlflow_experiment_name="GraphRanker_tuning_cli" \
 --vizier_endpoint="vizier_server:8000" \
 --mlflow_tracking_uri="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/mlflow_db" \
---latest_checkpoint_uri="http://gcs:4443/checkpoint_bucket/latest" \
---best_checkpoint_uri="http://gcs:4443/checkpoint_bucket/best" \
+--latest_checkpoint_uri="http://gcs:4443/checkpoint-bucket/latest" \
+--best_checkpoint_uri="http://gcs:4443/checkpoint-bucket/best" \
 --movies_uri="http://gcs:4443/data/movies-00000-of-00001.array_record" \
 --recommendations_uri="http://gcs:4443/data/recommended_movies.array_record" \
 --recommendations_ts_uri="http://gcs:4443/data/recommended_movies_timestamps.array_record" \

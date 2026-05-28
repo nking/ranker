@@ -93,7 +93,6 @@ jax-ai-stack==2025.10.28
 jaxopt==0.8.5
 jaxtyping==0.3.9
 Jinja2==3.1.6
-jraph @ git+https://github.com/deepmind/jraph.git@51f5990104f7374492f8f3ea1cbc47feb411c69c
 jraphx==0.0.4
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
