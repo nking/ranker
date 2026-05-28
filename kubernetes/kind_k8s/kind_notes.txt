@@ -2,7 +2,6 @@ Kind (Kubernetes IN Docker) is a tool for running local Kubernetes
 clusters using Docker containers as "nodes."
 
 Because Kind containers share the Linux kernel with your host 
-
 machine (assuming you are on Linux or using Docker Desktop), 
 there is virtually zero virtualization overhead. This makes 
 it the fastest way to boot a cluster for development and CI/CD.

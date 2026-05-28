@@ -28,13 +28,22 @@ extract_and_shutdown() {
 
     #fetch and report
     if [ "$run_code" = "true" ]; then
-        python3 extract_hpo_results.py >& hpo_results.txt
+        echo "Running HPO results extraction..."
 
-        ##this is handled in cluster shutdown already, so save 10-15 sec by deleting the cluster only
-        ##kubectl delete -f dbs.yaml
+        # Runs python script, redirects stdout and stderr to hpo_results.txt, and tests exit code
+        if python3 extract_hpo_results.py > hpo_results.txt 2>&1; then
+            echo "✅ HPO results extracted successfully to hpo_results.txt"
+        else
+            echo "❌ ERROR: extract_hpo_results.py crashed!"
+            echo "📝 Check 'hpo_results.txt' to view the python traceback error statements."
+            echo "🛑 DEBUG PAUSE: Keeping the Kind cluster alive so you can inspect databases/logs."
+            read -p "Press [Enter] to tear down the cluster and exit..."
+        fi
 
-        # You could add a check here to extract data if it wasn't already
-        #kind delete cluster --name graphranker-tune-train-test-cluster
+        echo "Cleaning up local cluster..."
+        kind delete cluster --name graphranker-tune-train-test-cluster
+
+        date
     fi
 }
 
@@ -57,14 +66,35 @@ if [ "$run_code" = "true" ]; then
     kubectl create namespace ranker-ns --dry-run=client -o yaml | kubectl apply -f -
     kubectl apply -f secrets.yaml -n ranker-ns
     envsubst '$PROJECT_ROOT' < dbs.yaml | kubectl apply -f -
-    echo "waiting for readiness of databases"
-    kubectl rollout status deployment/local-db-store -n ranker-ns --timeout=60s || exit 1
-    kubectl rollout status deployment/gcs-emulator -n ranker-ns --timeout=60s || exit 1
-    kubectl rollout status deployment/vizier-server -n ranker-ns --timeout=60s || exit 1
 
+    #echo "waiting for readiness of databases"
+    #kubectl rollout status deployment/local-db-store -n ranker-ns --timeout=60s || exit 1
+    #kubectl rollout status deployment/gcs-emulator -n ranker-ns --timeout=60s || exit 1
+    #kubectl rollout status deployment/vizier-server -n ranker-ns --timeout=60s || exit 1
+    echo "waiting for readiness of databases (timeout is 3m)"
+    # If any of these fail, pause so you can debug instead of instantly exiting and deleting the cluster
+    if ! kubectl rollout status deployment/local-db-store -n ranker-ns --timeout=180s; then
+        echo "❌ ERROR: local-db-store failed to roll out."
+        echo "🛑 SETUP DEBUG PAUSE: Run 'kubectl get pods -n ranker-ns' in another terminal to inspect."
+        read -p "Press [Enter] to allow the script to exit and clean up..."
+        exit 1
+    fi
+
+    if ! kubectl rollout status deployment/gcs-emulator -n ranker-ns --timeout=180s; then
+        echo "❌ ERROR: gcs-emulator failed to roll out."
+        read -p "Press [Enter] to allow the script to exit and clean up..."
+        exit 1
+    fi
+
+    if ! kubectl rollout status deployment/vizier-server -n ranker-ns --timeout=180s; then
+        echo "❌ ERROR: vizier-server failed to roll out."
+        read -p "Press [Enter] to allow the script to exit and clean up..."
+        exit 1
+    fi
 fi
 
 (
+    date
     for (( i=0; i<NUM_TRIALS; i+=NUM_TRIALS_PER_WORKER )); do
         #format the trial_ids string to give a worker several trials to process
         TRIAL_IDS="["
@@ -84,34 +114,30 @@ fi
         echo "Launching JobGroup chunk with trial_ids=${TRIAL_IDS}"
 
         if [ "$run_code" = "true" ]; then
-            #for HPO, we use a new instance per chunk, though could refactor to keep container if wanted...
+
             envsubst '$PROJECT_ROOT $TRIAL_IDS' < app-runner.yaml | kubectl apply -f -
 
-            echo "Waiting for chunk to finish..."
+            echo "Waiting for all ML workers to roll out..."
+            # blocks until the statefulset meets its entire replica availability goal
+            kubectl rollout status statefulset/app-runner -n ranker-ns --timeout=300s
 
-            kubectl wait --for=condition=Initialized pod -l app=app-runner -n ranker-ns --timeout=30s
-
-            ## stream container statements in background and save its Process ID (PID)
-            #kubectl logs -f -l app=app-runner -c app-runner -n ranker-ns --prefix=true &
-            #LOGS_PID=$!
-
-            echo "Waiting for chunk to finish..."
-            # 1-hour execution safeguard blocking the foreground
+            echo "🚀 Chunk executing! Waiting for training workloads to complete..."
+            # 1-hour safeguard blocking the script until the pods finish executing (Ready=False)
             kubectl wait --for=condition=ready=false pod -l app=app-runner -n ranker-ns --timeout=1h
 
+            # Append logs for this chunk iteration
             kubectl logs pod/app-runner-0 -n ranker-ns >> chunk_logs_app_0.txt
             kubectl logs pod/app-runner-1 -n ranker-ns >> chunk_logs_app_1.txt
 
-            # --- DEBUG PAUSE ---
-            echo "🛑 DEBUG PAUSE: Pods have finished or crashed."
-            read -p "Press [Enter] to delete the StatefulSet and continue to the next chunk..."
-            # ----------------------------
-
-            ## Kill the background log stream now that the chunk is done
-            #kill $LOGS_PID 2>/dev/null
+            ## --- DEBUG PAUSE.... comment out when done debugging ---
+            #echo "🛑 DEBUG PAUSE: Pods have finished or crashed."
+            #read -p "Press [Enter] to delete the StatefulSet and continue to the next chunk..."
+            ## ----------------------------
 
             echo "Chunk finished!"
             kubectl delete -f app-runner.yaml --ignore-not-found
+
         fi
     done
+    date
 )

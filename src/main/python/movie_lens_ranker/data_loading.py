@@ -27,13 +27,9 @@ def create_train_and_val_dataloaders(
         train_negatives_uri:str, val_negatives_uri:str,
         max_history:int, num_candidates:int,
         num_epochs:int, batch_size:int, seed:int=0) -> Tuple[DataLoader, DataLoader]:
-    
-    print(f'before read_movies_array_record', flush=True)
-    
+        
     all_movie_ids: List[int] = read_movies_array_record(movies_uri, batch_size=batch_size)
     
-    print(f'after read_movies_array_record', flush=True)
-
     # the number per user must be >= half of num_candidates
     recommendations = RecommendedMovies(
         movie_rec_file_path=recommendations_uri,

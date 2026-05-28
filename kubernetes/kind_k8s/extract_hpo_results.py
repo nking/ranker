@@ -5,6 +5,7 @@ from typing import Union, Dict, Any
 import mlflow
 from mlflow import MlflowClient
 from vizier._src.pyvizier.shared.trial import ParameterValue, ParameterDict
+from vizier.service import pyvizier as vz
 from vizier.service import clients as vz_clients
 import numpy as np
 from dotenv import dotenv_values
@@ -80,21 +81,29 @@ def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
     return config
     
 def main():
-        
+    
+    config = {}
     # === these are so that grain dataloader can read data from fake gcs server running in docker ====
     env_file = os.path.join(os.getcwd(), "run_config.env")
     for k, v in dotenv_values(env_file).items():
-        os.environ[k] = v
+        v = v.replace("vizier-service:", "172.17.0.1:")
+        v = v.replace("db-service:", "172.17.0.1:")
+        #os.environ[k] = v
+        config[k] = v
     env_file = os.path.join(get_project_dir(), ".env")
     for k, v in dotenv_values(env_file).items():
-        os.environ[k] = v
+        v = v.replace("gcs:", "172.17.0.1:")
+        #os.environ[k] = v
+        config[k] = v
         
-    STUDY_NAME = os.environ["study_name"]
+    STUDY_NAME = config["study_name"]
+    project_id = config['project_id']
         
-    vz_clients.environment_variables.server_endpoint = os.environ['vizier_endpoint']
-    print(f'looking for study_name {STUDY_NAME} at endpoint {os.environ["vizier_endpoint"]}')
-    study = vz_clients.Study.from_owner_and_id(owner=os.environ['project_id'],
-        study_id=STUDY_NAME)
+    vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
+    print(f'looking for study_name {STUDY_NAME} at endpoint {config["vizier_endpoint"]}', flush=True)
+    resource_name = f"owners/{project_id}/studies/{STUDY_NAME}"
+
+    study = vz_clients.Study.from_owner_and_id(owner=project_id, study_id=STUDY_NAME)
     
     optimal_trials = study.optimal_trials()
     best_trial = None
@@ -112,14 +121,21 @@ def main():
     print(f"Loaded Best Objective: {best_value}")
     print(f"Loaded Best Parameters: {best_params}")
     
+    mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
+    
+    #mlflow table called runs has columns:
+    #run_uuid | name | source_type | source_name | entry_point_name | user_id | status | start_time | end_time | source_version | lifecycle_stage | artifact_uri | experiment_id | deleted_time
+    
+    #run_uuid is this:
     mlflow_run_id = best_trial_data.metadata.get('mlflow_run_id')
     mlflow_run = mlflow.get_run(mlflow_run_id)
-    config = destringify_mlflow_params(mlflow_run.data.params)
+    
+    config2 = destringify_mlflow_params(mlflow_run.data.params)
     
     print(f'\nconfig:')
-    print(json.dumps(config, indent=4, sort_keys=True))
+    print(json.dumps(config2, indent=4, sort_keys=True))
     
-    mlflow_client = MlflowClient(tracking_uri=os.environ['mlflow_tracking_uri'])
+    mlflow_client = MlflowClient(tracking_uri=config['mlflow_tracking_uri'])
     
     metrics_dict = {}
     for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
@@ -131,7 +147,7 @@ def main():
                 metrics_dict[key_t]['y'].append(float(m.value))
     
     print(f'\nmetrics:')
-    print(json.dumps(config, indent=4, sort_keys=True))
+    print(json.dumps(metrics_dict, indent=4, sort_keys=True))
     
 if __name__ == '__main__':
     main()

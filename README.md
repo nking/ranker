@@ -21,23 +21,24 @@ https://github.com/nking/reranker.git
 --------------------------------------------------
 some details about the model
 
-- base layer an instance of jraphx.nn.GATv2Conv
+- base layer is an instance of jraphx.nn.GATv2Conv
   which is the jraphx implementation of the
   Brody, Alon, Yahav "How Attentive are Graph Attention Networks"
   model called "Universal Graph Attention".
   - has dynamic attention that is dependent upon the query.
-  - complexity is O(V*F + E*F) where
+  - runtime complexity is O(V*F + E*F) where
     V is number of nodes, E is number of edges and F is number of
     features.
   - The model takes in a user's query graph which is the user query
     enriched by the user's watch history and candidate movies.
-    During training, the candidate movies are negatives for the
+    During training, the candidate movies are built from negatives for the
     constrastive listwise learning.
-    During inference, the candidate movies are from the retrieval
+    During inference, the candidate movies are given from the retrieval
     stage of the recommendation system.
 
     The GATV2 takes the embeddings created by the bi-encoder and
-    takes the ratings as edge attributes, and learns a weight matrix
+    takes the ratings (from the dataloader entries of [user_id, movie_id, rating, timestamp])
+    as edge attributes, and learns a weight matrix
     over a specified number of hops in the query graph network
     nodes, and learns an edge weight matrix, and learns the attention
     that node_i pays to node_j.
@@ -53,7 +54,8 @@ some details about the model
 
   TODO: considering a CliffordNet version, but it needs
         upstream of it, a bi-encoder that uses geometric algebra
-        and it requires adaptations to the retrieval.
+        to make query (=user) bi-vectors and candidate (=movie) bi-vectors,
+        and it requires adaptations to the retrieval code including storage in ScANN.
         - this Geometric Algebra (GA) cross encoder would have layers:
           (1) a geometric product layer to characterize the interaction
              where the GP is dot product + wedge product between a
@@ -63,13 +65,14 @@ some details about the model
           (3) a rotor layer to characterize rotation of embedding axes
               and replace the GATv2 attention.
         presumably I can use a smaller number of axes in the
-          input bivector embeddings (n=6 bivector as comparable to the 
+          input bi-vector embeddings (n=6 bi-vector as comparable to the 
           length=16 euclidean vector, considering the combinatorial C(n, 2))
           and get a more expressive result for similar final runtime complexity
           and space complexity.
           ==> that the runtime and space complexities are of same order as
-              the prototype GraphRanker means that the model would need to
-              train in a cluster, preferably with accelerators.
+              the prototype GraphRanker means that the geometric alegra
+              cross-encoder model, like the GraphRanker GATv2 cross-encoder
+              model would benefit from 8 times faster training with accelerators
 --------------------------------------------------
 
 Instructions:

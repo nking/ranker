@@ -258,7 +258,7 @@ def sync_hyperparams(params_dict) -> Dict[str, Union[int, float]]:
 def tune_run(config):
     
     if "debug" in config and config['debug']:
-        print(f'args received: {config}', flush=True)
+        print(f'tune_run config: {config}', flush=True)
     
     if "phase" not in config:
         print("ERROR: expecting phase='tune'")
@@ -301,15 +301,10 @@ def tune_run(config):
         config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
         print(f"worker_{worker_rank}: done creating MLFlow parent run")
         
-    if "debug" in config and config['debug']:
-        print(f'args received by tune_fn: {config}', flush=True)
-        
     trial_ids = json.loads(config['trial_ids'])
     n_large = len(trial_ids) > 10
     
-    print(f"worker_{worker_rank}: waiting at barrier for vizier")
     jax.experimental.multihost_utils.sync_global_devices( "sync_barrier_for_vizier")
-    print(f"worker_{worker_rank}: passed barrier for vizier before create study")
     
     if worker_rank == 0:
         print(f"worker_{worker_rank}: creating vizier study", flush=True)
@@ -361,7 +356,7 @@ def tune_run(config):
 def train_run(config):
    
     if "debug" in config and config['debug']:
-        print(f'args received: {config}', flush=True)
+        print(f'train_run config: {config}', flush=True)
     
     if "phase" not in config:
         print("ERROR: expecting phase='train_best' or 'train_given'")
@@ -462,7 +457,7 @@ def get_best_checkpoint_uri_for_testing(config:Dict[str, Any]) -> str:
 
 def test_run(config):
     if "debug" in config and config['debug']:
-        print(f'args received: {config}', flush=True)
+        print(f'test_run config: {config}', flush=True)
     
     if "phase" not in config:
         print("ERROR: expecting phase='test_best' or 'test_given'")

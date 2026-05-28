@@ -71,7 +71,7 @@ def app_runner_is_missing_minimum_required_keys(config: Dict[str, Any]) -> bool:
     
 def get_canonical_mlflow_run_name(config: Dict[str, Any]) -> str:
     if config['phase'].find('tune') == 0:
-        run_name = f"trail_{config.get('trial_id', 0)}"
+        run_name = f"trial_{config.get('trial_id', 0)}"
     elif config['phase'].find('train') == 0:
         run_name = f"train_{config.get('train_id',0)}"
     elif config['phase'].find('test') == 0:
