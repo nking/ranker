@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# this script runs the container image ranker-app:latest using a StatefulSet
+# this script runs the container image ranker-app:latest using a Kubeflow Trainer API v2.2
 
 echo "Checking internet connection, needed to pull docker images..."
 if ! ping -c 1 -W 3 google.com &> /dev/null; then
@@ -51,7 +51,7 @@ extract_and_shutdown() {
 
 trap extract_and_shutdown EXIT
 
-rm chunk_logs_app_0.txt chunk_logs_app_1.txt
+rm chunk_trainer_master_logs.txt chunk_trainer_worker-0_logs.txt
 
 if [ "$run_code" = "true" ]; then
 
@@ -59,6 +59,31 @@ if [ "$run_code" = "true" ]; then
     envsubst '$PROJECT_ROOT' < kind-cluster.yaml | kind create cluster --config -
     echo "waiting for nodes"
     kubectl wait --for=condition=Ready nodes --all --timeout=120s
+
+    # ====================================================================
+    # INSTALL KUBEFLOW TRAINER V2
+    # ====================================================================
+    echo "Installing JobSet..."
+    kubectl apply --server-side -f https://github.com/kubernetes-sigs/jobset/releases/download/v0.10.1/manifests.yaml
+
+    export VERSION=v2.1.0
+    echo "Installing Kubeflow Trainer Controller..."
+    kubectl apply --server-side -k "https://github.com/kubeflow/trainer.git/manifests/overlays/manager?ref=${VERSION}"
+
+    echo "Waiting for Trainer Controller to be 1/1 Ready..."
+    while [[ $(kubectl get deployment kubeflow-trainer-controller-manager -n kubeflow-system -o 'jsonpath={.status.readyReplicas}') != "1" ]]; do
+      echo "Controller not ready yet... checking again in 5s"
+      sleep 5
+    done
+    echo "Controller is ready!"
+
+
+    echo "Installing Kubeflow Training Runtimes..."
+    kubectl apply --server-side -k "https://github.com/kubeflow/trainer.git/manifests/overlays/runtimes?ref=${VERSION}"
+
+    echo "Waiting for Kubeflow components to start..."
+    kubectl wait --for=condition=Available deployment/kubeflow-trainer-controller-manager -n kubeflow-system --timeout=120s
+    # ====================================================================
 
     echo "Sideloading local docker image into Kind..."
     kind load docker-image ranker-app:latest --name graphranker-tune-train-test-cluster
@@ -117,29 +142,34 @@ fi
 
         if [ "$run_code" = "true" ]; then
 
-            envsubst '$PROJECT_ROOT $TRIAL_IDS' < app-runner.yaml | kubectl apply -f -
+            # Apply the Kubeflow manifest
+            envsubst '$PROJECT_ROOT $TRIAL_IDS' < train_job.yaml | kubectl apply -f -
 
-            echo "Waiting for all ML workers to roll out..."
-            # blocks until the statefulset meets its entire replica availability goal
-            kubectl rollout status statefulset/app-runner -n ranker-ns --timeout=300s
+            echo "🚀 Training Job submitted to Kubeflow! Waiting for completion..."
 
-            echo "🚀 Chunk executing! Waiting for training workloads to complete..."
-            # 1-hour safeguard blocking the script until the pods finish executing (Ready=False)
-            kubectl wait --for=condition=ready=false pod -l app=app-runner -n ranker-ns --timeout=1h
+            sleep 3
 
-            # Append logs for this chunk iteration
-            kubectl logs pod/app-runner-0 -n ranker-ns >> chunk_logs_app_0.txt
-            kubectl logs pod/app-runner-1 -n ranker-ns >> chunk_logs_app_1.txt
+            # Wait natively for the TrainJob to finish!
+            # Kubeflow automatically sets the "Complete" condition when Rank 0 finishes successfully.
+            kubectl wait --for=condition=Complete trainjob/graphranker-jax-training -n ranker-ns --timeout=1h
 
-            ## --- DEBUG PAUSE.... comment out when done debugging ---
-            #echo "🛑 DEBUG PAUSE: Pods have finished or crashed."
-            #read -p "Press [Enter] to delete the StatefulSet and continue to the next chunk..."
-            ## ----------------------------
+            # Grab logs from the master node before deleting
+            #NOTE: job-role=master is the rank=0 worker and worker=0 is the 2nd worker.
+            # the jax_process=0 is the 'master' and jax_process=1 is the 'worker' with replica index 0
+            kubectl logs -l training.kubeflow.org/job-role=master -n ranker-ns >> chunk_trainer_master_logs.txt
+            #kubectl logs -f -l training.kubeflow.org/job-role=worker -n ranker-ns --prefix >> chunk_trainer_workers_logs.txt
+            kubectl logs -l training.kubeflow.org/job-role=worker,training.kubeflow.org/replica-index=0 -n ranker-ns >> chunk_trainer_worker-0_logs.txt
 
             echo "Chunk finished!"
-            kubectl delete -f app-runner.yaml --ignore-not-found
+            kubectl delete -f train_job.yaml --ignore-not-found
 
         fi
     done
     date
 )
+
+##debugging: 
+#kubectl get pods -n kubeflow-system
+#kubectl delete validatingwebhookconfiguration validator.trainer.kubeflow.org
+#kubectl rollout restart deployment/kubeflow-trainer-controller-manager -n kubeflow-system
+

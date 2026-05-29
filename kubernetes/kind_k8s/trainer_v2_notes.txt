@@ -1,0 +1,29 @@
+Kubeflow Trainer is a k8s native distr AI platform for
+training of AI models and fine-tuning LLMs across
+many different frameworks, including JAX.
+
+Kubeflow Train orchestrates multi-node, multi-local device (such as TPU, GPU)
+efficiently and scalably acroess HPCs.
+
+while Google Grain (and jax) handles the data plane, 
+Kubeflow Trainer v2 handles the infrastructure plane.
+
+pip install -U kubeflow  <-- smaller distr?  compatible version?
+
+Runtime(name='jax-distributed', 
+  trainer=RuntimeTrainer(trainer_type=<TrainerType.CUSTOM_TRAINER: 'CustomTrainer'>, framework='jax', image='nvcr.io/nvidia/jax:25.10-py3', num_nodes=1, device='Unknown', device_count='Unknown'), 
+  pretrained_model=None)
+
+(1) create a k8s cluster, using kind for example
+
+(2) install the kubeflow trainer controller manager
+export VERSION=v2.1.0
+kubectl apply --server-side -k "https://github.com/kubeflow/trainer.git/manifests/overlays/manager?ref=${VERSION}"
+  or use helm charts to install
+
+(3) Ensure that the JobSet and Trainer controller manager pods are running:
+  kubectl get pods -n kubeflow-system
+
+(4) deploy a released version of Kubeflow Training Runtimes:
+  kubectl apply --server-side -k "https://github.com/kubeflow/trainer.git/manifests/overlays/runtimes?ref=${VERSION}"
+

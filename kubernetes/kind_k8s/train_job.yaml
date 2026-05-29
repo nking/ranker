@@ -1,0 +1,77 @@
+apiVersion: kubeflow.org/v2alpha1
+kind: TrainJob
+metadata:
+  name: graphranker-jax-training
+  namespace: ranker-ns
+spec:
+  # ell Kubeflow this is a JAX workload
+  runtimeRef:
+    name: jax-job-runtime
+  trainer:
+    # Define the size of your cluster (Replaces your StatefulSet replicas)
+    numNodes: 2
+    container:
+    - name: app-runner
+      image: ranker-app:latest
+      imagePullPolicy: Never
+
+      # Kubeflow automatically injects JAX_COORDINATOR_ADDRESS, POD_IP, etc.
+      command: ["python", "/app/src/main/python/movie_lens_ranker/app_runner.py"]
+      args:
+        - "--LOGNAME=runner"
+        - "--USER=runner"
+        - "--study_name=GraphRanker_tuning_kind"
+        - "--mlflow_experiment_name=GraphRanker_tuning_kind"
+        - "--mlflow_tracking_uri=postgresql://runner:password123@db-service:5432/mlflow_db"
+        - "--vizier_endpoint=vizier-service:8000"
+        - "--latest_checkpoint_uri=gs://checkpoint-bucket/latest"
+        - "--best_checkpoint_uri=gs://checkpoint-bucket/best"
+        - "--movies_uri=gs://data/movies-00000-of-00001.array_record"
+        - "--recommendations_uri=gs://data/recommended_movies.array_record"
+        - "--recommendations_ts_uri=gs://data/recommended_movies_timestamps.array_record"
+        - "--ratings_train_uri=gs://data/small/ratings_train_liked.array_record"
+        - "--ratings_val_uri=gs://data/small/ratings_val_liked.array_record"
+        - "--train_negatives_uri=gs://data/train_negatives.array_record"
+        - "--val_negatives_uri=gs://data/val_negatives.array_record"
+        - "--movie_embeddings_uri=gs://data/movie_emb-00000-of-00001.array_record"
+        - "--user_embeddings_uri=gs://data/user_emb-00000-of-00001.array_record"
+        - "--num_epochs=2"
+        - "--batch_size=64"
+        - "--seed=12345"
+        - "--phase=tune"
+        - "--project_id=tune-kind-01"
+        - "--grain_num_threads_fetching_records=2"
+        - "--grain_num_threads_computing_num_records=2"
+        - "--debug=True"
+      envFrom:
+        - configMapRef:
+            name: app-runner-env
+      env:
+        # Inject the exact Pod Name (e.g., 'app-runner-0') using Downward API
+        - name: XLA_FLAGS
+          value: "--xla_force_host_platform_device_count=2"
+        - name: JAX_PROCESS_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['training.kubeflow.org/job-rank']
+        - name: JAX_COORDINATOR_ADDRESS
+          value: "graphranker-jax-training-master-0:8888" # Match the service name
+        - name: JAX_NUM_PROCESSES
+          value: "2"
+        #for debugging:
+        - name: ABSL_MIN_LOG_LEVEL
+          value: "0"  # 0 is INFO, 1 is WARNING, 2 is ERROR, 3 is FATAL
+        - name: GLOG_minloglevel
+          value: "0"
+        - name: TENSORSTORE_VERBOSE_LOGGING
+          value: "1"
+
+      volumeMounts:
+        - name: source-code
+          mountPath: /app/src
+
+    volumes:
+      - name: source-code
+        hostPath:
+          path: /app/src  # This path MUST exist on the Worker Node
+          type: Directory
