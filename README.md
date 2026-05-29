@@ -190,7 +190,7 @@ Running k8s/kind script:
 - make sure the db service images and the app image are built
   and that the main app image is tagged. by default ranker should be tagged latest
   ut if not:
-  docker build -t ranker-app:latest -f Dockerfile_cpu .
+  docker build -t ranker-app:local -f Dockerfile_cpu .
 - cd to kubernetes/kind_k8s
 - ./run_app.sh
 

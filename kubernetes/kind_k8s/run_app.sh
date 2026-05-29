@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# this script runs the container image ranker-app:latest using a StatefulSet
+# this script runs the container image ranker-app:local using a StatefulSet
 
 echo "Checking internet connection, needed to pull docker images..."
 if ! ping -c 1 -W 3 google.com &> /dev/null; then
@@ -61,8 +61,8 @@ if [ "$run_code" = "true" ]; then
     kubectl wait --for=condition=Ready nodes --all --timeout=120s
 
     echo "Sideloading local docker image into Kind..."
-    kind load docker-image ranker-app:latest --name graphranker-tune-train-test-cluster
-    kind load docker-image ranker-vizier_server:latest --name graphranker-tune-train-test-cluster
+    kind load docker-image ranker-app:local --name graphranker-tune-train-test-cluster
+    kind load docker-image vizier-server:local --name graphranker-tune-train-test-cluster
 
     echo "deploying databases"
     kubectl create namespace ranker-ns --dry-run=client -o yaml | kubectl apply -f -

@@ -1,5 +1,5 @@
 # Use your already-built image as the base
-FROM ranker-app:latest
+FROM ranker-app:local
 
 COPY ./src /app/src
 

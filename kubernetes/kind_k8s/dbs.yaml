@@ -221,7 +221,7 @@ spec:
     spec:
       containers:
       - name: vizier-server
-        image: ranker-vizier_server:latest # Must be built and loaded into kind first
+        image: vizier-server:local # Must be built and loaded into kind first
         imagePullPolicy: Never
         env:
         - name: VIZIER_DATABASE_URL

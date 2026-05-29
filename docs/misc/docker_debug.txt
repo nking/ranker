@@ -86,7 +86,7 @@ container holding vizier server is listening on 172.17.0.1 at port 8000
 a container is missing a module, so can run the container
 for duration of a session and while in its terminal,
 submit commands like pip list
-    docker run --rm -it ranker-vizier_server bash
+    docker run --rm -it vizier-server bash
 
 ----------
 a shell into the running postgres sql server mlflow_db:
@@ -104,16 +104,16 @@ sometimes, computer cannot resolve docker address:
 
 ------------------
 
-access vizier_server tables for queries:
+access vizier-server tables for queries:
 
-docker exec -it vizier_server python3 -c "
+docker exec -it vizier-server python3 -c "
 import sqlite3
 conn = sqlite3.connect('/app/data/vizier.db') 
 cursor = conn.cursor()
 cursor.execute('SELECT name FROM sqlite_master WHERE type=\'table\';')
 print(cursor.fetchall())"
 
-docker exec -it vizier_server python3 -c "
+docker exec -it vizier-server python3 -c "
 import sqlite3
 conn = sqlite3.connect('/app/data/vizier.db') 
 cursor = conn.cursor()
@@ -126,7 +126,7 @@ there is no time entry in any of them!
 [('owners', 'owner_name', 'VARCHAR'), ('studies', 'study_name', 'VARCHAR'), ('studies', 'owner_id', 'VARCHAR'), ('studies', 'study_id', 'VARCHAR'), ('studies', 'serialized_study', 'VARCHAR'), ('trials', 'trial_name', 'VARCHAR'), ('trials', 'owner_id', 'VARCHAR'), ('trials', 'study_id', 'VARCHAR'), ('trials', 'trial_id', 'INTEGER'), ('trials', 'serialized_trial', 'VARCHAR'), ('suggestion_operations', 'operation_name', 'VARCHAR'), ('suggestion_operations', 'owner_id', 'VARCHAR'), ('suggestion_operations', 'study_id', 'VARCHAR'), ('suggestion_operations', 'client_id', 'VARCHAR'), ('suggestion_operations', 'operation_number', 'INTEGER'), ('suggestion_operations', 'serialized_op', 'VARCHAR'), ('early_stopping_operations', 'operation_name', 'VARCHAR'), ('early_stopping_operations', 'owner_id', 'VARCHAR'), ('early_stopping_operations', 'study_id', 'VARCHAR'), ('early_stopping_operations', 'trial_id', 'INTEGER'), ('early_stopping_operations', 'serialized_op', 'VARCHAR')]
 
 to get last time the db file was modified:
-docker exec -it vizier_server python3 -c "
+docker exec -it vizier-server python3 -c "
 import os
 import datetime
 db_path = '/app/data/vizier.db'

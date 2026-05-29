@@ -64,28 +64,31 @@ if [ "$run_code" = "true" ]; then
     # ====================================================================
     # INSTALL KUBEFLOW TRAINER V2
     # ====================================================================
-    echo "Installing JobSet..."
-    #v0.11.0 or latest which is 0.12.0
-    JOBSET_VERSION=v0.12.0
-    kubectl apply --server-side -f https://github.com/kubernetes-sigs/jobset/releases/download/$JOBSET_VERSION/manifests.yaml
-    echo "Waiting for JobSet Controller to be 1/1 Ready..."
-    # Note: Ensure the namespace 'jobset-system' matches where your controller is deployed
-    while [[ $(kubectl get deployment jobset-controller-manager -n jobset-system -o 'jsonpath={.status.readyReplicas}') != "1" ]]; do
+    export VERSION=v2.2.0
+    echo "1. Installing Kubeflow Trainer Controller (and bundled JobSet)..."
+    kubectl apply --server-side -k "https://github.com/kubeflow/trainer.git/manifests/overlays/manager?ref=${VERSION}"
+
+    # Give the API server a few seconds to register the deployment objects before patching
+    sleep 3
+
+    echo "Applying Hotfix for broken JobSet staging image..."
+    # This overrides the deleted staging image with the official, stable v0.12.0 image
+    kubectl set image deployment/jobset-controller-manager manager=registry.k8s.io/jobset/jobset:v0.12.0 -n kubeflow-system
+
+    echo "Waiting for Controllers to be Ready..."
+    # Wait for Trainer Controller
+    while [[ $(kubectl get deployment kubeflow-trainer-controller-manager -n kubeflow-system -o 'jsonpath={.status.readyReplicas}') != "1" ]]; do
+      echo "Trainer Controller not ready yet... checking again in 5s"
+      sleep 5
+    done
+    echo "Trainer Controller is ready!"
+
+    # Wait for JobSet Controller
+    while [[ $(kubectl get deployment jobset-controller-manager -n kubeflow-system -o 'jsonpath={.status.readyReplicas}') != "1" ]]; do
       echo "JobSet Controller not ready yet... checking again in 5s"
       sleep 5
     done
     echo "JobSet Controller is ready!"
-
-    export VERSION=v2.2.0
-    echo "Installing Kubeflow Trainer Controller..."
-    kubectl apply --server-side -k "https://github.com/kubeflow/trainer.git/manifests/overlays/manager?ref=${VERSION}"
-
-    echo "Waiting for Trainer Controller to be 1/1 Ready..."
-    while [[ $(kubectl get deployment kubeflow-trainer-controller-manager -n kubeflow-system -o 'jsonpath={.status.readyReplicas}') != "1" ]]; do
-      echo "Controller not ready yet... checking again in 5s"
-      sleep 5
-    done
-    echo "Controller is ready!"
 
     echo "Installing Kubeflow Training Runtimes..."
     kubectl apply --server-side -k "https://github.com/kubeflow/trainer.git/manifests/overlays/runtimes?ref=${VERSION}"
@@ -95,8 +98,9 @@ if [ "$run_code" = "true" ]; then
     # ====================================================================
 
     echo "Sideloading local docker image into Kind..."
-    kind load docker-image ranker-app:latest --name graphranker-tune-train-test-cluster
-    kind load docker-image ranker-vizier_server:latest --name graphranker-tune-train-test-cluster
+    #note if doesn't exist, cd to project root and use docker build -t ranker-app:local -f Dockerfile_cpu .
+    kind load docker-image ranker-app:local --name graphranker-tune-train-test-cluster
+    kind load docker-image vizier-server:local --name graphranker-tune-train-test-cluster
 
     echo "deploying databases"
     kubectl create namespace ranker-ns --dry-run=client -o yaml | kubectl apply -f -

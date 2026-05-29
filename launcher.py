@@ -82,7 +82,7 @@ def main(_):
         #    executor_spec = xm_local.Local.Spec(),
         #)
         #docker_packageable = xm.container(
-        #    image_path='ranker-app:latest',
+        #    image_path='ranker-app:local',
         #    executor_spec = xm_local.Local.Spec(),
         #    env_vars=env_config,
         #    args={

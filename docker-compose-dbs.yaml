@@ -72,11 +72,12 @@ services:
       timeout: 5s
       retries: 5
 
-  vizier_server:
+  vizier-server:
     build:
       context: .
       dockerfile: Dockerfile_vizier
-    container_name: vizier_server
+    image: vizier-server:local
+    container_name: vizier-server
     healthcheck:
       test: [ "CMD-SHELL", "python3 -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect((\"localhost\", 8080))' || exit 1" ]
       interval: 10s

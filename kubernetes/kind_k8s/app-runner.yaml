@@ -5,8 +5,8 @@
 #
 # ALSO:
 #  need to give kind the app image:
-#     docker build -t ranker-app:latest -f Dockerfile_cpu .
-#     kind load docker-image ranker-app:latest
+#     docker build -t ranker-app:local -f Dockerfile_cpu .
+#     kind load docker-image ranker-app:local
 #
 # To access gcs-service:4443 or db-service:5432 from the host machine 
 # (outside the cluster) during development, map these specific ports 
@@ -75,7 +75,7 @@ spec:
 
       containers:
       - name: app-runner
-        image: ranker-app:latest # build and load into kind before using this yaml
+        image: ranker-app:local # build and load into kind before using this yaml
         imagePullPolicy: Never #will never look outside of local
         #if image is missing, see instructions at top of this file
         # Pull in all variables from the ConfigMap

@@ -185,7 +185,7 @@ def main(_):
         }
         
         executable = experiment.package([
-            # docker tag ranker-app:latest localhost/ranker-app:latest
+            # docker tag ranker-app:local localhost/ranker-app:local
             xm.Packageable(
                 executable_spec=xm.Dockerfile(
                     path=os.path.abspath('.'),
