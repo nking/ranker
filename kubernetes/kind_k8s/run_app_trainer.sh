@@ -65,9 +65,16 @@ if [ "$run_code" = "true" ]; then
     # INSTALL KUBEFLOW TRAINER V2
     # ====================================================================
     echo "Installing JobSet..."
-    #v0.11.0 or latest which is
+    #v0.11.0 or latest which is 0.12.0
     JOBSET_VERSION=v0.12.0
     kubectl apply --server-side -f https://github.com/kubernetes-sigs/jobset/releases/download/$JOBSET_VERSION/manifests.yaml
+    echo "Waiting for JobSet Controller to be 1/1 Ready..."
+    # Note: Ensure the namespace 'jobset-system' matches where your controller is deployed
+    while [[ $(kubectl get deployment jobset-controller-manager -n jobset-system -o 'jsonpath={.status.readyReplicas}') != "1" ]]; do
+      echo "JobSet Controller not ready yet... checking again in 5s"
+      sleep 5
+    done
+    echo "JobSet Controller is ready!"
 
     export VERSION=v2.2.0
     echo "Installing Kubeflow Trainer Controller..."
