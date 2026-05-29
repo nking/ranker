@@ -1,120 +1,34 @@
 looking for study_name GraphRanker_tuning_kind at endpoint 172.17.0.1:8000
-Available metrics: ['ndcg_20']
-Loaded Best Objective: 0.11264989418642861
-Loaded Best Parameters: {'top_k': 20, 'num_layers': 2, 'num_heads': 4, 'hidden_dim': 128, 'max_history': 784, 'num_candidates': 270, 'learning_rate': 0.001, 'weight_decay': 0.001, 'out_dim': 32, 'edge_embed_dim': 16, 'dropout_rate': 0.2}
+Traceback (most recent call last):
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/vizier/_src/service/clients.py", line 211, in from_resource_name
+    _ = client.get_study_config()  # Make sure study exists.
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/vizier/_src/service/vizier_client.py", line 352, in get_study_config
+    study = self._service.GetStudy(request)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/grpc/_channel.py", line 1159, in __call__
+    return _end_unary_response_blocking(state, call, False, None)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/grpc/_channel.py", line 990, in _end_unary_response_blocking
+    raise _InactiveRpcError(state)  # pytype: disable=not-instantiable
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+grpc._channel._InactiveRpcError: <_InactiveRpcError of RPC that terminated with:
+	status = StatusCode.UNKNOWN
+	details = "Exception calling application: 'Failed to find study name: owners/tune-kind-01/studies/GraphRanker_tuning_kind'"
+	debug_error_string = "UNKNOWN:Error received from peer  {grpc_status:2, grpc_message:"Exception calling application: \'Failed to find study name: owners/tune-kind-01/studies/GraphRanker_tuning_kind\'"}"
+>
 
-config:
-{
-    "LOGNAME": "runner",
-    "USER": "runner",
-    "batch_size": 64,
-    "best_checkpoint_uri": "gs://checkpoint-bucket/best",
-    "debug": true,
-    "dropout_rate": 0.20000000298023224,
-    "edge_embed_dim": 16,
-    "hidden_dim": 128,
-    "latest_checkpoint_uri": "gs://checkpoint-bucket/latest",
-    "learning_rate": 0.0010000000474974513,
-    "max_history": 784,
-    "mlflow_experiment_id": "1",
-    "mlflow_experiment_name": "GraphRanker_tuning_kind",
-    "mlflow_parent_run_id": "9df04fa5725543f59c7aa2257da285eb",
-    "mlflow_run_id": "7d546c8a8d0d4be1a915fcf625879988",
-    "mlflow_tracking_uri": "postgresql://runner:password123@db-service:5432/mlflow_db",
-    "movie_embeddings_uri": "gs://data/movie_emb-00000-of-00001.array_record",
-    "movies_uri": "gs://data/movies-00000-of-00001.array_record",
-    "num_candidates": 270,
-    "num_epochs": 2,
-    "num_heads": 4,
-    "num_layers": 2,
-    "out_dim": 32,
-    "phase": "tune",
-    "project_id": "tune-kind-01",
-    "ratings_test_uri": null,
-    "ratings_train_uri": "gs://data/small/ratings_train_liked.array_record",
-    "ratings_val_uri": "gs://data/small/ratings_val_liked.array_record",
-    "recommendations_ts_uri": "gs://data/recommended_movies_timestamps.array_record",
-    "recommendations_uri": "gs://data/recommended_movies.array_record",
-    "seed": 12345,
-    "study_name": "GraphRanker_tuning_kind",
-    "test_id": 0,
-    "test_negatives_uri": null,
-    "top_k": 20,
-    "train_id": 0,
-    "train_negatives_uri": "gs://data/train_negatives.array_record",
-    "trial_id": 0,
-    "trial_ids": "[0]",
-    "user_embeddings_uri": "gs://data/user_emb-00000-of-00001.array_record",
-    "val_negatives_uri": "gs://data/val_negatives.array_record",
-    "validate_checkpoint_restores": false,
-    "vizier_endpoint": "vizier-service:8000",
-    "weight_decay": 0.0010000000474974513
-}
+The above exception was the direct cause of the following exception:
 
-metrics:
-{
-    "train_loss": {
-        "x": [
-            2
-        ],
-        "y": [
-            5.456557273864746
-        ]
-    },
-    "train_mrr_20": {
-        "x": [
-            2
-        ],
-        "y": [
-            0.07133777439594269
-        ]
-    },
-    "train_ndcg_20": {
-        "x": [
-            2
-        ],
-        "y": [
-            0.12662316858768463
-        ]
-    },
-    "train_recall_20": {
-        "x": [
-            2
-        ],
-        "y": [
-            0.328125
-        ]
-    },
-    "val_loss": {
-        "x": [
-            2
-        ],
-        "y": [
-            5.260947363717215
-        ]
-    },
-    "val_mrr_20": {
-        "x": [
-            2
-        ],
-        "y": [
-            0.06556162610650063
-        ]
-    },
-    "val_ndcg_20": {
-        "x": [
-            2
-        ],
-        "y": [
-            0.11264989418642861
-        ]
-    },
-    "val_recall_20": {
-        "x": [
-            2
-        ],
-        "y": [
-            0.28683035714285715
-        ]
-    }
-}
+Traceback (most recent call last):
+  File "/home/nichole/projects/github/ranker/kubernetes/kind_k8s/extract_hpo_results.py", line 153, in <module>
+    main()
+  File "/home/nichole/projects/github/ranker/kubernetes/kind_k8s/extract_hpo_results.py", line 106, in main
+    study = vz_clients.Study.from_owner_and_id(owner=project_id, study_id=STUDY_NAME)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/vizier/_src/service/clients.py", line 233, in from_owner_and_id
+    return cls.from_resource_name(resource.name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/ranker_py312/lib/python3.12/site-packages/vizier/_src/service/clients.py", line 213, in from_resource_name
+    raise ResourceNotFoundError(f'Study {name} does not exist.') from err
+vizier.client.client_abc.ResourceNotFoundError: Study owners/tune-kind-01/studies/GraphRanker_tuning_kind does not exist.

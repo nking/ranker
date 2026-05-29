@@ -8,11 +8,13 @@ efficiently and scalably acroess HPCs.
 while Google Grain (and jax) handles the data plane, 
 Kubeflow Trainer v2 handles the infrastructure plane.
 
-pip install -U kubeflow  <-- smaller distr?  compatible version?
-
 Runtime(name='jax-distributed', 
   trainer=RuntimeTrainer(trainer_type=<TrainerType.CUSTOM_TRAINER: 'CustomTrainer'>, framework='jax', image='nvcr.io/nvidia/jax:25.10-py3', num_nodes=1, device='Unknown', device_count='Unknown'), 
   pretrained_model=None)
+
+one can interact with the Trainer using:
+  - kubectl for low level CLI commands to Kubernetes API server using the trainer.kubeflow.org/v1alpha1 schema
+  - the Kubeflow SDK
 
 (1) create a k8s cluster, using kind for example
 

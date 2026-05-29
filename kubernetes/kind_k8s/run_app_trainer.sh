@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # this script runs the container image ranker-app:latest using a Kubeflow Trainer API v2.2
+#    as a jax-distributed Trainer
 
 echo "Checking internet connection, needed to pull docker images..."
 if ! ping -c 1 -W 3 google.com &> /dev/null; then
@@ -64,9 +65,11 @@ if [ "$run_code" = "true" ]; then
     # INSTALL KUBEFLOW TRAINER V2
     # ====================================================================
     echo "Installing JobSet..."
-    kubectl apply --server-side -f https://github.com/kubernetes-sigs/jobset/releases/download/v0.10.1/manifests.yaml
+    #v0.11.0 or latest which is
+    JOBSET_VERSION=v0.12.0
+    kubectl apply --server-side -f https://github.com/kubernetes-sigs/jobset/releases/download/$JOBSET_VERSION/manifests.yaml
 
-    export VERSION=v2.1.0
+    export VERSION=v2.2.0
     echo "Installing Kubeflow Trainer Controller..."
     kubectl apply --server-side -k "https://github.com/kubeflow/trainer.git/manifests/overlays/manager?ref=${VERSION}"
 
@@ -76,7 +79,6 @@ if [ "$run_code" = "true" ]; then
       sleep 5
     done
     echo "Controller is ready!"
-
 
     echo "Installing Kubeflow Training Runtimes..."
     kubectl apply --server-side -k "https://github.com/kubeflow/trainer.git/manifests/overlays/runtimes?ref=${VERSION}"
@@ -173,3 +175,4 @@ fi
 #kubectl delete validatingwebhookconfiguration validator.trainer.kubeflow.org
 #kubectl rollout restart deployment/kubeflow-trainer-controller-manager -n kubeflow-system
 
+# kubectl describe trainjob -n ranker-ns graphranker-jax-training
