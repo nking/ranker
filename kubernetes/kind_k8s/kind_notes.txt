@@ -6,7 +6,13 @@ machine (assuming you are on Linux or using Docker Desktop),
 there is virtually zero virtualization overhead. This makes 
 it the fastest way to boot a cluster for development and CI/CD.
 ``
-requires go and docker, then kubectl
+requires go and docker
+
+for the bash scripts:
+   install kubectl (specific to platform OS... I used snap)
+for the python SDK:
+   pip install kubernetes
+
 
 Install:
 - go install sigs.k8s.io/kind@v0.31.0 (for go 1.17+). 
@@ -17,35 +23,14 @@ Install:
 - install kubectl:
    sudo snap install kubectl --classic
 
-to run:
-   ./run_app.sh
-
 documentation:
   https://kind.sigs.k8s.io/
 
-====================
-
-check that nodes are alive and talking to each other:
-  kubectl get nodes
-     (Should see control-plane and 2 worker nodes) 
-
- list the deployments:
-       kubectl get deployments
-          this should list all replica pods
-
- check same for services:
-      kubectl get services
-        this should list the service and the default kubernetes
-
-  kubectl describe deployment gcs-emulator
-
-  see debugging_notes.txt too
-
-  kubectl rollout history deployment gcs-emulator
-  kubectl rollout history deployment local-db-store
-  kubectl rollout history deployment local-db-store
-  kubectl rollout history deployment vizier-server
-  kubectl rollout history statefulset app-runner
-
-  kubectl delete -f app_kube_config.yaml
-
+This project was built using versions:
+   kind v0.31.0 go1.25.4 linux/amd64
+   go version go1.25.4 linux/amd64
+   kubectl version:
+        Client Version: v1.35.5
+        Kustomize Version: v5.7.1
+   kubeflow trainer v2.2.0 (dynamic)
+   python >= 3.11

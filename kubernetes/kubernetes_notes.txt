@@ -35,3 +35,16 @@ connects Pods to the network
 Setting the KUBECONFIG environment variable to point to your 
    .kube/config file.  holds credentials, etc
 
+-----------------------------------------------
+
+one can interact with the k8s API, a.k.a. k8s API server using
+the command line and kubectl or any of many k8s client SDKs.
+
+kubectl is essential reading the yaml file it is given, conerting
+it to JSON object and sending it to k8s api server using an HTTP POST or PUT
+request.
+
+the client SDKs are  similarly, doing the formatting of HTTP POST or
+PUT requests, but from dictionaries rather than yaml.
+
+
