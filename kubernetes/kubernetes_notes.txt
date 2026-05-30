@@ -1,0 +1,37 @@
+Kubernetes automates the process of deploying, scaling, and managing
+containerized applications across a cluster of machines. 
+
+K8s is abbrev for Kubernetes.
+
+kubernetes objects:
+Deployment
+Pod
+Service
+Ingress
+PersistentVolumeClaim
+
+Cluster: A collection of machines (nodes) managed by Kubernetes. 
+
+Control Plane: The brain of the cluster, responsible for managing the
+overall state and behavior. 
+
+Nodes: Individual machines within the cluster that run the
+applications.   ontains one or more pods
+
+Pods: The smallest deployable units in Kubernetes, representing a
+single instance of an application. 
+wraps a container.  usually only 1 container per pod.
+
+Containers: Lightweight, isolated environments for running
+applications. 
+
+Deployments: Instructions for how to create and update applications. 
+manages the pods.
+
+Services: Abstract representations of a set of pods, providing a stable
+endpoint for accessing applications. 
+connects Pods to the network
+
+Setting the KUBECONFIG environment variable to point to your 
+   .kube/config file.  holds credentials, etc
+
