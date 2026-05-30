@@ -50,14 +50,23 @@ spec:
       # Inject the exact Pod Name (e.g., 'app-runner-0') using Downward API
       - name: XLA_FLAGS
         value: "--xla_force_host_platform_device_count=2"
+      - name: POD_NAME
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.name
       - name: JAX_PROCESS_ID
         valueFrom:
           fieldRef:
             fieldPath: metadata.annotations['training.kubeflow.org/job-rank']
+      # naming convention forJobSet workers is 
+      # <jobSetName>-<replicatedJobName>-<jobIndex>-<podIndex>.<jobSetName>-<replicatedJobName>
+      # use kubectl get svc -n ranker-ns to get it
       - name: JAX_COORDINATOR_ADDRESS
-        value: "graphranker-jax-training-master-0:8888" # Match the service name
+        value: "graphranker-jax-training-node-0-0.graphranker-jax-training:8888"
       - name: JAX_NUM_PROCESSES
         value: "2"
+      - name: LOCAL_SIMULATION
+        value: "True"
       #for debugging:
       - name: ABSL_MIN_LOG_LEVEL
         value: "0"  # 0 is INFO, 1 is WARNING, 2 is ERROR, 3 is FATAL

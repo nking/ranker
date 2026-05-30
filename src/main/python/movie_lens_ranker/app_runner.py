@@ -10,14 +10,32 @@ from typing import Dict, Union, Any
 import jax
 
 def safe_jax_init():
-    
+    def get_process_id():
+        import re
+        #print(f'POD_NAME={os.environ.get("POD_NAME", "")}', flush=True)
+        #print(f'MASTER_ADDR={os.environ.get("MASTER_ADDR", "")}', flush=True)
+        #print(f'MASTER_PORT={os.environ.get("MASTER_PORT", "")}', flush=True)
+        #print(f'RANK={os.environ.get("RANK", "")}', flush=True)
+        #print(f'LOCAL_RANK={os.environ.get("LOCAL_RANK", "")}', flush=True)
+        if "JAX_PROCESS_ID" in os.environ and os.environ.get("JAX_PROCESS_ID").strip() != "":
+            return int(os.environ.get("JAX_PROCESS_ID"))
+        pod_name = os.environ.get("POD_NAME", "")
+        # Standard JobSet/StatefulSet pattern: name-replicatedjob-index-podindex
+        # the last digit represents the pod index/rank
+        match = re.search(r'-(\d+)-[a-z0-9]+$', pod_name)
+        if match:
+            return int(match.group(1))
+        return 0  # Fallback
+             
     try:
         if "LOCAL_SIMULATION" in os.environ and os.environ.get("LOCAL_SIMULATION") == "True":
             print("🛠️ Detected local simulation. Applying manual jax initialization...", flush=True)
+            process_id = get_process_id()
+
             jax.distributed.initialize(
                 coordinator_address=os.environ.get("JAX_COORDINATOR_ADDRESS"),
                 num_processes=int(os.environ.get("JAX_NUM_PROCESSES", 1)),
-                process_id=int(os.environ.get("JAX_PROCESS_ID"))
+                process_id=process_id
             )
     
         # Try jax[k8s] auto-discovery if no coordinator is provided

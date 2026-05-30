@@ -52,7 +52,7 @@ extract_and_shutdown() {
 
 trap extract_and_shutdown EXIT
 
-rm chunk_trainer_master_logs.txt chunk_trainer_worker-0_logs.txt
+rm -f chunk_trainer_master_logs.txt chunk_trainer_worker-0_logs.txt
 
 if [ "$run_code" = "true" ]; then
 
@@ -162,13 +162,23 @@ fi
 
             sleep 3
 
-            # Wait natively for the TrainJob to finish!
-            # Kubeflow automatically sets the "Complete" condition when Rank 0 finishes successfully.
-            kubectl wait --for=condition=Complete trainjob/graphranker-jax-training -n ranker-ns --timeout=1h
+            echo "get service for JAX_COORDINATOR_ADDRESS:"
+            kubectl get svc -n ranker-ns
+            kubectl get pods -n ranker-ns
 
             #NOTE: job-role=master is the rank=0 worker and worker=0 is the 2nd worker.
             # the jax_process=0 is the 'master' and jax_process=1 is the 'worker' with replica index 0
             MASTER_POD=$(kubectl get pods -n ranker-ns -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep "node-0-0")
+
+            if [ -n "$MASTER_POD" ]; then
+                echo "📡 Live-streaming logs to live_logs.txt..."
+                kubectl logs -f $MASTER_POD -n ranker-ns --tail=-1 > live_logs.txt 2>&1 &
+            fi
+
+            # Wait natively for the TrainJob to finish!
+            # Kubeflow automatically sets the "Complete" condition when Rank 0 finishes successfully.
+            kubectl wait --for=condition=Complete trainjob/graphranker-jax-training -n ranker-ns --timeout=1h
+
             WORKER_POD=$(kubectl get pods -n ranker-ns -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep "node-0-1")
 
             echo "Saving logs for $MASTER_POD and $WORKER_POD..."
@@ -190,3 +200,5 @@ fi
 #kubectl rollout restart deployment/kubeflow-trainer-controller-manager -n kubeflow-system
 
 # kubectl describe trainjob -n ranker-ns graphranker-jax-training
+# kubectl get pods -n ranker-ns
+# kubectl logs <pod_name from get pods> -n ranker-ns
