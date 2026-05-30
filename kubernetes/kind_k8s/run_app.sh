@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # this script runs the container image ranker-app:local using a StatefulSet
+#    and kubectl
 
 echo "Checking internet connection, needed to pull docker images..."
 if ! ping -c 1 -W 3 google.com &> /dev/null; then

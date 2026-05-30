@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # this script runs the container image ranker-app:latest using a Kubeflow Trainer API v2.2
-#    as a jax-distributed Trainer
+#    as a jax-distributed Trainer using kubectl
 
 echo "Checking internet connection, needed to pull docker images..."
 if ! ping -c 1 -W 3 google.com &> /dev/null; then
@@ -166,12 +166,15 @@ fi
             # Kubeflow automatically sets the "Complete" condition when Rank 0 finishes successfully.
             kubectl wait --for=condition=Complete trainjob/graphranker-jax-training -n ranker-ns --timeout=1h
 
-            # Grab logs from the master node before deleting
             #NOTE: job-role=master is the rank=0 worker and worker=0 is the 2nd worker.
             # the jax_process=0 is the 'master' and jax_process=1 is the 'worker' with replica index 0
-            kubectl logs -l training.kubeflow.org/job-role=master -n ranker-ns >> chunk_trainer_master_logs.txt
-            #kubectl logs -f -l training.kubeflow.org/job-role=worker -n ranker-ns --prefix >> chunk_trainer_workers_logs.txt
-            kubectl logs -l training.kubeflow.org/job-role=worker,training.kubeflow.org/replica-index=0 -n ranker-ns >> chunk_trainer_worker-0_logs.txt
+            MASTER_POD=$(kubectl get pods -n ranker-ns -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep "node-0-0")
+            WORKER_POD=$(kubectl get pods -n ranker-ns -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep "node-0-1")
+
+            echo "Saving logs for $MASTER_POD and $WORKER_POD..."
+
+            kubectl logs $MASTER_POD -n ranker-ns --tail=-1 >> chunk_trainer_master_logs.txt 2>&1
+            kubectl logs $WORKER_POD -n ranker-ns --tail=-1 >> chunk_trainer_worker-0_logs.txt 2>&1
 
             echo "Chunk finished!"
             kubectl delete -f train_job.yaml --ignore-not-found

@@ -14,7 +14,8 @@ Runtime(name='jax-distributed',
 
 one can interact with the Trainer using:
   - kubectl for low level CLI commands to Kubernetes API server using the trainer.kubeflow.org/v1alpha1 schema
-  - the Kubeflow SDK
+  - the Kubeflow SDK via cleints in several languages
+  - or in a declrative manner using tools like Helm ond/or Kustomize, or Terraform
 
 (1) create a k8s cluster, using kind for example
 
