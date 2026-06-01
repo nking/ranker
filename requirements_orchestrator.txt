@@ -1,2 +1,4 @@
 xmanager @ git+https://github.com/deepmind/xmanager.git@v0.7.1
 dotenv==0.9.9
+psycopg2-binary==2.9.5
+cloudpickle==3.1.2
