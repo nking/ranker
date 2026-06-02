@@ -157,7 +157,6 @@ def extract_hpo_results(target_image: str, namespace: str = "ranker-ns"):
     """Uses the same unified image variable to invoke extraction logic."""
     return dsl.ContainerSpec(
         image=target_image,
-        command=["python3", "main.py"],
         args=[
             "--phase=extract_hpo_results",
             f"--namespace={namespace}"
@@ -182,6 +181,7 @@ def hpo_pipeline(train_job_yaml_content:str, namespace:str = 'ranker-ns', target
         
     previous_task = None
     for chunk in chunks:
+        #dsl compoment returns task
         train_task = run_trainjob_chunk(
             trial_ids=chunk,
             train_job_yaml_content=train_job_yaml_content,
@@ -193,7 +193,7 @@ def hpo_pipeline(train_job_yaml_content:str, namespace:str = 'ranker-ns', target
         
         previous_task = train_task
     
-    # Single-node extractor using the same image coordinate
+    # Single-node extractor using the same image
     extraction_task = extract_hpo_results(target_image=target_image, namespace=namespace)
     
     if previous_task is not None:

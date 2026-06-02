@@ -81,12 +81,19 @@ extract_and_shutdown() {
             fi
         done
 
-        FILE="chunk_logs_app_0.txt"
+        FILE="chunk_trainer_master_logs.txt"
         PHRASE="mlflow start run: trial_"
         EXPECTED=4
         count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
         if ! [ "$count" -eq "$EXPECTED" ]; then
-            echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count in FILE"
+            echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count in $FILE"
+            exit 1
+        fi
+        PHRASE="worker_0"
+        EXPECTED=4
+        count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+        if ! [ "$count" -eq "$EXPECTED" ]; then
+            echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count in $FILE"
             exit 1
         fi
         PHRASE="worker_0"
@@ -96,14 +103,7 @@ extract_and_shutdown() {
             echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count."
             exit 1
         fi
-        PHRASE="worker_0"
-        EXPECTED=4
-        count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
-        if ! [ "$count" -eq "$EXPECTED" ]; then
-            echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count."
-            exit 1
-        fi
-        FILE="chunk_logs_app_1.txt"
+        FILE="chunk_trainer_worker-0_logs.txt"
         count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
         if ! [ "$count" -eq "$EXPECTED" ]; then
             echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count."
