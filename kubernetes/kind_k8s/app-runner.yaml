@@ -1,5 +1,5 @@
 # USAGE:
-#   export PROJECT_ROOT=$(pwd)/../../ && envsubst '$PROJECT_ROOT' < app-runner.yaml | kubectl apply -f -
+#   envsubst $TRIAL_IDS < app-runner.yaml | kubectl apply -f -
 # Sets the variable, pipes the YAML through envsubst, and passes it to kubectl via stdin (-)
 # to add another env var, separate the exports by semi-colons
 #
@@ -104,6 +104,7 @@ spec:
           - "--project_id=tune-kind-01"
           - "--grain_num_threads_fetching_records=2"
           - "--grain_num_threads_computing_num_records=2"
+          - "--trial_ids=${TRIAL_IDS}"
           - "--debug=True"
         envFrom:
         - configMapRef:

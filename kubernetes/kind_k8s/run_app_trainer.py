@@ -1,11 +1,16 @@
 import os
 import time
 import subprocess
+from json import dumps
+
 import yaml
 from kubernetes import client, config, utils
 from kubernetes.client.rest import ApiException
 
 from kind_util import setup_cluster, delete_cluster, find_executable_path
+
+#USAGE:
+#   python3 run_app_trainer.py
 
 # ====================================================================
 # CONFIGURATION
@@ -27,19 +32,30 @@ def run_training_loop():
     config.load_kube_config()
     crd_api = client.CustomObjectsApi()
     core_v1 = client.CoreV1Api()
-
+    
+    # Apply the custom TrainJob
+    with open("train_job.yaml", "r") as f:
+        manifest_str = f.read()
+    manifest = yaml.safe_load(manifest_str)
+    if "spec" not in manifest or "trainer" not in manifest["spec"] or "args" not in manifest["spec"][
+        "trainer"]:
+        raise ValueError("train_job.yaml is missing spec.trainer.args")
+    modify_i = -1
+    for i, arg in enumerate(manifest["spec"]["trainer"]["args"]):
+        if arg.find("--trial_ids") == 0:
+            modify_i = i
+            break
+    if modify_i == -1:
+        modify_i = len(manifest["spec"]["trainer"]["args"])
+        manifest["spec"]["trainer"]["args"].append("placeholder")
+    
     for i in range(0, NUM_TRIALS, NUM_TRIALS_PER_WORKER):
         
         trial_ids = [val for val in range(i, i + NUM_TRIALS_PER_WORKER) if val < NUM_TRIALS]
         print(f"\n🚀 Launching JobGroup chunk with trial_ids={trial_ids}")
-
-        # Apply the custom TrainJob
-        with open("train_job.yaml", "r") as f:
-            manifest_str = f.read()
-        manifest_str = manifest_str.replace("${PROJECT_ROOT}", PROJECT_ROOT)
-        manifest_str = manifest_str.replace("${TRIAL_IDS}", str(trial_ids))
-        manifest = yaml.safe_load(manifest_str)
-
+        
+        manifest["spec"]["trainer"]["args"][modify_i] = f"--trial_ids={dumps(list(trial_ids))}"
+        
         crd_api.create_namespaced_custom_object(
             group=TRAINJOB_GROUP,
             version=TRAINJOB_VERSION,
@@ -111,7 +127,22 @@ def extract_and_shutdown(kind_path:str):
         print("❌ ERROR: extract_hpo_results.py crashed! Check hpo_results.txt.")
         input("🛑 DEBUG PAUSE: Press [Enter] to tear down cluster...")
 
-    delete_cluster()
+    delete_cluster(kind_path)
+    
+def assert_logs():
+    for i, log_file in enumerate(["chunk_trainer_master_logs.txt", "chunk_trainer_worker-0_logs.txt"]):
+        with open(log_file, "r") as f:
+            file_str = f.read()
+            assert(file_str.find("'trial_ids': '[0, 1]'") > -1)
+            assert (file_str.find("'trial_ids': '[2, 3]'") > -1)
+            assert (file_str.count("Epoch 2:") == 4)
+            assert(file_str.count('finally clause in train_fn') == 4)
+            if i == 0:
+                assert (file_str.find("worker_0") > -1)
+                assert (file_str.count("mlflow start run: trial_") == 4)
+                assert (file_str.count("New best val NDCG") == 4)
+            else:
+                assert (file_str.find("worker_1") > -1)
     
 # ====================================================================
 # EXECUTION ENTRY POINT
@@ -119,6 +150,7 @@ def extract_and_shutdown(kind_path:str):
 if __name__ == "__main__":
     kind_path = find_executable_path("kind")
     kubectl_path = find_executable_path("kubectl")
+    finished = False
     try:
         # Clear old logs
         for log_file in ["chunk_trainer_master_logs.txt", "chunk_trainer_worker-0_logs.txt"]:
@@ -128,9 +160,12 @@ if __name__ == "__main__":
             KUBEFLOW_VERSION=KUBEFLOW_VERSION, NAMESPACE=NAMESPACE)
         
         run_training_loop()
+        finished = True
     except KeyboardInterrupt:
         print("\n⚠️ Interrupted by user.")
     except Exception as e:
         print(f"\n❌ Unhandled Exception: {e}")
     finally:
         extract_and_shutdown(kind_path)
+        if finished:
+            assert_logs()

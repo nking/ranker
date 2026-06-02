@@ -127,7 +127,7 @@ def setup_cluster(kind_path:str, kubectl_path:str, PROJECT_ROOT:str, KUBEFLOW_VE
     print("📦 Installing Kubeflow Training Runtimes...")
     run_cmd([kubectl_path, "apply", "--server-side", "-k", f"https://github.com/kubeflow/trainer.git/manifests/overlays/runtimes?ref={KUBEFLOW_VERSION}"])
 
-    print("🐳 Sideloading Docker Images...")
+    print("🐳 Sideloading Docker Images...") #the tags, when not :latest, result in looking for image locally first
     cluster_name = "graphranker-tune-train-test-cluster"
     run_cmd([kind_path, "load", "docker-image", "ranker-app:local", "--name", cluster_name])
     run_cmd([kind_path, "load", "docker-image", "vizier-server:local", "--name", cluster_name])

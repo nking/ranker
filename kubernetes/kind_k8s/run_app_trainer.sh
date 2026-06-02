@@ -2,6 +2,9 @@
 
 # this script runs the container image ranker-app:latest using a Kubeflow Trainer API v2.2
 #    as a jax-distributed Trainer using kubectl
+# USAGE:
+#    use in a venv that has vizier installed
+#    ./run_app_trainer.sh
 
 echo "Checking internet connection, needed to pull docker images..."
 if ! ping -c 1 -W 3 google.com &> /dev/null; then
@@ -54,6 +57,58 @@ extract_and_shutdown() {
         echo "Cleaning up local cluster..."
         kind delete cluster --name graphranker-tune-train-test-cluster
 
+        ## assert contents of chunk_logs_app_0.txt and chunk_logs_app_1.txt
+        FILES=("chunk_trainer_master_logs.txt" "chunk_trainer_worker-0_logs.txt")
+        for FILE in "${FILES[@]}"; do
+            if ! grep -q "'trial_ids': '\[0, 1\]'" $FILE; then
+                echo "missing trial_ids from $FILE"
+            fi
+            if ! grep -q "'trial_ids': '\[2, 3\]'" $FILE; then
+                echo "missing trial_ids from $FILE"
+            fi
+            PHRASE="Epoch 2:"
+            EXPECTED=4
+            count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+            if ! [ "$count" -eq "$EXPECTED" ]; then
+                echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count in $FILE"
+                exit 1
+            fi
+            PHRASE="finally clause in train_fn"
+            count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+            if ! [ "$count" -eq "$EXPECTED" ]; then
+                echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count in $FILE"
+                exit 1
+            fi
+        done
+
+        FILE="chunk_logs_app_0.txt"
+        PHRASE="mlflow start run: trial_"
+        EXPECTED=4
+        count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+        if ! [ "$count" -eq "$EXPECTED" ]; then
+            echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count in FILE"
+            exit 1
+        fi
+        PHRASE="worker_0"
+        EXPECTED=4
+        count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+        if ! [ "$count" -eq "$EXPECTED" ]; then
+            echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count."
+            exit 1
+        fi
+        PHRASE="worker_0"
+        EXPECTED=4
+        count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+        if ! [ "$count" -eq "$EXPECTED" ]; then
+            echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count."
+            exit 1
+        fi
+        FILE="chunk_logs_app_1.txt"
+        count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+        if ! [ "$count" -eq "$EXPECTED" ]; then
+            echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count."
+            exit 1
+        fi
         date
     fi
 }
@@ -164,7 +219,7 @@ fi
         if [ "$run_code" = "true" ]; then
 
             # Apply the Kubeflow manifest
-            envsubst '$PROJECT_ROOT $TRIAL_IDS' < train_job.yaml | kubectl apply -f -
+            envsubst '$TRIAL_IDS' < train_job.yaml | kubectl apply -f -
 
             echo "🚀 Training Job submitted to Kubeflow! Waiting for completion..."
 

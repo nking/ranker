@@ -1,5 +1,5 @@
 # USAGE:
-#   export PROJECT_ROOT=$(pwd)/../../ && envsubst '$PROJECT_ROOT' < dbsr.yaml | kubectl apply -f -
+#   export PROJECT_ROOT=$(pwd)/../../ && envsubst '$PROJECT_ROOT' < dbs.yaml | kubectl apply -f -
 # Sets the variable, pipes the YAML through envsubst, and passes it to kubectl via stdin (-)
 # to add another env var, separate the exports by semi-colons
 #

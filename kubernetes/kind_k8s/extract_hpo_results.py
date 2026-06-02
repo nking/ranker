@@ -2,6 +2,8 @@ import os
 import logging
 from typing import Union, Dict, Any
 
+## NOTE: must be run in a venv that contains vizier
+
 import mlflow
 from mlflow import MlflowClient
 from vizier._src.pyvizier.shared.trial import ParameterValue, ParameterDict

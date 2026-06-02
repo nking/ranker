@@ -37,6 +37,7 @@ spec:
       - "--project_id=tune-kind-01"
       - "--grain_num_threads_fetching_records=2"
       - "--grain_num_threads_computing_num_records=2"
+      - "--trial_ids=${TRIAL_IDS}"
       - "--debug=True"
     #not allowed, so manually entering them in env
     #envFrom:

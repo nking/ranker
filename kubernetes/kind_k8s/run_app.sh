@@ -54,6 +54,64 @@ extract_and_shutdown() {
         echo "Cleaning up local cluster..."
         kind delete cluster --name graphranker-tune-train-test-cluster
 
+        ## assert contents of chunk_logs_app_0.txt and chunk_logs_app_1.txt
+        FILES=("chunk_logs_app_0.txt" "chunk_logs_app_1.txt")
+        for FILE in "${FILES[@]}"; do
+            if ! grep -q "'trial_ids': '\[0, 1\]'" $FILE; then
+                echo "missing trial_ids."
+            fi
+            if ! grep -q "'trial_ids': '\[2, 3\]'" $FILE; then
+                echo "missing trial_ids."
+            fi
+            PHRASE="Epoch 2:"
+            EXPECTED=4
+            count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+            if ! [ "$count" -eq "$EXPECTED" ]; then
+                echo "✅ Success: '$PHRASE' found $count times."
+                echo "❌ Assertion failed: Expected $EXPECTED, but found $count."
+                exit 1
+            fi
+            PHRASE="finally clause in train_fn"
+            count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+            if ! [ "$count" -eq "$EXPECTED" ]; then
+                echo "✅ Success: '$PHRASE' found $count times."
+                echo "❌ Assertion failed: Expected $EXPECTED, but found $count."
+                exit 1
+            fi
+        done
+
+        FILE="chunk_logs_app_0.txt"
+        PHRASE="mlflow start run: trial_"
+        EXPECTED=4
+        count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+        if ! [ "$count" -eq "$EXPECTED" ]; then
+            echo "✅ Success: '$PHRASE' found $count times."
+            echo "❌ Assertion failed: Expected $EXPECTED, but found $count."
+            exit 1
+        fi
+        PHRASE="worker_0"
+        EXPECTED=4
+        count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+        if ! [ "$count" -eq "$EXPECTED" ]; then
+            echo "✅ Success: '$PHRASE' found $count times."
+            echo "❌ Assertion failed: Expected $EXPECTED, but found $count."
+            exit 1
+        fi
+        PHRASE="worker_0"
+        EXPECTED=4
+        count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+        if ! [ "$count" -eq "$EXPECTED" ]; then
+            echo "✅ Success: '$PHRASE' found $count times."
+            echo "❌ Assertion failed: Expected $EXPECTED, but found $count."
+            exit 1
+        fi
+        FILE="chunk_logs_app_1.txt"
+        count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
+        if ! [ "$count" -eq "$EXPECTED" ]; then
+            echo "✅ Success: '$PHRASE' found $count times."
+            echo "❌ Assertion failed: Expected $EXPECTED, but found $count."
+            exit 1
+        fi
         date
     fi
 }
@@ -126,7 +184,7 @@ fi
 
         if [ "$run_code" = "true" ]; then
 
-            envsubst '$PROJECT_ROOT $TRIAL_IDS' < app-runner.yaml | kubectl apply -f -
+            envsubst '$TRIAL_IDS' < app-runner.yaml | kubectl apply -f -
 
             echo "Waiting for all ML workers to roll out..."
             # blocks until the statefulset meets its entire replica availability goal
