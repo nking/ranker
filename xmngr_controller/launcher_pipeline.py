@@ -21,7 +21,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import asyncio
 import os
 from json import dumps
 
@@ -84,10 +83,11 @@ train_fn sees:
       9    jax.devices=[CpuDevice(id=0), CpuDevice(id=1), CpuDevice(id=2), CpuDevice(id=2048), CpuDevice(id=2049), CpuDevice(id=2050)]
 
 """
-study_name = "GraphRanker_tuning_xmngr_2"
+study_name = 'GraphRanker_tuning_xmngr_2'
+project_id = 'tune-xmngr-01'
 
 import subprocess
-def reset_checkpoint_buckets():
+def reset_checkpoint_buckets(study_name:str):
     for subdir in ("latest", "best"):
         command = [
             "docker", "exec", "gcs_emulator",
@@ -103,7 +103,23 @@ def reset_checkpoint_buckets():
             print("empty checkpoint-bucket/* successful")
         except subprocess.CalledProcessError as e:
             print(f"Error resetting database: {e.stderr}")
-        
+
+def reset_hpo_results_bucket(project_id:str, study_name:str):
+    command = [
+        "docker", "exec", "gcs_emulator",
+        "sh", "-c", f"rm -rf /storage/hpo-results-bucket/{project_id}/{study_name}"
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        print("empty checkpoint-bucket/* successful")
+    except subprocess.CalledProcessError as e:
+        print(f"Error resetting database: {e.stderr}")
+
 async def check_await_status(handle):
     try:
         await handle.wait_until_complete()
@@ -121,6 +137,16 @@ async def check_await_status(handle):
 #passwords in uris. see todo.txt for API details
 def main(_):
     from dotenv import dotenv_values
+    
+    ## reset all of orbax checkpoint-bucket and hpo results bucket
+    try:
+        reset_checkpoint_buckets(study_name)
+    except Exception as ex:
+        pass
+    try:
+        reset_hpo_results_bucket(project_id, study_name)
+    except Exception as ex:
+        pass
     
     with xm_local.create_experiment(experiment_title='xmngr_pipeline') as experiment:
         
@@ -179,7 +205,7 @@ def main(_):
             "batch_size": 64,
             "seed": 12345,
             "phase": "tune",
-            'project_id': 'tune-xmngr-01',
+            'project_id': project_id,
             "grain_num_threads_fetching_records": 2,
             "grain_num_threads_computing_num_records": 2,
         }
@@ -280,8 +306,51 @@ def main(_):
             logging.info(f"finished tuning {num_trials} trials")
             print('\a')
             
-            # ===============  begin train  =======================
+            # ===============  extract hpo  =======================
             jax_port = 8890
+            phase = 'export_hpo_results'
+            print(f"begin {phase} job")
+            group_jobs = {}
+            work_unit_id += 1
+            group_coordinator_port = jax_port
+            coordinator_name = f"{experiment.experiment_id}_{work_unit_id}_{phase}_job_0_worker_0"
+            rank = 0
+            container_ip = f"{container_gateway}"
+            docker_options = xm_local.DockerOptions()
+            coordinator_addr = f"{container_ip}:{group_coordinator_port}"
+            
+            _env_dict = env_config.copy()
+            _env_dict['JAX_PROCESS_ID'] = "0"
+            _env_dict['JAX_COORDINATOR_ADDRESS'] = coordinator_addr
+            _env_dict['JAX_NUM_PROCESSES'] = "1"
+            _env_dict['JAX_COORDINATOR_PORT'] = str(jax_port)
+            _env_dict["grain_read_options_num_threads"] = str(2)
+            
+            group_jobs[f"{phase}_job_0_worker_{rank}"] = xm.Job(
+                executable=executable,
+                executor=xm_local.Local(
+                    requirements=resources,
+                    docker_options=docker_options
+                ),
+                name=f"{phase}_job_0_worker_{rank}",
+                env_vars=_env_dict,
+                args={
+                    **run_config,
+                    'phase': phase,
+                    'validate_checkpoint_restores': False,
+                    "debug": True,
+                    'output_hyperparams_uri': f"gs://hpo-results-bucket/{project_id}/{study_name}/hpo_hparams.json",
+                    'output_metrics_uri': f"gs://hpo-results-bucket/{project_id}/{study_name}/hpo_metrics.json",
+                },
+            )
+            logging.info(f'adding {phase} job')
+            handle = await experiment.add(xm.JobGroup(**group_jobs))
+            await handle.wait_until_complete()
+            logging.info(f'finished {phase} job')
+            print('\a')
+            
+            # ===============  begin train  =======================
+            jax_port = 8892
             print("begin train job")
             group_jobs = {}
             work_unit_id += 1
@@ -326,7 +395,7 @@ def main(_):
             
             # ===============  begin test  =======================
             """
-            jax_port = 8892
+            jax_port = 8894
             print("begin test job")
             group_jobs = {}
             work_unit_id += 1
@@ -378,10 +447,5 @@ def main(_):
         logging.info("pipeline done.")
         
 if __name__ == '__main__':
-    ## reset all of orbax checkpoint-bucket
-    try:
-        reset_checkpoint_buckets()
-    except Exception as ex:
-        pass
-    
+   
     app.run(main)

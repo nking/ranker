@@ -31,7 +31,8 @@ mlflow_config_keys = {
 }
 hpo_config_keys = {'vizier_endpoint', 'trial_ids',
     'trial_id', 'train_id', 'test_id',
-    'phase', 'LOGNAME', 'USER', 'debug', 'study_name', 'project_id', "debug"
+    'phase', 'LOGNAME', 'USER', 'debug', 'study_name', 'project_id', "debug",
+    'output_hyperparams_uri', 'output_metrics_uri'
 }
 model_params_trainable_keys = {
     'top_k',
@@ -234,12 +235,13 @@ def define_flags():
     )
     flags.DEFINE_enum(
         'phase', 'train_best',
-        ['tune', 'train_best', 'train_given', 'test_best', 'test_given'],
+        ['tune', 'train_best', 'train_given', 'test_best', 'test_given', 'export_hpo_results'],
         'mode for running the train_fn.  tune: HPO run; '
         'train_best: use best HPs from tune; '
         'train_given: use given HPs; '
         'test_best: use test_fn for best model for the given study_name and project_id;'
-        'test_given: use test_fn with test_checkpoint_uri'
+        'test_given: use test_fn with test_checkpoint_uri; '
+        'export_hpo_results: extract the HPO best results into params and metrcs json files'
     )
     flags.DEFINE_string("mlflow_tracking_uri", default=None,
         help="MLFlow tracking uri"
@@ -280,6 +282,12 @@ def define_flags():
     )
     flags.DEFINE_float("dropout_rate", default=0.1,
         help="the dropout probability of a layer in the GATv2 layer of the GraphRanker"
+    )
+    flags.DEFINE_string("output_hyperparams_uri", default=None,
+        help="uri to write the best hyperparameters from HPO in json format"
+    )
+    flags.DEFINE_string("output_metrics_uri", default=None,
+        help="uri to write the metrics from best hyperparameters from HPO in json format"
     )
     flags.DEFINE_bool("debug", default=False,
         help="prints debug statements"

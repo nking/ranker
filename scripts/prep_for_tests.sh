@@ -2,6 +2,7 @@
 #from this directory, invoke:
 mkdir -p ../fake-gcs-server/data
 mkdir -p ../fake-gcs-server/checkpoint-bucket
+mkdir -p ../fake-gcs-server/hpo-results-bucket
 mkdir -p ../fake-gcs-server/mlflow_artifact_bucket
 cp -rf ../src/test/resources/data/* ../fake-gcs-server/data/
 chmod -R 775 ../fake-gcs-server

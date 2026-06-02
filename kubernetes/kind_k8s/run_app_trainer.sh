@@ -33,6 +33,14 @@ extract_and_shutdown() {
     if [ "$run_code" = "true" ]; then
         echo "Running HPO results extraction..."
 
+        #TODO: this script, extract_hpo_results.py, running outside of the ranker-app:local
+        # could be replaced by reading in app-runner.yaml and replacing:
+        # spec.replicas --> override value with "1"
+        # spec.template.spec.containers.env.JAX_NUM_PROCESSES --> override value with "1"
+        # spec.template.spec.containers.args.phase --> override value to use 'extract_hpo'
+        # then invoke similarly as below with envsubst '$PROJECT_ROOT $TRIAL_IDS' < app-runner_modified.yaml | kubectl apply -f -
+        # where have to figure out how to pass the modified string as the yaml...
+
         # Runs python script, redirects stdout and stderr to hpo_results.txt, and tests exit code
         if python3 extract_hpo_results.py > hpo_results.txt 2>&1; then
             echo "✅ HPO results extracted successfully to hpo_results.txt"

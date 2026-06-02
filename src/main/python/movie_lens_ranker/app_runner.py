@@ -8,6 +8,8 @@ import uuid
 from typing import Dict, Union, Any
 
 import jax
+from mlflow import MlflowClient
+
 
 def safe_jax_init():
     def get_process_id():
@@ -31,10 +33,14 @@ def safe_jax_init():
         if "LOCAL_SIMULATION" in os.environ and os.environ.get("LOCAL_SIMULATION") == "True":
             print("🛠️ Detected local simulation. Applying manual jax initialization...", flush=True)
             process_id = get_process_id()
+            coord_addr = os.environ.get("JAX_COORDINATOR_ADDRESS")
+            num_processes = int(os.environ.get("JAX_NUM_PROCESSES", 1))
+            
+            print(f'process_id = {process_id} coord_addr={coord_addr} num_processes={num_processes}',  flush=True)
 
             jax.distributed.initialize(
-                coordinator_address=os.environ.get("JAX_COORDINATOR_ADDRESS"),
-                num_processes=int(os.environ.get("JAX_NUM_PROCESSES", 1)),
+                coordinator_address=coord_addr,
+                num_processes=num_processes,
                 process_id=process_id
             )
     
@@ -49,7 +55,7 @@ def safe_jax_init():
     
     except RuntimeError as e:
         #absorb the error to avoid failure from more than one init attempt
-        print(f'WARNING while trying to initialize JAX distributed: {e}')
+        print(f'WARNING while trying to initialize JAX distributed: {e}', flush=True)
 
 safe_jax_init()
 
@@ -66,7 +72,8 @@ from vizier.service import clients as vz_clients
 
 from movie_lens_ranker.train import train_fn, test_fn
 from movie_lens_ranker.util import define_flags, get_recognized_keys, \
-    get_canonical_mlflow_run_name, app_runner_is_missing_minimum_required_keys
+    get_canonical_mlflow_run_name, app_runner_is_missing_minimum_required_keys, \
+    destringify_mlflow_params
 
 FLAGS = flags.FLAGS
 
@@ -240,7 +247,7 @@ def sync_hyperparams(params_dict) -> Dict[str, Union[int, float]]:
         final_params_dict)
     return final_params_dict
     
-def tune_run(config):
+def run_tune(config):
     
     if "debug" in config and config['debug']:
         print(f'tune_run config: {config}', flush=True)
@@ -338,7 +345,7 @@ def tune_run(config):
             trial_suggestion.update_metadata(vz.Metadata({'mlflow_run_id': mlflow_run_id}))
             trial_suggestion.complete(vz.Measurement(metrics={f'ndcg_{config["top_k"]}': float(best_val_ndcg_k)}))
         
-def train_run(config):
+def run_train(config):
    
     if "debug" in config and config['debug']:
         print(f'train_run config: {config}', flush=True)
@@ -440,7 +447,7 @@ def get_best_checkpoint_uri_for_testing(config:Dict[str, Any]) -> str:
         raise ValueError(f"No runs found for train_* for MLFlow experiment name: {config['study_name']}")
     return runs[0].data.tags.get("best_checkpoint_uri")
 
-def test_run(config):
+def run_test(config):
     if "debug" in config and config['debug']:
         print(f'test_run config: {config}', flush=True)
     
@@ -494,6 +501,82 @@ def test_run(config):
         
     print(f'TEST METRICS: {test_metrics}', flush=True)
    
+def run_export_hpo_results(config: Dict[str, Any]):
+    """
+    given a dictionary which includes vizier mappings: study_name, project_id, vizier_endpoint
+    and MLFlow mappings: mlflow_tracking_uri, extract the best found hyperparameters from the
+    HPO tuning and the resulting metrics and write to the given output uris output_hyperparams_uri and output_metrics_uri.
+    Note that the files will be json dictionaries.
+    :param config: a dictionary which includes vizier mappings: study_name, project_id, vizier_endpoint
+    and MLFlow mappings: mlflow_tracking_uri
+    :param output_hyperparams_uri: uri to write the best found hyper-parameters to
+    :param output_metrics_uri: uri to write the metrics dictionary from the best-hyper parameters run.
+    """
+    print(f'run_export_hpo_results')
+    
+    for key in ("study_name", "project_id", "vizier_endpoint", "mlflow_tracking_uri", "output_hyperparams_uri", "output_metrics_uri"):
+        if key not in config:
+            raise ValueError(f"Missing key {key} in config")
+        
+    STUDY_NAME = config["study_name"]
+    project_id = config['project_id']
+    
+    vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
+    print(f'looking for study_name {STUDY_NAME} at endpoint {config["vizier_endpoint"]}', flush=True)
+    #resource_name = f"owners/{project_id}/studies/{STUDY_NAME}"
+
+    study = vz_clients.Study.from_owner_and_id(owner=project_id, study_id=STUDY_NAME)
+    
+    optimal_trials = study.optimal_trials()
+    best_trial = next(iter(optimal_trials), None)
+    best_trial_data = best_trial.materialize()
+    #best_params contains only the params being tuned, not all params needed for train_fn
+    best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
+    #print("Available metrics:", list(best_trial_data.final_measurement.metrics.keys()), flush=True)
+    bfm = best_trial_data.final_measurement
+    bfm = bfm.metrics.get(f'ndcg_20')
+    best_value = bfm.value
+    
+    print(f"Loaded Best Objective: {best_value}")
+    print(f"Loaded Best Parameters: {best_params}")
+    
+    mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
+    
+    # mlflow table called runs has columns:
+    # run_uuid | name | source_type | source_name | entry_point_name | user_id | status | start_time | end_time | source_version | lifecycle_stage | artifact_uri | experiment_id | deleted_time
+    
+    # run_uuid is this:
+    mlflow_run_id = best_trial_data.metadata.get('mlflow_run_id')
+    mlflow_run = mlflow.get_run(mlflow_run_id)
+    
+    hparams = destringify_mlflow_params(mlflow_run.data.params)
+    hparams_json = json.dumps(hparams, indent=4, sort_keys=True)
+    try:
+        with fsspec.open(config['output_hyperparams_uri'], mode="w") as f:
+            f.write(hparams_json)
+    except Exception as e:
+        print(f'ERROR while trying to write to {config["output_hyperparams_uri"]}: {e}')
+        raise e
+    
+    #get the metrics:
+    mlflow_client = MlflowClient(tracking_uri=config['mlflow_tracking_uri'])
+    metrics_dict = {}
+    for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
+        for key_t in (f"train_{key}", f"val_{key}"):
+            metrics_dict[key_t] = {'x': [], 'y': []}
+            m_dict = mlflow_client.get_metric_history(mlflow_run_id, key=key_t)
+            for m in m_dict:
+                metrics_dict[key_t]['x'].append(int(m.step))
+                metrics_dict[key_t]['y'].append(float(m.value))
+    
+    metrics_json = json.dumps(metrics_dict, indent=4, sort_keys=True)
+    try:
+        with fsspec.open(config['output_metrics_uri'], mode="w") as f:
+            f.write(metrics_json)
+    except Exception as e:
+        print(f'ERROR while trying to write to {config["output_metrics_uri"]}: {e}')
+        raise e
+
 def main(_):
     config = FLAGS.flag_values_dict()
     
@@ -522,12 +605,15 @@ def main(_):
           f'jax.devices={jax.devices()}, phase={config["phase"]}', flush=True)
 
     if config['phase'] == 'tune':
-        tune_run(config)
+        run_tune(config)
     elif config['phase'].find('test') == 0:
-        test_run(config)
+        run_test(config)
+    elif config['phase'].find('train') == 0:
+        run_train(config)
+    elif config['phase'].find('export') == 0:
+        run_export_hpo_results(config)
     else:
-        train_run(config)
-    
+        raise ValueError('unknown phase: {config["phase"]}')
     
 if __name__ == '__main__':
     define_flags()

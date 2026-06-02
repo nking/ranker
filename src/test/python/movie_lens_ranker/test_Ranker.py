@@ -1,6 +1,5 @@
 import os
 import logging
-
 #to test for multiple devices before using on GPUs or TPUs:
 #os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=4'
 import jax
@@ -17,6 +16,8 @@ def safe_jax_init():
         print(f'WARNING while trying to initialize jax distributed: {e}')
 safe_jax_init()
 
+import fsspec
+import gcsfs
 from mlflow import MlflowClient
 from vizier.service import clients as vz_clients
 import numpy as np
@@ -45,6 +46,7 @@ from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
 from movie_lens_ranker.app_runner import main as app_runner, \
     extract_correct_vizier_param_types_dict, \
     get_best_checkpoint_uri_for_testing, get_best_parameters_for_training
+from movie_lens_ranker.app_runner import run_export_hpo_results
 
 import unittest
 import subprocess
@@ -131,7 +133,23 @@ def reset_checkpoint_buckets():
         print("empty checkpoint-bucket/* successful")
     except subprocess.CalledProcessError as e:
         print(f"Error resetting database: {e.stderr}")
-    
+        
+def reset_hpo_results_bucket(project_id:str, study_name:str):
+    command = [
+        "docker", "exec", "gcs_emulator",
+        "sh", "-c", f"rm -rf /storage/hpo-results-bucket/{project_id}/{study_name}"
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        print("empty checkpoint-bucket/* successful")
+    except subprocess.CalledProcessError as e:
+        print(f"Error resetting database: {e.stderr}")
+        
 class TestRanker(unittest.TestCase):
     def setUp(self):
         
@@ -297,6 +315,11 @@ class TestRanker(unittest.TestCase):
         except Exception as ex:
             pass
         
+        try:
+            reset_hpo_results_bucket(config['project_id'], config['study_name'])
+        except Exception as ex:
+            pass
+        
         print(f'BEGIN TUNING')
         
         # run tune HPO
@@ -346,7 +369,62 @@ class TestRanker(unittest.TestCase):
                 self.assertAlmostEqual(v, best_params2[k], delta=0.01 * v)
             else:
                 self.assertEqual(v, config[k])
-        
+                
+        # use the method and assert results
+        #output_hp_path = os.path.join(get_bin_dir(), "output_hp.json")
+        #output_metrics_path = os.path.join(get_bin_dir(), "output_metrics.json")
+        output_hp_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/hpo_hparams.json"
+        output_metrics_path =  f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/hpo_metrics.json"
+        config['output_hyperparams_uri'] = output_hp_path
+        config['output_metrics_uri'] = output_metrics_path
+        run_export_hpo_results(config = config)
+        with fsspec.open(output_hp_path, mode='r') as f:
+            content = f.read()
+            output_hp_dict = json.loads(content)
+        with fsspec.open(output_metrics_path, mode='r') as f:
+            content = f.read()
+            output_metrics_dict = json.loads(content)
+        self.assertIsNotNone(output_hp_dict)
+        self.assertIsNotNone(output_metrics_dict)
+        for k, v in best_params.items():
+            if isinstance(v, float):
+                self.assertAlmostEqual(v, output_hp_dict[k], delta=0.01*v)
+            else:
+                self.assertEqual(v, output_hp_dict[k])
+        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
+            key1 = f'train_{key}'
+            key2 = f'val_{key}'
+            self.assertTrue(key1 in output_metrics_dict)
+            self.assertTrue(key2 in output_metrics_dict)
+            
+        #remove files to test phase with app_runner
+        fs, path = fsspec.core.url_to_fs(config['output_hyperparams_uri'])
+        fs.rm(path)  # or fs.remove(path)
+        fs, path = fsspec.core.url_to_fs(config['output_metrics_uri'])
+        fs.rm(path)  # or fs.remove(path)
+        #test use from app_runner and phase
+        config['phase'] = 'export_hpo_results'
+        set_flags_from_dict(config)
+        app_runner(None)
+        with fsspec.open(output_hp_path, mode='r') as f:
+            content = f.read()
+            output_hp_dict = json.loads(content)
+        with fsspec.open(output_metrics_path, mode='r') as f:
+            content = f.read()
+            output_metrics_dict = json.loads(content)
+        self.assertIsNotNone(output_hp_dict)
+        self.assertIsNotNone(output_metrics_dict)
+        for k, v in best_params.items():
+            if isinstance(v, float):
+                self.assertAlmostEqual(v, output_hp_dict[k], delta=0.01*v)
+            else:
+                self.assertEqual(v, output_hp_dict[k])
+        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
+            key1 = f'train_{key}'
+            key2 = f'val_{key}'
+            self.assertTrue(key1 in output_metrics_dict)
+            self.assertTrue(key2 in output_metrics_dict)
+            
         #### ====================================================== ####
         print(f'BEGIN TRAINING')
         
