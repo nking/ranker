@@ -1,0 +1,100 @@
+KFP becomes the orchestration layer. 
+- write a pipeline using the KFP SDK
+- the compiler converts the Python code into a workflow
+  yaml/json which in turn gives to KFP's native execution
+  engine (which leverages Argo Workflows under the hood
+  insted the cluster).
+
+A pipeline component is a self-contained set of user code, packaged as
+a Docker image, that performs one step in the pipeline. For example, a
+component can be responsible for data preprocessing, data
+transformation, model training, and so on.
+
+A KFP component consist of the following key elements:
+- Code
+- Dependency support
+  - python libraries
+  - env vars
+  - python package indices
+  - cluster resources
+  - runtime dependencies
+- base image
+- input/output specification
+
+The recommended way to define a component is using the @dsl.component
+decorator from the KFP Python SDK
+
+The kfp client code is compiled into a large string and submitted to
+a backend to run the script.
+
+- Kubeflow Trainer v2 is a CustomResource
+
+from kfp import dsl
+from kfp import client
+
+# 1. Define a KFP component that uses the K8s SDK to launch your TrainJob
+@dsl.component(
+    base_image="bitnami/kubectl:latest", # Or a custom Python image with 'kubernetes' installed
+    packages_to_install=["kubernetes"]
+)
+def launch_trainjob_component(trial_ids: str, namespace: str = "ranker-ns"):
+    import time
+    from kubernetes import client, config
+    from kubernetes.client.rest import ApiException
+    
+    # Authenticate inside the cluster natively
+    config.load_incluster_config()
+    custom_api = client.CustomObjectsApi()
+    
+    # Replaces your manual 'envsubst < train_job.yaml' bash code
+    train_job_manifest = {
+        "apiVersion": "trainer.kubeflow.org/v1alpha1", # matching your Trainer version
+        "kind": "TrainJob",
+        "metadata": {"name": f"graphranker-jax-training-{trial_ids.replace(',', '-')}"},
+        "spec": {
+            # Your JAX distributed settings, image configurations, etc...
+        }
+    }
+    
+    print(f"Submitting TrainJob for trials: {trial_ids}")
+    try:
+        custom_api.create_namespaced_custom_object(
+            group="trainer.kubeflow.org",
+            version="v1alpha1",
+            namespace=namespace,
+            plural="trainjobs",
+            body=train_job_manifest
+        )
+    except ApiException as e:
+        print(f"Exception calling CustomObjectsApi: {e}")
+        raise e
+
+    # Programmatic Wait loop replacing 'kubectl wait' bash script
+    while True:
+        job = custom_api.get_namespaced_custom_object(
+            group="trainer.kubeflow.org", version="v1alpha1",
+            namespace=namespace, plural="trainjobs", name=train_job_manifest["metadata"]["name"]
+        )
+        status = job.get("status", {})
+        conditions = status.get("conditions", [])
+        
+        # Check if complete
+        if any(c.get("type") == "Complete" and c.get("status") == "True" for c in conditions):
+            print("🎉 TrainJob finished successfully!")
+            break
+        if any(c.get("type") == "Failed" and c.get("status") == "True" for c in conditions):
+            raise RuntimeException("❌ TrainJob failed during execution.")
+            
+        time.sleep(10)
+
+# 2. Wire the component into a KFP Pipeline
+@dsl.pipeline(name="graphranker-hpo-pipeline")
+def graphranker_pipeline(chunk_trials: list = ['0,1', '2,3']):
+    # Instead of bash loops, KFP handles execution topology naturally
+    with dsl.ParallelFor(chunk_trials) as trials:
+        launch_trainjob_component(trial_ids=trials)
+
+# 3. Trigger it using the KFP Client
+# client = client.Client(host="http://your-kfp-ui-address")
+# client.create_run_from_pipeline_func(graphranker_pipeline, arguments={})
+

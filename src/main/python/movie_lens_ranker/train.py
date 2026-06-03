@@ -1020,7 +1020,50 @@ def export_model(trained_model: GraphRanker, batch_size:int, max_history:int,
     :param num_candidates: num_candidates used for model training
     :return:
     """
+    from orbax import export
+
+    jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
+        max_history, num_candidates)
     
+    MAX_NODES = jax_graph_comp_dict['max_nodes']
+    MAX_EDGES = jax_graph_comp_dict['max_edges']
+    MAX_GRAPHS = 1  # Usually 1 if doing single-request real-time ranking
+
+    raise Exception("not yet implemented")
+    
+    """
+    serving_config = export.ServingConfig(
+        signature_key="serving_default",
+        input_signature=[
+            {
+                # Nodes attributes
+                "node_candidate_mask": tf.TensorSpec(shape=(MAX_NODES,),
+                    dtype=tf.bool, name="node_candidate_mask"),
+                "node_ids": tf.TensorSpec(shape=(MAX_NODES,), dtype=tf.int32,
+                    name="node_ids"),
+                "node_label": tf.TensorSpec(shape=(MAX_NODES,),
+                    dtype=tf.float32, name="node_label"),
+                "node_type": tf.TensorSpec(shape=(MAX_NODES,), dtype=tf.int32,
+                    name="node_type"),
+                
+                # Edges attributes
+                "edge_rating": tf.TensorSpec(shape=(MAX_EDGES,),
+                    dtype=tf.int32, name="edge_rating"),
+                
+                # Core Graph Topology
+                "receivers": tf.TensorSpec(shape=(MAX_EDGES,), dtype=tf.int32,
+                    name="receivers"),
+                "senders": tf.TensorSpec(shape=(MAX_EDGES,), dtype=tf.int32,
+                    name="senders"),
+                
+                # Metadata
+                "n_node": tf.TensorSpec(shape=(MAX_GRAPHS,), dtype=tf.int32,
+                    name="n_node"),
+                "n_edge": tf.TensorSpec(shape=(MAX_GRAPHS,), dtype=tf.int32,
+                    name="n_edge"),
+            }
+        ])
+    """
     '''
     train_dataloader operations stack receives as inputs:
         batch is a tuple of lists of the 4 datums: ([user_ids],[movie_ids],[ratings],[timestamps])

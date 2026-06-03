@@ -3,8 +3,8 @@ __pycache__/
 *.py[codz]
 *$py.class
 
-kubernetes/kind_k8s/*logs*txt
-kubernetes/kind_k8s/hpo_results.txt
+k8s/kind_k8s/*logs*txt
+k8s/kind_k8s/hpo_results.txt
 
 fake-gcs-server/
 .env

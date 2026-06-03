@@ -4,7 +4,6 @@ import shutil
 import sys
 import time
 import subprocess
-
 import yaml
 from kubernetes import client, config, utils
 from kubernetes.client.rest import ApiException

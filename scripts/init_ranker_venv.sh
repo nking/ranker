@@ -8,6 +8,8 @@ cd ..
 pip install -c requirements.txt -e .
 pip install equinox==0.13.2 alembic==1.18.4
 pip install orbax-checkpoint-0.11.39 jax==0.8.3 flax==flax-0.12.6 -c requirements3.txt
+pip install kfp==2.16.1 -c requirements3.txt 
+pip install kubernetes -c requirements3.txt
 #needed for export to tensorflow SavedModel format:
 #pip install tensorflow==2.20.0 -c requirements3.txt
 conda deactivate

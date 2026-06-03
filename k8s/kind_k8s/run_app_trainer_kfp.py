@@ -1,20 +1,21 @@
+#NOTE: in unit test choice of interprete,  interpreter with kubernetes installed in it. such as xmanager_py311
 import os
 import time
 import subprocess
 from json import dumps
 from typing import Dict
-
+import argparse
 import yaml
 from kind_util import setup_cluster, delete_cluster, find_executable_path
 
-from jax.experimental.pallas.ops.tpu.ragged_paged_attention.tuned_block_sizes import \
-    TUNED_BLOCK_SIZES
 #pip install kfp==2.16.1
 from kfp import dsl, compiler, client as kfp_client
 
 KUBEFLOW_VERSION = "v2.2.0"
 NAMESPACE = "ranker-ns"
 PROJECT_ROOT = os.path.abspath("../../")
+
+HPO_RESULTS_EXTRACTOR_IMAGE = "ranker-app:local"
 
 def setup_rbac(namespace: str = "ranker-ns"):
     """Grants KFP permissions to manage TrainJob custom resources."""
@@ -69,8 +70,8 @@ def setup_rbac(namespace: str = "ranker-ns"):
 
 #TODO: these need versions
 @dsl.component(
-    base_image="python:3.11-slim",
-    packages_to_install=["kubernetes", "pyyaml"]
+    base_image="python:3.12-slim",
+    packages_to_install=["kubernetes==30.1.0", "pyyaml==6.0.3"]
 )
 def run_trainjob_chunk(
         trial_ids: list,
@@ -138,13 +139,14 @@ def run_trainjob_chunk(
     )
 
 @dsl.container_component
-def extract_hpo_results(target_image: str, namespace: str = "ranker-ns"):
+def extract_hpo_results(namespace: str = "ranker-ns"):
     """Uses the same unified image variable to invoke extraction logic."""
+    ## inputs.parameters['namespace']
     return dsl.ContainerSpec(
-        image=target_image,
+        image=HPO_RESULTS_EXTRACTOR_IMAGE, # <-- KFPv2 undocumented requirement for a static string for docker image
         args=[
-            "--phase=extract_hpo_results",
-            f"--namespace={namespace}"
+            "--phase", "extract_hpo_results",
+            "--namespace", namespace
         ]
     )
 
@@ -154,16 +156,17 @@ def extract_hpo_results(target_image: str, namespace: str = "ranker-ns"):
 
 @dsl.pipeline(
     name="graphranker-sequential-hpo",
-    description="Sequential HPO execution loop powered by embedded layout manifests."
+    description="Sequential HPO execution loop powered by embedded layout manifests.",
 )
-def hpo_pipeline(train_job_yaml_content:str, namespace:str = 'ranker-ns', target_image:str = 'ranker-app:local'):
+def hpo_pipeline(train_job_yaml_content:str, namespace:str = 'ranker-ns'):
     
     ## demonstrating sequential use of 2 list of trial_ids given to 2 nodes, each with 2 local devices (==2 hax processes).
     # the code uses SPMD to partition the data into 2 nodes * 2 local devices = 4
     
     chunks = [[0, 1], [2, 3]]
-        
+    
     previous_task = None
+    
     for chunk in chunks:
         #dsl compoment returns task
         train_task = run_trainjob_chunk(
@@ -178,57 +181,56 @@ def hpo_pipeline(train_job_yaml_content:str, namespace:str = 'ranker-ns', target
         previous_task = train_task
     
     # Single-node extractor using the same image
-    extraction_task = extract_hpo_results(target_image=target_image, namespace=namespace)
+    extraction_task = extract_hpo_results(namespace=namespace)
     
     if previous_task is not None:
         extraction_task.after(previous_task)
+    
+@dsl.component(base_image="python:3.12-slim")
+def cleanup_cluster_resources(kind_path: str):
+    delete_cluster(kind_path)
 
-# ====================================================================
-# EXECUTION ENTRY POINT
-# ====================================================================
-if __name__ == '__main__':
+def compile_pipeline_yaml(pipeline_filename:str, train_job_yaml_path:str) -> str:
+    """
+    compile the pipeline to yaml and return the namespace.  the local train_job.yaml is the internal input.
+    :param pipeline_filename: name of the pipeline yaml file to write to
+    :return: the namespace parsed from the local train_job.yaml
+    """
+    print( f"🛠️ Ingesting template and compiling pipeline to {pipeline_filename}...")
+    TRAIN_JOB_YAML_PATH = train_job_yaml_path
     
-    TRAIN_JOB_YAML_PATH = "./train_job.yaml"
-    
-    if not os.path.exists():
+    if not os.path.exists(TRAIN_JOB_YAML_PATH):
         raise FileNotFoundError(
-            f"Missing trian job yaml file file: {TRAIN_JOB_YAML_PATH}")
+            f"Missing train job yaml file: {TRAIN_JOB_YAML_PATH}")
     
     with open(TRAIN_JOB_YAML_PATH, "r") as f:
         train_job_yaml_content = f.read()
     
     manifest = yaml.safe_load(train_job_yaml_content)
-    target_image = manifest['spec']['trainer']['image']
     namespace = manifest['metadata']['namespace']
     
-    kind_path = find_executable_path("kind")
-    kubectl_path = find_executable_path("kubectl")
+    compiler.Compiler().compile(
+        pipeline_func=hpo_pipeline,
+        package_path=pipeline_filename,
+        pipeline_parameters={
+            'namespace': namespace,
+            'train_job_yaml_content': train_job_yaml_content
+        }
+    )
+    return namespace
     
-    # Setup Local Infrastructure and RBAC
-    with dsl.ExitHandler(
-            exit_task=delete_cluster(kind_path=kind_path),
-            name="infrastructure-guard"
-    ):
+def run_pipeline(pipeline_filename: str = 'graphranker_pipeline.yaml', train_job_yaml_path:str = "./train_job.yaml"):
+    try:
+        namespace = compile_pipeline_yaml(pipeline_filename, train_job_yaml_path)
+        
+        kind_path = find_executable_path("kind")
+        kubectl_path = find_executable_path("kubectl")
         
         setup_cluster(kind_path=kind_path, kubectl_path=kubectl_path,
             PROJECT_ROOT=PROJECT_ROOT,
             KUBEFLOW_VERSION=KUBEFLOW_VERSION, NAMESPACE=NAMESPACE)
         
         setup_rbac(namespace)
-        
-        # Compile the Pipeline
-        pipeline_filename = 'graphranker_pipeline.yaml'
-        print( f"🛠️ Ingesting template and compiling pipeline to {pipeline_filename}...")
-        compiler.Compiler().compile(
-            pipeline_func=hpo_pipeline,
-            package_path=pipeline_filename,
-            # Bind our locally loaded variables as default pipeline configuration entries
-            pipeline_parameters={
-                'namespace': namespace,
-                'target_image': target_image,
-                'train_job_yaml_content': train_job_yaml_content
-            }
-        )
         
         # Send the compiled asset to the Kind KFP engine
         print("📤 Submitting pipeline run to local backend...")
@@ -243,4 +245,15 @@ if __name__ == '__main__':
             print(f"🎉 Run initiated! Dashboard URL: {run.url}", flush=True)
         except Exception as e:
             print(f"⚠️ Automatic submission skipped/failed: {e}")
-            print("You can manually upload 'graphranker_pipeline.yaml' directly inside the KFP UI website.")
+            print(
+                "You can manually upload 'graphranker_pipeline.yaml' directly inside the KFP UI website.")
+    finally:
+        print(f'deleting cluster')
+        cleanup_cluster_resources(kind_path)
+        
+# ====================================================================
+# EXECUTION ENTRY POINT
+# ====================================================================
+if __name__ == '__main__':
+    run_pipeline()
+    
