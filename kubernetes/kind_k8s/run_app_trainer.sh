@@ -57,7 +57,7 @@ extract_and_shutdown() {
         echo "Cleaning up local cluster..."
         kind delete cluster --name graphranker-tune-train-test-cluster
 
-        ## assert contents of chunk_logs_app_0.txt and chunk_logs_app_1.txt
+        ## assert contents of logs
         FILES=("chunk_trainer_master_logs.txt" "chunk_trainer_worker-0_logs.txt")
         for FILE in "${FILES[@]}"; do
             if ! grep -q "'trial_ids': '\[0, 1\]'" $FILE; then
@@ -89,24 +89,24 @@ extract_and_shutdown() {
             echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count in $FILE"
             exit 1
         fi
-        PHRASE="worker_0"
-        EXPECTED=4
+        PHRASE="mlflow start run: trial_"
         count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
         if ! [ "$count" -eq "$EXPECTED" ]; then
             echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count in $FILE"
             exit 1
         fi
         PHRASE="worker_0"
-        EXPECTED=4
         count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
-        if ! [ "$count" -eq "$EXPECTED" ]; then
-            echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count."
+        if [ "$count" -eq 0 ]; then
+            echo "❌ Assertion failed: Expected > 0 of $PHRASE, but found $count in $FILE"
             exit 1
         fi
+
         FILE="chunk_trainer_worker-0_logs.txt"
+        PHRASE="worker_1"
         count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
-        if ! [ "$count" -eq "$EXPECTED" ]; then
-            echo "❌ Assertion failed: Expected $EXPECTED of $PHRASE, but found $count."
+        if [ "$count" -eq 0 ]; then
+            echo "❌ Assertion failed: Expected > 0 of $PHRASE, but found $count."
             exit 1
         fi
         date

@@ -19,6 +19,18 @@
 - add ability to introduce a delay to some of the gradient computations on one worker
   to test that synchronization occurs even when one Pod might be busier than others.
 
+- implement the model export method 
+  - requires tensorflow install for orbax-export to tf savedmodel
+  - when add it to the KFP pipeline, consider a PVC for the fakegcs
+    server to hold output artifact... not needed in development
+    because I'm using mounts and mount paths to local disk
+
+- implement the python or C++ code to replace the grain dataloaders
+  for inference using the tf saved model
+
+- consider using kube-linter
+   https://github.com/stackrox/kube-linter
+
 - replace use of passwords in the .env and uris with
   a mock service for GCP Secret Manager.
   e.g. can add this to docker-compose-dbs.yaml:
@@ -43,12 +55,3 @@
 
     other mock services avail too:
        https://github.com/blackwell-systems?tab=repositories&q=gcp*&type=&language=&sort=name
-
-- install podman for container images
-- install minikube for a local mini kubernetes cluster
-see notes on kfp
--> ingest can be dat to pyarrow
-- look into whether can modify datagrain transforms
-  starting with first in order to make batch operations
-  possible...numpy equiv of vectorized ops...
-

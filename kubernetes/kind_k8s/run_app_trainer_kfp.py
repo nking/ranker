@@ -15,21 +15,7 @@ from kfp import dsl, compiler, client as kfp_client
 KUBEFLOW_VERSION = "v2.2.0"
 NAMESPACE = "ranker-ns"
 PROJECT_ROOT = os.path.abspath("../../")
-# ====================================================================
-# THE INFRASTRUCTURE
-# These functions only run on your laptop, NEVER inside the cluster.
-# You can bypass these completely when moving to Vertex AI or GKE.
-# ====================================================================
-def atart_local_cluster():
-    kind_path = find_executable_path("kind")
-    kubectl_path = find_executable_path("kubectl")
-    setup_cluster(kind_path=kind_path, kubectl_path=kubectl_path,
-        PROJECT_ROOT=PROJECT_ROOT,
-        KUBEFLOW_VERSION=KUBEFLOW_VERSION, NAMESPACE=NAMESPACE)
-    
-def stop_local_cluster(kind_path:str):
-    delete_cluster(kind_path)
-    
+
 def setup_rbac(namespace: str = "ranker-ns"):
     """Grants KFP permissions to manage TrainJob custom resources."""
     from kubernetes import client, config
@@ -76,12 +62,12 @@ def setup_rbac(namespace: str = "ranker-ns"):
         if "AlreadyExists" not in str(e):
             print(f"⚠️ RBAC creation warning: {e}", flush=True)
 
-
 # ====================================================================
 # THE COMPONENTS
 # These functions define what runs INSIDE the Kubernetes pods.
 # ====================================================================
 
+#TODO: these need versions
 @dsl.component(
     base_image="python:3.11-slim",
     packages_to_install=["kubernetes", "pyyaml"]
@@ -151,7 +137,6 @@ def run_trainjob_chunk(
         namespace=namespace, plural="trainjobs", name=job_name
     )
 
-
 @dsl.container_component
 def extract_hpo_results(target_image: str, namespace: str = "ranker-ns"):
     """Uses the same unified image variable to invoke extraction logic."""
@@ -163,9 +148,8 @@ def extract_hpo_results(target_image: str, namespace: str = "ranker-ns"):
         ]
     )
 
-
 # ====================================================================
-# PART 3: THE PIPELINE ("The Script")
+#  THE PIPELINE
 # ====================================================================
 
 @dsl.pipeline(
@@ -222,7 +206,7 @@ if __name__ == '__main__':
     
     # Setup Local Infrastructure and RBAC
     with dsl.ExitHandler(
-            exit_task=stop_local_cluster(kind_path=kind_path),
+            exit_task=delete_cluster(kind_path=kind_path),
             name="infrastructure-guard"
     ):
         
@@ -246,7 +230,7 @@ if __name__ == '__main__':
             }
         )
         
-        # 4. Send the compiled asset to your Kind KFP engine
+        # Send the compiled asset to the Kind KFP engine
         print("📤 Submitting pipeline run to local backend...")
         try:
             client = kfp_client.Client(host="http://localhost:8080")
@@ -256,7 +240,7 @@ if __name__ == '__main__':
                 job_name="hermetic-sequential-hpo-run",
                 pipeline_package_path=pipeline_filename
             )
-            print(f"🎉 Run initiated! Dashboard URL: {run.url}")
+            print(f"🎉 Run initiated! Dashboard URL: {run.url}", flush=True)
         except Exception as e:
             print(f"⚠️ Automatic submission skipped/failed: {e}")
             print("You can manually upload 'graphranker_pipeline.yaml' directly inside the KFP UI website.")

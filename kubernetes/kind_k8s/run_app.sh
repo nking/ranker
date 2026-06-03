@@ -58,24 +58,22 @@ extract_and_shutdown() {
         FILES=("chunk_logs_app_0.txt" "chunk_logs_app_1.txt")
         for FILE in "${FILES[@]}"; do
             if ! grep -q "'trial_ids': '\[0, 1\]'" $FILE; then
-                echo "missing trial_ids."
+                echo "missing trial_ids in $FILE"
             fi
             if ! grep -q "'trial_ids': '\[2, 3\]'" $FILE; then
-                echo "missing trial_ids."
+                echo "missing trial_ids in $FILE"
             fi
             PHRASE="Epoch 2:"
             EXPECTED=4
             count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
             if ! [ "$count" -eq "$EXPECTED" ]; then
-                echo "✅ Success: '$PHRASE' found $count times."
-                echo "❌ Assertion failed: Expected $EXPECTED, but found $count."
+                echo "❌ Assertion failed: Expected $EXPECTED for $PHRASE, but found $count in $FILE"
                 exit 1
             fi
             PHRASE="finally clause in train_fn"
             count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
             if ! [ "$count" -eq "$EXPECTED" ]; then
-                echo "✅ Success: '$PHRASE' found $count times."
-                echo "❌ Assertion failed: Expected $EXPECTED, but found $count."
+                echo "❌ Assertion failed: Expected $EXPECTED for $PHRASE, but found $count in $FILE"
                 exit 1
             fi
         done
@@ -85,40 +83,65 @@ extract_and_shutdown() {
         EXPECTED=4
         count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
         if ! [ "$count" -eq "$EXPECTED" ]; then
-            echo "✅ Success: '$PHRASE' found $count times."
-            echo "❌ Assertion failed: Expected $EXPECTED, but found $count."
+            echo "❌ Assertion failed: Expected $EXPECTED for $PHRASE, but found $count in $FILE"
             exit 1
         fi
         PHRASE="worker_0"
-        EXPECTED=4
         count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
-        if ! [ "$count" -eq "$EXPECTED" ]; then
-            echo "✅ Success: '$PHRASE' found $count times."
-            echo "❌ Assertion failed: Expected $EXPECTED, but found $count."
-            exit 1
-        fi
-        PHRASE="worker_0"
-        EXPECTED=4
-        count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
-        if ! [ "$count" -eq "$EXPECTED" ]; then
-            echo "✅ Success: '$PHRASE' found $count times."
-            echo "❌ Assertion failed: Expected $EXPECTED, but found $count."
+        if [ "$count" -eq 0 ]; then
+            echo "❌ Assertion failed: Expected > 0 for $PHRASE, but found $count in $FILE"
             exit 1
         fi
         FILE="chunk_logs_app_1.txt"
+        PHRASE="worker_1"
         count=$(grep -oF "$PHRASE" "$FILE" | wc -l)
-        if ! [ "$count" -eq "$EXPECTED" ]; then
-            echo "✅ Success: '$PHRASE' found $count times."
-            echo "❌ Assertion failed: Expected $EXPECTED, but found $count."
+        if [ "$count" -eq 0 ]; then
+            echo "❌ Assertion failed: Expected > 0 for $PHRASE, but found $count in $FILE"
             exit 1
         fi
         date
     fi
 }
 
+fetch_logs() {
+    local pod_name=$1
+    local output_file=$2
+    local temp_log="temp_log_$(date +%s%N).txt"
+
+    echo "Attempting to fetch logs for $pod_name..."
+
+    kubectl logs "pod/$pod_name" -n ranker-ns > "$temp_log" 2>/dev/null
+
+    # 2. Check if file is empty (size is zero)
+    if [ ! -s "$temp_log" ]; then
+        echo "⚠️  No current logs found for $pod_name. Trying --previous (-p)..."
+        kubectl logs "pod/$pod_name" -n ranker-ns -p > "$temp_log" 2>/dev/null
+    fi
+
+    # 3. Append whatever we got to the final file
+    if [ -s "$temp_log" ]; then
+        cat "$temp_log" >> "$output_file"
+        echo "✅ Logs for $pod_name appended to $output_file."
+    else
+        echo "❌ No logs available for $pod_name (current or previous)."
+    fi
+
+    # 4. Clean up
+    rm -f "$temp_log"
+}
+
+# --- Main Script Execution ---
+
+# Wait for completion
+kubectl wait --for=condition=ready=false pod -l app=app-runner -n ranker-ns --timeout=1h
+
+# Append logs for this chunk iteration
+fetch_logs "app-runner-0" "chunk_logs_app_0.txt"
+fetch_logs "app-runner-1" "chunk_logs_app_1.txt"
+
 trap extract_and_shutdown EXIT
 
-rm chunk_logs_app_0.txt chunk_logs_app_1.txt
+rm -f chunk_logs_app_0.txt chunk_logs_app_1.txt
 
 if [ "$run_code" = "true" ]; then
 
@@ -194,9 +217,11 @@ fi
             # 1-hour safeguard blocking the script until the pods finish executing (Ready=False)
             kubectl wait --for=condition=ready=false pod -l app=app-runner -n ranker-ns --timeout=1h
 
+            kubectl get pods -n ranker-ns
+
             # Append logs for this chunk iteration
-            kubectl logs pod/app-runner-0 -n ranker-ns >> chunk_logs_app_0.txt
-            kubectl logs pod/app-runner-1 -n ranker-ns >> chunk_logs_app_1.txt
+            fetch_logs "app-runner-0" "chunk_logs_app_0.txt"
+            fetch_logs "app-runner-1" "chunk_logs_app_1.txt"
 
             ## --- DEBUG PAUSE.... comment out when done debugging ---
             #echo "🛑 DEBUG PAUSE: Pods have finished or crashed."

@@ -166,19 +166,17 @@ spec:
               - name: node
                 template:
                   spec:
-                    template:
-                      spec:
-                        containers:
-                          - name: node
-                            #imagePullPolicy: Never #<-- not recognized.  so use default behavior that an image:latest has default pull policy Always but an image tagged with anythin else other than latest has default policy IfNotPresent, so will make an image with tag :local for this
-                            volumeMounts:
-                              - name: source-code
-                                mountPath: /app/src
-                        volumes:
+                    containers:
+                      - name: node
+                        #imagePullPolicy: Never #<-- not recognized.  so use default behavior that an image:latest has default pull policy Always but an image tagged with anythin else other than latest has default policy IfNotPresent, so will make an image with tag :local for this
+                        volumeMounts:
                           - name: source-code
-                            hostPath:
-                              path: /app/src
-                              type: Directory
+                            mountPath: /app/src
+                    volumes:
+                      - name: source-code
+                        hostPath:
+                          path: /app/src
+                          type: Directory
 
 #debugging:
 #kubectl get clustertrainingruntime jax-distributed -o yaml
