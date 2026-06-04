@@ -10,7 +10,7 @@ spec:
     kind: ClusterTrainingRuntime
   trainer:
     # Define the size of your cluster (Replaces your StatefulSet replicas)
-    numNodes: 2
+    numNodes: 2 #these are k8s pods, not nodes.  nodes are defined at cluster level in kind-cluster.yaml
     image: ranker-app:local
     args:
       - "--LOGNAME=runner"

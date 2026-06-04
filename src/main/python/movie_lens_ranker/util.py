@@ -241,7 +241,7 @@ def define_flags():
         'train_given: use given HPs; '
         'test_best: use test_fn for best model for the given study_name and project_id;'
         'test_given: use test_fn with test_checkpoint_uri; '
-        'export_hpo_results: extract the HPO best results into params and metrcs json files'
+        'export_hpo_results: extract the HPO best results into params and metrics json files'
     )
     flags.DEFINE_string("mlflow_tracking_uri", default=None,
         help="MLFlow tracking uri"

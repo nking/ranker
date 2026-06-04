@@ -25,7 +25,7 @@ class Test(TestCase):
         train_job_yaml_path = os.path.join(get_project_dir(), "k8s/kind_k8s/train_job.yaml")
         output_path = os.path.join(get_bin_dir(), "output_pipeline.yaml")
         print(f'writing to {output_path}', flush=True)
-        compile_pipeline_yaml(output_path, train_job_yaml_path)
+        compile_pipeline_yaml(output_path, train_job_yaml_path, num_trials=4)
 
 if __name__ == '__main__':
     unittest.main()
