@@ -1,3 +1,5 @@
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 def run_train_job_phase(
         train_job_yaml_content: str,
@@ -10,7 +12,7 @@ def run_train_job_phase(
     run train_job.yaml for given phase. Authenticate within the cluster before invoking this method.
     :param train_job_yaml_content:
     :param namespace:
-    :param phase: can be "tune" or "train_best" or "test_best".  other options not yet implemented
+    :param phase: can be "tune" or "train-best" or "test-best".  other options not yet implemented
     :param trial_ids: the list of HPO trials to make if phase =="tune", else is None if phase is not "tune'
     :param output_log_dir_uri: uri where to write output logs with name job_name if not None.  the logs
        will be written as output_log_dir_uri/{phase}-<master|worker-podNumber>-logs.txt
@@ -21,9 +23,9 @@ def run_train_job_phase(
     from kubernetes.client import ApiException
     from json import loads
     
-    if phase not in ("tune", "train_best", "test_best", "export_hpo_results"):
+    if phase not in ("tune", "train-best", "test-best", "export-hpo-results"):
         raise ValueError(
-            f"phase must be one of {('tune', 'train_best', 'test_best')}")
+            f"phase must be one of {('tune', 'train-best', 'test-best', 'export-hpo-results')}")
     
     if phase == "tune" and trial_ids is None:
         raise ValueError("trial_ids cannot be None when phase is 'tune'")
@@ -55,75 +57,88 @@ def run_train_job_phase(
         if trial_ids_str:
             manifest["spec"]["trainer"]["args"].append(trial_ids_str)
         job_name = f'{job_name}-{trial_ids[0]}'
-    elif phase == "export_hpo_results":
-        # this one only needs to run on one node no matter what is in train_job.yaml
-        print(f'type={type(manifest["spec"]["trainer"]["num_nodes"])}')
-        manifest["spec"]["trainer"]["num_nodes"] = "2"
-        manifest["spec"]["trainer"]["env"]['JAX_NUM_PROCESSES'] = "1"
+    elif phase == "export-hpo-results":
+        # this one only needs to run on 1 node no matter what is in train_job.yaml
+        manifest["spec"]["trainer"]["numNodes"] = 1
+        for env_dict in manifest["spec"]["trainer"]["env"]:
+            if env_dict["name"] == "JAX_NUM_PROCESSES":
+                env_dict["value"] = "1"
     
     manifest['metadata']['name'] = job_name
     manifest['metadata']['namespace'] = namespace
+    for env_dict in manifest["spec"]["trainer"]["env"]:
+        if env_dict["name"] == "JAX_COORDINATOR_ADDRESS":
+            env_dict["value"] = f"{job_name}-node-0-0.{job_name}:8888"
+    
+    logging.info(f'deploying {job_name}')
     
     crd_api = client.CustomObjectsApi()
     
-    # Deploy to Kubernetes
-    print(f"🚀 Launching TrainJob: {job_name}")
-    crd_api.create_namespaced_custom_object(
-        group="trainer.kubeflow.org", version="v1alpha1",
-        namespace=namespace, plural="trainjobs", body=manifest
-    )
-    
-    #  Monitor execution
-    completed = False
-    while not completed:
-        time.sleep(10)
-        try:
-            status = crd_api.get_namespaced_custom_object(
-                group="trainer.kubeflow.org", version="v1alpha1",
-                namespace=namespace, plural="trainjobs", name=job_name
-            )
-            conditions = status.get('status', {}).get('conditions', [])
-            for condition in conditions:
-                if condition.get('type') == 'Complete' and condition.get(
-                        'status') == 'True':
-                    print(f"✅ TrainJob {job_name} completed successfully!")
-                    completed = True
-                    break
-                elif condition.get('type') == 'Failed' and condition.get(
-                        'status') == 'True':
-                    raise RuntimeError(f"❌ TrainJob {job_name} failed!")
-        except ApiException as e:
-            print(f"API Error fetching TrainJob: {e}")
-    
-    if output_log_dir_uri:
-        print(f"writing logs to {output_log_dir_uri}")
-        import fsspec
-        core_v1 = client.CoreV1Api()
-        pods = core_v1.list_namespaced_pod(namespace).items
-        master_pod = next(
-            (p.metadata.name for p in pods if "node-0-0" in p.metadata.name), None)
-        if master_pod:
-            master_logs = core_v1.read_namespaced_pod_log(name=master_pod,
-                namespace=namespace)
-            with fsspec.open(
-                    f"{output_log_dir_uri}/{phase}-master-logs.txt",
-                    "a") as f:
-                f.write(master_logs)
+    try:
+        # Deploy to Kubernetes
+        logging.info(f"🚀 Launching TrainJob: {job_name}")
+        crd_api.create_namespaced_custom_object(
+            group="trainer.kubeflow.org", version="v1alpha1",
+            namespace=namespace, plural="trainjobs", body=manifest
+        )
         
-        num_nodes = int(manifest["spec"]["trainer"]["num_nodes"])
-        for i in range(1, num_nodes):
-            worker_pod = next((p.metadata.name for p in pods if
-            f"node-0-{i}" in p.metadata.name), None)
-            if worker_pod:
-                worker_logs = core_v1.read_namespaced_pod_log(name=worker_pod,
-                    namespace=namespace)
-                with fsspec.open(f"{output_log_dir_uri}/{phase}-worker-{i}-logs.txt",
-                        "a") as f:
-                    f.write(worker_logs)
-    
-    # Lifecycle cleanup
-    print(f"🧹 Tearing down TrainJob custom resource: {job_name}")
-    crd_api.delete_namespaced_custom_object(
-        group="trainer.kubeflow.org", version="v1alpha1",
-        namespace=namespace, plural="trainjobs", name=job_name
-    )
+        #  Monitor execution
+        completed = False
+        while not completed:
+            time.sleep(10)
+            try:
+                status = crd_api.get_namespaced_custom_object(
+                    group="trainer.kubeflow.org", version="v1alpha1",
+                    namespace=namespace, plural="trainjobs", name=job_name
+                )
+                conditions = status.get('status', {}).get('conditions', [])
+                for condition in conditions:
+                    if condition.get('type') == 'Complete' and condition.get( 'status') == 'True':
+                        logging.info(f"✅ TrainJob {job_name} completed successfully!")
+                        completed = True
+                        break
+                    elif condition.get('type') == 'Failed' and condition.get( 'status') == 'True':
+                        reason = condition.get('reason', 'UnknownReason')
+                        message = condition.get('message','No error message provided.')
+                        raise RuntimeError(f"❌ TrainJob {job_name} failed! reason: {reason}, message: {message}")
+            except ApiException as e:
+                logging.exception(f"API Error fetching TrainJob: {e}")
+        
+        if output_log_dir_uri:
+            logging.info(f"writing logs to {output_log_dir_uri}")
+            import fsspec
+            core_v1 = client.CoreV1Api()
+            pods = core_v1.list_namespaced_pod(namespace).items
+            master_pod = next((p.metadata.name for p in pods if "node-0-0" in p.metadata.name), None)
+            if master_pod:
+                master_logs = core_v1.read_namespaced_pod_log(name=master_pod, namespace=namespace)
+                with fsspec.open(f"{output_log_dir_uri}/{phase}-master-logs.txt","a") as f:
+                    f.write(master_logs)
+            
+            num_nodes = manifest["spec"]["trainer"]["numNodes"] #is already int
+            for i in range(1, num_nodes):
+                worker_pod = next((p.metadata.name for p in pods if f"node-0-{i}" in p.metadata.name), None)
+                if worker_pod:
+                    worker_logs = core_v1.read_namespaced_pod_log(name=worker_pod, namespace=namespace)
+                    with fsspec.open(f"{output_log_dir_uri}/{phase}-worker-{i}-logs.txt", "a") as f:
+                        f.write(worker_logs)
+                        
+        #DEBUG:  remove after done
+        logging.info(f"🧹 Tearing down TrainJob custom resource: {job_name}")
+        crd_api.delete_namespaced_custom_object(
+            group="trainer.kubeflow.org", version="v1alpha1",
+            namespace=namespace, plural="trainjobs", name=job_name
+        )
+        
+    except Exception as e2:
+        logging.exception(f'Error during Train Job: {e2}')
+        raise e2
+    finally:
+        # Lifecycle cleanup
+        """ DEBUG:  uncomment after done
+        logging.info(f"🧹 Tearing down TrainJob custom resource: {job_name}")
+        crd_api.delete_namespaced_custom_object(
+            group="trainer.kubeflow.org", version="v1alpha1",
+            namespace=namespace, plural="trainjobs", name=job_name
+        )
+        """

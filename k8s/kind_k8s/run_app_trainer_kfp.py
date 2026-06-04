@@ -1,18 +1,14 @@
-#NOTE: in unit test choice of interprete,  interpreter with kubernetes installed in it. such as xmanager_py311
 import os
-import time
-import subprocess
 from json import dumps
-from typing import Dict, List
 import argparse
 import yaml
 import fsspec
-
 from k8s_train_util import run_train_job_phase
 from kind_util import setup_cluster, delete_cluster, find_executable_path
-
 #pip install kfp==2.16.1
 from kfp import dsl, compiler, client as kfp_client
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 def get_project_dir() -> str:
     cwd = os.getcwd()
@@ -36,7 +32,7 @@ def setup_rbac(namespace: str = "ranker-ns"):
     config.load_kube_config()
     rbac_api = client.RbacAuthorizationV1Api()
     
-    print(f"🔐 Setting up RBAC for KFP in namespace: {namespace}...")
+    logging.info(f"🔐 Setting up RBAC for KFP in namespace: {namespace}...")
     
     role = client.V1Role(
         metadata=client.V1ObjectMeta(name="kfp-trainjob-manager",
@@ -71,10 +67,10 @@ def setup_rbac(namespace: str = "ranker-ns"):
         rbac_api.create_namespaced_role(namespace=namespace, body=role)
         rbac_api.create_namespaced_role_binding(namespace=namespace,
             body=binding)
-        print("✅ RBAC applied successfully.")
+        logging.info("✅ RBAC applied successfully.")
     except Exception as e:
         if "AlreadyExists" not in str(e):
-            print(f"⚠️ RBAC creation warning: {e}", flush=True)
+            logging.info(f"⚠️ RBAC creation warning: {e}")
 
 # ====================================================================
 # THE COMPONENTS
@@ -96,7 +92,7 @@ def run_train_job(
     run train_job.yaml for given phase.
     :param train_job_yaml_content:
     :param namespace:
-    :param phase: can be "tune" or "train_best" or "test_best".  other options not yet implemented
+    :param phase: can be "tune" or "train-best" or "test-best".  other options not yet implemented
     :param trial_ids: the list of HPO trials to make if phase =="tune", else is None if phase is not "tune"
     :param output_log_dir_uri: uri where to write output logs with name job_name if not None
     """
@@ -105,10 +101,10 @@ def run_train_job(
     from kubernetes import config
     try:
         config.load_incluster_config()
-        print("Loaded in-cluster Kubernetes configuration.")
+        logging.info("Loaded in-cluster Kubernetes configuration.")
     except config.ConfigException:
         config.load_kube_config()
-        print("Loaded local kube_config for development.")
+        logging.info("Loaded local kube_config for development.")
     
     run_train_job_phase(train_job_yaml_content, namespace, phase, trial_ids, output_log_dir_uri)
 
@@ -139,17 +135,17 @@ def hpo_train_test_pipeline(train_job_yaml_content:str, namespace:str = 'ranker-
     extraction_task = run_train_job(
         train_job_yaml_content=train_job_yaml_content,
         namespace=namespace,
-        phase="export_hpo_results")
+        phase="export-hpo-results")
     
     train_task = run_train_job(
         train_job_yaml_content=train_job_yaml_content,
         namespace=namespace,
-        phase="train_best")
+        phase="train-best")
     
     test_task = run_train_job(
         train_job_yaml_content=train_job_yaml_content,
         namespace=namespace,
-        phase="test_best")
+        phase="test-best")
     
     extraction_task.after(hpo_task)
     train_task.after(extraction_task)
@@ -169,7 +165,7 @@ def compile_pipeline_yaml(output_pipeline_yaml_uri: str = 'graphranker_pipeline.
     :param output_pipeline_yaml_uri: name of the pipeline yaml file to write to
     :return: the namespace parsed from the local train_job.yaml
     """
-    print( f"🛠️ Ingesting train job template and compiling pipeline to {output_pipeline_yaml_uri}...")
+    logging.info( f"🛠️ Ingesting train job template and compiling pipeline to {output_pipeline_yaml_uri}...")
     TRAIN_JOB_YAML_PATH = train_job_yaml_uri
     
     with fsspec.open(TRAIN_JOB_YAML_PATH, "r") as f:
@@ -205,7 +201,7 @@ def run_pipeline(output_pipeline_yaml_uri: str = 'graphranker_pipeline.yaml',
         setup_rbac(namespace)
         
         # Send the compiled asset to the Kind KFP engine
-        print("📤 Submitting pipeline run to local backend...")
+        logging.info("📤 Submitting pipeline run to local backend...")
         try:
             client = kfp_client.Client(host="http://localhost:8080")
             experiment = client.create_experiment("GraphRanker-HPO")
@@ -214,13 +210,12 @@ def run_pipeline(output_pipeline_yaml_uri: str = 'graphranker_pipeline.yaml',
                 job_name="hermetic-sequential-hpo-run",
                 pipeline_package_path=output_pipeline_yaml_uri
             )
-            print(f"🎉 Run initiated! Dashboard URL: {run.url}", flush=True)
+            logging.info(f"🎉 Run initiated! Dashboard URL: {run.url}")
         except Exception as e:
-            print(f"⚠️ Automatic submission skipped/failed: {e}")
-            print(
-                "You can manually upload 'graphranker_pipeline.yaml' directly inside the KFP UI website.")
+            logging.exception((f"⚠️ Automatic submission skipped/failed: {e}"
+                "You can manually upload 'graphranker_pipeline.yaml' directly inside the KFP UI website."))
     finally:
-        print(f'deleting cluster')
+        logging.info(f'deleting cluster')
         cleanup_cluster_resources(kind_path)
         
 # ====================================================================

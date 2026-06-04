@@ -403,7 +403,7 @@ class TestRanker(unittest.TestCase):
         fs, path = fsspec.core.url_to_fs(config['output_metrics_uri'])
         fs.rm(path)  # or fs.remove(path)
         #test use from app_runner and phase
-        config['phase'] = 'export_hpo_results'
+        config['phase'] = 'export-hpo-results'
         set_flags_from_dict(config)
         app_runner(None)
         with fsspec.open(output_hp_path, mode='r') as f:
@@ -428,7 +428,7 @@ class TestRanker(unittest.TestCase):
         #### ====================================================== ####
         print(f'BEGIN TRAINING')
         
-        config['phase'] = 'train_best'
+        config['phase'] = 'train-best'
         train_id = 1234567
         config['train_id'] = train_id
         config['validate_checkpoint_restores'] = True
@@ -500,9 +500,9 @@ class TestRanker(unittest.TestCase):
         print(f'BEGIN TESTING')
         config['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
         config['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
-        #config['test_checkpoint_uri'] = best_checkpoint_uri_tag  #for use when phase is 'test_given'
+        #config['test_checkpoint_uri'] = best_checkpoint_uri_tag  #for use when phase is 'test-given'
         config['best_checkpoint_uri'] = best_checkpoint_uri_tag
-        config['phase'] = 'test_best'
+        config['phase'] = 'test-best'
         test_id = 234567
         config['test_id'] = test_id
         set_flags_from_dict(config)

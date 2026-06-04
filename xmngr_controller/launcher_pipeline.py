@@ -308,7 +308,7 @@ def main(_):
             
             # ===============  extract hpo  =======================
             jax_port = 8890
-            phase = 'export_hpo_results'
+            phase = 'export-hpo-results'
             print(f"begin {phase} job")
             group_jobs = {}
             work_unit_id += 1
@@ -380,7 +380,7 @@ def main(_):
                     },
                     args={
                         **run_config,
-                        'phase': 'train_best',
+                        'phase': 'train-best',
                         'validate_checkpoint_restores' : True,
                         "debug": True,
                     },
@@ -425,7 +425,7 @@ def main(_):
                     },
                     args={
                         **run_config,
-                        'phase': 'test_best',
+                        'phase': 'test-best',
                         'validate_checkpoint_restores' : False,
                         "debug": True,
                         "ratings_test_uri": "gs://data/small/ratings_test_liked.array_record",

@@ -1,9 +1,10 @@
 import os
 from json import dumps
 import yaml
-from kubernetes import config
 from k8s_train_util import run_train_job_phase
 from kind_util import setup_cluster, delete_cluster, find_executable_path
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 #USAGE:
 #   python3 run_app_trainer.py
@@ -25,8 +26,7 @@ PROJECT_ROOT = os.path.abspath("../../")
 # ====================================================================
 
 def run_training_loop():
-    config.load_kube_config()
-   
+
     # Apply the custom TrainJob
     infile = "train_job.yaml"
     with open(infile, "r") as f:
@@ -56,7 +56,7 @@ def extract_hpo_train_job():
     run_train_job_phase(
         train_job_yaml_content=manifest_str,
         namespace=namespace,
-        phase='export_hpo_results')
+        phase='export-hpo-results')
 
 def assert_logs():
     for i, log_file in enumerate(["tune-master-logs.txt", "tune-worker-1-logs.txt"]):
@@ -89,18 +89,26 @@ if __name__ == "__main__":
         setup_cluster(kind_path=kind_path, kubectl_path=kubectl_path, PROJECT_ROOT=PROJECT_ROOT,
             KUBEFLOW_VERSION=KUBEFLOW_VERSION, NAMESPACE=NAMESPACE)
         
+        #config.load_kube_config() is in setup_cluster
         run_training_loop()
         
-        print("\nExtract HPO results:")
+        logging.info("\nExtract HPO results:")
         extract_hpo_train_job()
         
         finished = True
         
     except KeyboardInterrupt:
-        print("\n⚠️ Interrupted by user.")
+        logging.info("\n⚠️ Interrupted by user.")
     except Exception as e:
-        print(f"\n❌ Unhandled Exception: {e}")
+        logging.exception(f"\n❌ Unhandled Exception: {e}")
+        #logging.exception("\n❌ Unhandled Exception: {e}")
+        #TEMPORARY DEBUG:
+        import traceback
+        stack_trace_string = traceback.format_exc()
+        print(f"Captured Trace:\n{stack_trace_string}", flush=True)
     finally:
+        """ DEBUG: uncomment after done
         delete_cluster(kind_path)
         if finished:
             assert_logs()
+        """

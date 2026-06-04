@@ -892,16 +892,16 @@ def test_fn(config: dict):
             if key not in config:
                 raise ValueError(f"config is missing {key}")
     
-    if config['phase'] == 'test_best':
+    if config['phase'] == 'test-best':
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
     else:
-        #test_given, uese given checkpoint path to restore, test_checkpoint_uri
+        #test-given, uese given checkpoint path to restore, test_checkpoint_uri
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['test_checkpoint_uri'])
     
     model = restore_dict['model']
     model.eval()
     
-    config['phase'] = 'test_best'
+    config['phase'] = 'test-best'
     
     mlflow_run = None
     run_name = f"test_{config.get('test_id', 0)}"

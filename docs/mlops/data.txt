@@ -50,10 +50,10 @@ MLFlow runs are organized this way:
          - if phase="tune"
            - each trial run: 
               - run_name: "trial_{trial_id}"
-         - if phase="train_best" or "train_given"
+         - if phase="train-best" or "train-given"
            - train run: 
               - run_name: "train_{train_id}"
-         - if phase="test_best" or "test_given"
+         - if phase="test-best" or "test-given"
            - test run: 
               - run_name: "test_{test_id}"
 OR 

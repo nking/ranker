@@ -204,10 +204,10 @@ def define_flags():
         help="uri to write latest checkpoints too.  model, data, optimizer and seed state are saved.   the study_name and trial number will be appended to the given path"
     )
     flags.DEFINE_string("best_checkpoint_uri", default=None,
-        help="uri to write checkpoints to for best model.  model, data, optimizer and seed state are saved.  it's also the uri to read best model from when phase='test_best'. the study_name and trial_id will be appended to the given path"
+        help="uri to write checkpoints to for best model.  model, data, optimizer and seed state are saved.  it's also the uri to read best model from when phase='test-best'. the study_name and trial_id will be appended to the given path"
     )
     flags.DEFINE_string("test_checkpoint_uri", default=None,
-        help="uri to read orbax checkpointed model for tests when phase='test_given'"
+        help="uri to read orbax checkpointed model for tests when phase='test-given'"
     )
     flags.DEFINE_bool("validate_checkpoint_restores", default=False, help="compares validation metrics of active model  "
         "with validation metrics for saved active model restored, but only if the phase is a train phase with save checkpoints enabled."
@@ -225,23 +225,23 @@ def define_flags():
         help="a string serialization of array of integer trial ids for a worker, e.g. '[0, 1]' and 2 trials will be conducted"
     )
     flags.DEFINE_integer("test_id", default=0,
-        help="an id to assign to test if phase is 'test_best' or 'test_given'"
+        help="an id to assign to test if phase is 'test-best' or 'test-given'"
     )
     flags.DEFINE_integer("train_id", default=0,
-        help="an id to assign to train if phase is 'train_best' or 'train_given'"
+        help="an id to assign to train if phase is 'train-best' or 'train-given'"
     )
     flags.DEFINE_integer("trial_id", default=0,
         help="an id internally in a single trial _train_fn run"
     )
     flags.DEFINE_enum(
-        'phase', 'train_best',
-        ['tune', 'train_best', 'train_given', 'test_best', 'test_given', 'export_hpo_results'],
+        'phase', 'train-best',
+        ['tune', 'train-best', 'train-given', 'test-best', 'test-given', 'export-hpo-results'],
         'mode for running the train_fn.  tune: HPO run; '
-        'train_best: use best HPs from tune; '
-        'train_given: use given HPs; '
-        'test_best: use test_fn for best model for the given study_name and project_id;'
-        'test_given: use test_fn with test_checkpoint_uri; '
-        'export_hpo_results: extract the HPO best results into params and metrics json files'
+        'train-best: use best HPs from tune; '
+        'train-given: use given HPs; '
+        'test-best: use test_fn for best model for the given study_name and project_id;'
+        'test-given: use test_fn with test_checkpoint_uri; '
+        'export-hpo-results: extract the HPO best results into params and metrics json files'
     )
     flags.DEFINE_string("mlflow_tracking_uri", default=None,
         help="MLFlow tracking uri"

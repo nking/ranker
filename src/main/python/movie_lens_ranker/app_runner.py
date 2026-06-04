@@ -351,7 +351,7 @@ def run_train(config):
         print(f'train_run config: {config}', flush=True)
     
     if "phase" not in config:
-        print("ERROR: expecting phase='train_best' or 'train_given'")
+        print("ERROR: expecting phase='train-best' or 'train-given'")
         return
     
     worker_rank = jax.process_index()
@@ -389,7 +389,7 @@ def run_train(config):
         config['mlflow_experiment_name'] = config['study_name']
         config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
     
-    if config['phase'] == 'train_best':
+    if config['phase'] == 'train-best':
         #worker==0 fetches the best parameters and then all workers synchronize to get best params
         best_params = {}
         if worker_rank == 0:
@@ -452,12 +452,12 @@ def run_test(config):
         print(f'test_run config: {config}', flush=True)
     
     if "phase" not in config:
-        print("ERROR: expecting phase='test_best' or 'test_given'")
+        print("ERROR: expecting phase='test-best' or 'test-given'")
         return
     
     worker_rank = jax.process_index()
     
-    if config['phase'] == 'test_best':
+    if config['phase'] == 'test-best':
         #all worker ranks need this in order to get the checkpoint
         config['best_checkpoint_uri'] = get_best_checkpoint_uri_for_testing(config)
     
