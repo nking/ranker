@@ -84,3 +84,7 @@ Events:
   Normal   Scheduled    2m4s                default-scheduler  Successfully assigned ranker-ns/local-db-store-544bc7f67f-rb6mk to graphranker-tune-train-test-cluster-worker
   Warning  FailedMount  60s (x8 over 2m4s)  kubelet            MountVolume.SetUp failed for volume "pg-init" : hostPath type check failed: /home/nichole/projects/github/ranker/init-databases.sh is not a file
 
+=================================================
+
+kubectl get trainjobs.trainer.kubeflow.org --all-namespaces
+

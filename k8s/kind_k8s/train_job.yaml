@@ -21,6 +21,8 @@ spec:
       - "--vizier_endpoint=vizier-service:8000"
       - "--latest_checkpoint_uri=gs://checkpoint-bucket/latest"
       - "--best_checkpoint_uri=gs://checkpoint-bucket/best"
+      - "--output_hyperparams_uri=gs://hpo-results-bucket/tune-kind-01/GraphRanker_tuning_kind/hpo_hparams.json"
+      - "--output_metrics_uri=gs://hpo-results-bucket/tune-kind-01/GraphRanker_tuning_kind/hpo_metrics.json"
       - "--movies_uri=gs://data/movies-00000-of-00001.array_record"
       - "--recommendations_uri=gs://data/recommended_movies.array_record"
       - "--recommendations_ts_uri=gs://data/recommended_movies_timestamps.array_record"
@@ -168,17 +170,19 @@ spec:
               - name: node
                 template:
                   spec:
-                    containers:
-                      - name: node
-                        #imagePullPolicy: Never #<-- not recognized.  so use default behavior that an image:latest has default pull policy Always but an image tagged with anythin else other than latest has default policy IfNotPresent, so will make an image with tag :local for this
-                        volumeMounts:
-                          - name: source-code
-                            mountPath: /app/src
-                    volumes:
-                      - name: source-code
-                        hostPath:
-                          path: /app/src
-                          type: Directory
+                    template:
+                        -spec:
+                            containers:
+                              - name: node
+                                #imagePullPolicy: Never #<-- not recognized.  so use default behavior that an image:latest has default pull policy Always but an image tagged with anythin else other than latest has default policy IfNotPresent, so will make an image with tag :local for this
+                                volumeMounts:
+                                  - name: source-code
+                                    mountPath: /app/src
+                            volumes:
+                              - name: source-code
+                                hostPath:
+                                  path: /app/src
+                                  type: Directory
 
 #debugging:
 #kubectl get clustertrainingruntime jax-distributed -o yaml

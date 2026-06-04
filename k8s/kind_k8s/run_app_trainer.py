@@ -93,6 +93,7 @@ if __name__ == "__main__":
         run_training_loop()
         
         logging.info("\nExtract HPO results:")
+        
         extract_hpo_train_job()
         
         finished = True
@@ -101,14 +102,7 @@ if __name__ == "__main__":
         logging.info("\n⚠️ Interrupted by user.")
     except Exception as e:
         logging.exception(f"\n❌ Unhandled Exception: {e}")
-        #logging.exception("\n❌ Unhandled Exception: {e}")
-        #TEMPORARY DEBUG:
-        import traceback
-        stack_trace_string = traceback.format_exc()
-        print(f"Captured Trace:\n{stack_trace_string}", flush=True)
     finally:
-        """ DEBUG: uncomment after done
         delete_cluster(kind_path)
         if finished:
             assert_logs()
-        """

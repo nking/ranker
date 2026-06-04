@@ -40,23 +40,22 @@ def run_train_job_phase(
             raise ValueError("train_job_yaml_content must be the yaml file read into a string")
         raise ex
         
+    ## ---- begin dynamic edits to the yaml ------
     if phase == "tune":
         trial_ids_str = trial_ids
-        trial_ids = loads(trial_ids_str)
+        trial_ids = loads(trial_ids)
         if not all(isinstance(x, int) and x > -1 for x in trial_ids):
             raise ValueError("trial_ids must only contain non-negative integers")
         if "spec" not in manifest or "trainer" not in manifest[
             "spec"] or "args" not in manifest["spec"][
             "trainer"]:
             raise ValueError("train_job.yaml is missing spec.trainer.args")
+        job_name = f'{job_name}-{trial_ids[0]}'
         for i, arg in enumerate(manifest["spec"]["trainer"]["args"]):
             if arg.find("--trial_ids") == 0:
-                manifest["spec"]["trainer"]["args"][i] = trial_ids_str
-                trial_ids_str = None
+                mod_i = i
                 break
-        if trial_ids_str:
-            manifest["spec"]["trainer"]["args"].append(trial_ids_str)
-        job_name = f'{job_name}-{trial_ids[0]}'
+        manifest["spec"]["trainer"]["args"][mod_i] = f"--trial_ids={trial_ids_str}"
     elif phase == "export-hpo-results":
         # this one only needs to run on 1 node no matter what is in train_job.yaml
         manifest["spec"]["trainer"]["numNodes"] = 1
@@ -64,11 +63,30 @@ def run_train_job_phase(
             if env_dict["name"] == "JAX_NUM_PROCESSES":
                 env_dict["value"] = "1"
     
+    if phase != "tune":
+        #remove the environment variable in train_job.yaml
+        for i, arg in enumerate(manifest["spec"]["trainer"]["args"]):
+            if arg.find("--trial_ids") == 0:
+                rm_i = i
+                break
+        del manifest["spec"]["trainer"]["args"][rm_i]
+       
+    #modify the phase in args
+    for i, arg in enumerate(manifest["spec"]["trainer"]["args"]):
+        if arg.find("--phase") == 0:
+            mod_i = i
+            break
+    manifest["spec"]["trainer"]["args"][mod_i] = f"--phase={phase}"
+    
     manifest['metadata']['name'] = job_name
     manifest['metadata']['namespace'] = namespace
     for env_dict in manifest["spec"]["trainer"]["env"]:
         if env_dict["name"] == "JAX_COORDINATOR_ADDRESS":
             env_dict["value"] = f"{job_name}-node-0-0.{job_name}:8888"
+            break
+        # {'name': 'XLA_FLAGS', 'value': '--xla_force_host_platform_device_count=2'}
+    
+    ## ---- end dynamic yaml edits ------
     
     logging.info(f'deploying {job_name}')
     
@@ -104,7 +122,7 @@ def run_train_job_phase(
             except ApiException as e:
                 logging.exception(f"API Error fetching TrainJob: {e}")
         
-        if output_log_dir_uri:
+        if output_log_dir_uri is not None:
             logging.info(f"writing logs to {output_log_dir_uri}")
             import fsspec
             core_v1 = client.CoreV1Api()
@@ -122,23 +140,15 @@ def run_train_job_phase(
                     worker_logs = core_v1.read_namespaced_pod_log(name=worker_pod, namespace=namespace)
                     with fsspec.open(f"{output_log_dir_uri}/{phase}-worker-{i}-logs.txt", "a") as f:
                         f.write(worker_logs)
-                        
-        #DEBUG:  remove after done
+                       
+    except Exception as e2:
+        logging.exception(f'Error during Train Job: {e2}')
+        raise e2
+    finally:
+        # Lifecycle cleanup
         logging.info(f"🧹 Tearing down TrainJob custom resource: {job_name}")
         crd_api.delete_namespaced_custom_object(
             group="trainer.kubeflow.org", version="v1alpha1",
             namespace=namespace, plural="trainjobs", name=job_name
         )
         
-    except Exception as e2:
-        logging.exception(f'Error during Train Job: {e2}')
-        raise e2
-    finally:
-        # Lifecycle cleanup
-        """ DEBUG:  uncomment after done
-        logging.info(f"🧹 Tearing down TrainJob custom resource: {job_name}")
-        crd_api.delete_namespaced_custom_object(
-            group="trainer.kubeflow.org", version="v1alpha1",
-            namespace=namespace, plural="trainjobs", name=job_name
-        )
-        """
