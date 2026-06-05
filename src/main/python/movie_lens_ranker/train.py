@@ -35,6 +35,9 @@ from movie_lens_ranker.util import read_embeddings, get_env_resources, \
     stringify_mlflow_params, get_canonical_mlflow_run_name, \
     calc_number_jax_graph_components, get_model_mesh
 
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
 env_resources, mesh = get_env_resources()
 #mesh_local = jax.sharding.Mesh(np.array(jax.local_devices()), axis_names=('local_data',))
 #data_sharding = jax.sharding.NamedSharding(mesh_local, P('local_data'))
@@ -365,10 +368,10 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     NUM_TRAIN_SHARDS = train_dataloader._sampler._shard_options.shard_count
     STEPS_PER_EPOCH_LOCAL = STEPS_PER_EPOCH_GLOBAL//NUM_TRAIN_SHARDS
     
-    print(f'TRAIN_BATCH_SIZE={TRAIN_BATCH_SIZE}, TOTAL_RECORDS={TOTAL_RECORDS}, NUM_TRAIN_SHARDS={NUM_TRAIN_SHARDS}', flush=True)
-    print(f'STEPS_PER_EPOCH_GLOBAL_TRAIN={STEPS_PER_EPOCH_GLOBAL}')
-    print(f'STEPS_PER_EPOCH_LOCAL_TRAIN={STEPS_PER_EPOCH_LOCAL}')
-    print(f'NUM_EPOCHS to train={train_dataloader._sampler._num_epochs}')
+    logging.info(f'TRAIN_BATCH_SIZE={TRAIN_BATCH_SIZE}, TOTAL_RECORDS={TOTAL_RECORDS}, NUM_TRAIN_SHARDS={NUM_TRAIN_SHARDS}')
+    logging.info(f'STEPS_PER_EPOCH_GLOBAL_TRAIN={STEPS_PER_EPOCH_GLOBAL}')
+    logging.info(f'STEPS_PER_EPOCH_LOCAL_TRAIN={STEPS_PER_EPOCH_LOCAL}')
+    logging.info(f'NUM_EPOCHS to train={train_dataloader._sampler._num_epochs}')
     
     VAL_BATCH_SIZE = train_dataloader._sampler.batch_size
     TOTAL_RECORDS_VAL = val_dataloader._sampler.total_records
@@ -376,12 +379,12 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     NUM_VAL_SHARDS = val_dataloader._sampler._shard_options.shard_count
     STEPS_PER_EPOCH_LOCAL_VAL = STEPS_PER_EPOCH_GLOBAL_VAL // NUM_VAL_SHARDS
     
-    print(f'VAL_BATCH_SIZE={VAL_BATCH_SIZE}, TOTAL_RECORDS_VAL={TOTAL_RECORDS_VAL}, NUM_VAL_SHARDS={NUM_VAL_SHARDS}', flush=True)
-    print(f'STEPS_PER_EPOCH_GLOBAL_VAL={STEPS_PER_EPOCH_GLOBAL_VAL}')
-    print(f'STEPS_PER_EPOCH_LOCAL_VAL={STEPS_PER_EPOCH_LOCAL_VAL}', flush=True)
+    logging.info(f'VAL_BATCH_SIZE={VAL_BATCH_SIZE}, TOTAL_RECORDS_VAL={TOTAL_RECORDS_VAL}, NUM_VAL_SHARDS={NUM_VAL_SHARDS}')
+    logging.info(f'STEPS_PER_EPOCH_GLOBAL_VAL={STEPS_PER_EPOCH_GLOBAL_VAL}')
+    logging.info(f'STEPS_PER_EPOCH_LOCAL_VAL={STEPS_PER_EPOCH_LOCAL_VAL}')
     
     if save_checkpoints:
-        print(f'worker_rank={rank}: constructing checkpoint managers', flush=True)
+        logging.info(f'worker_rank={rank}: constructing checkpoint managers')
         mngr_latest = ocp.CheckpointManager(latest_checkpoint_uri,
             item_handlers={
                 'model': ocp.StandardCheckpointHandler(),
@@ -458,7 +461,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         epoch_avg_train_loss.append(loss)
         
         if batch_idx % 5 == 0:# and rank==0:
-            print(f"batch {batch_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}", flush=True)
+            logging.info(f"batch {batch_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}")
         
         if (batch_idx + 1) % STEPS_PER_EPOCH_GLOBAL == 0:
             #finished a train epoch.  calc avg train loss and val metrics
@@ -478,12 +481,12 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             global_avg_val_ndcg = global_avg_val_metrics['ndcg']
             global_avg_val_recall = global_avg_val_metrics['recall']
             
-            print(f"Epoch {epoch}: Train avg Loss {avg_train_loss:.4f} "
+            logging.info(f"Epoch {epoch}: Train avg Loss {avg_train_loss:.4f} "
                   f"| train NDCG@{top_k} {train_metrics['ndcg']:.4f} "
                   f"| train MRR@{top_k} {train_metrics['mrr']:.4f} "
                   f"| train recall_{top_k} {train_metrics['recall']:.4f}"
                   f"avg val loss {global_avg_val_loss:.4f} | val NDCG@{top_k} {global_avg_val_ndcg:.4f} "
-                  f"| val MRR@{top_k} {global_avg_val_mrr:.4f} | val recall_{top_k} {global_avg_val_recall:.4f}", flush=True)
+                  f"| val MRR@{top_k} {global_avg_val_mrr:.4f} | val recall_{top_k} {global_avg_val_recall:.4f}")
             
             metrics_dict = {
                 "train_loss":avg_train_loss.item(),
@@ -527,9 +530,9 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 best_ndcg = global_avg_val_ndcg
                 epochs_without_improvement = 0
                 if rank == 0:
-                    print(f"  New best val NDCG! ({global_avg_val_ndcg})")
+                    logging.info(f"  New best val NDCG! ({global_avg_val_ndcg})")
                 if save_checkpoints:
-                    print(f'worker_rank={rank}: saving best checkpoint', flush=True)
+                    logging.info(f'worker_rank={rank}: saving best checkpoint')
                     mngr_best.save(
                         epoch,
                         args=ocp.args.Composite(
@@ -547,15 +550,15 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             elif epoch >= delay:
                 epochs_without_improvement += 1
                 if rank == 0:
-                    print( f"  No improvement for {epochs_without_improvement} epoch(s).")
+                    logging.info( f"  No improvement for {epochs_without_improvement} epoch(s).")
             if epochs_without_improvement >= patience:
                 if rank == 0:
-                    print(f"Early stopping triggered at epoch {epoch}.")
+                    logging.info(f"Early stopping triggered at epoch {epoch}.")
                 early_stop_triggered[0] = True
                 break
             
             if rank == 0:
-                print(f'worker_{rank}: log MLFlow metrics', flush=True)
+                logging.info(f'worker_{rank}: log MLFlow metrics')
                 
                 mlflow.log_metrics(metrics_dict, step=epoch)
                 #check for whether Vizier pruning suggests a stop of this trial
@@ -659,7 +662,7 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     
     worker_rank = jax.process_index()
 
-    print(f'worker_{worker_rank}: train_fn', flush=True)
+    logging.info(f'worker_{worker_rank}: train_fn')
     
     if worker_rank == 0:
         for key in {"phase", "mlflow_experiment_name", "mlflow_experiment_id",
@@ -684,12 +687,12 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     try:
     
         if worker_rank == 0:
-            print(f"mlflow set experiment: {config['mlflow_experiment_name']}", flush=True)
+            logging.info(f"mlflow set experiment: {config['mlflow_experiment_name']}")
             mlflow.set_experiment(
                 experiment_name=config['mlflow_experiment_name'],
             )
             # don't use nested=True because the parent isn't in the same thread in production
-            print(f"mlflow start run: {run_name}", flush=True)
+            logging.info(f"mlflow start run: {run_name}")
             mlflow_run = mlflow.start_run(
                 run_name=run_name,
                 #tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
@@ -699,7 +702,7 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
             mlflow.set_tag("phase", config["phase"]) #do not move this before start_run
             mlflow.log_params(stringify_mlflow_params(config))
             mlflow.log_text(str(model), "model_summary.txt")
-            print(f'worker_{worker_rank}: started MLFlow run_id={mlflow_run.info.run_id}', flush=True)
+            logging.info(f'worker_{worker_rank}: started MLFlow run_id={mlflow_run.info.run_id}')
         if save_checkpoints:
             # paradigm is that we save checkpoints for "train" phase, but not HPO trial phases
             sfx = f"{config['study_name']}/{run_name}"
@@ -713,7 +716,7 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
                     trial.update_metadata(
                         vz.Metadata({'best_checkpoint_uri': config['best_checkpoint_uri']}))
         
-        print( f"expect the model training to start w/ loss = {-log(1. / config['num_candidates'])}", flush=True)
+        logging.info( f"expect the model training to start w/ loss = {-log(1. / config['num_candidates'])}")
         
         validate_checkpoint_restores = config.get('validate_checkpoint_restores', False)
         
@@ -729,12 +732,12 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
             validate_checkpoint_restores=validate_checkpoint_restores)
             
         if "debug" in config and config['debug'] and save_checkpoints:
-            print(f"checkpoints save to directories:\n  {config.get('best_checkpoint_uri','')}"
+            logging.info(f"checkpoints save to directories:\n  {config.get('best_checkpoint_uri','')}"
                   f"\n  {config.get('latest_checkpoint_uri','')}")
             
         return best_val_ndcg_k, config.get('mlflow_run_id', "")
     finally:
-        print(f'worker_{worker_rank}: finally clause in train_fn', flush=True)
+        logging.info(f'worker_{worker_rank}: finally clause in train_fn')
         if worker_rank==0 and mlflow_run is not None:
             mlflow.log_metric(f"final_ndcg_{config['top_k']}", float(best_val_ndcg_k))
             mlflow.end_run()
@@ -860,7 +863,7 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     nnx.update(rngs, restored['rngs'])
     global_step = int(restored['global_step']['global_step'].item())
     
-    print(f"worker_rank ={jax.process_index()}: Restored model at step {global_step}")
+    logging.info(f"worker_rank ={jax.process_index()}: Restored model at step {global_step}")
     
     return {
         'model': model, 'optimizer': optimizer,
@@ -1199,10 +1202,10 @@ def export_model(trained_model: GraphRanker, batch_size:int, max_history:int,
 
 def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, global_step, top_k:int=20):
     
-    print(f'worker_rank={jax.process_index()}: begin _assert_checkpoints_restore', flush=True)
+    logging.info(f'worker_rank={jax.process_index()}: begin _assert_checkpoints_restore')
     
     restore_dict = restore_items_from_checkpoint(checkpoint_uri)
-    print(f'worker_rank={jax.process_index()}: global_step={global_step}, restored global_step={restore_dict["global_step"]}', flush=True)
+    logging.info(f'worker_rank={jax.process_index()}: global_step={global_step}, restored global_step={restore_dict["global_step"]}')
     restored_model = restore_dict['model']
     restored_model.eval()
     model.eval()
@@ -1227,30 +1230,30 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
     jax.experimental.multihost_utils.sync_global_devices(
         "sync_barrier_for_restored_model_validation")
     
-    print(f'n_val_samples_current={n_val_samples_current}, n_val_samples_restored = {n_val_samples_restored}')
+    logging.info(f'n_val_samples_current={n_val_samples_current}, n_val_samples_restored = {n_val_samples_restored}')
     
     all_similar = True
     for key in ("loss", "mrr", "ndcg", "recall"):
-        print(f'worker_rank={jax.process_index()}: key={key}, model={global_avg_val_metrics_current[key]}, restored={global_avg_val_metrics_restored[key]}', flush=True)
+        logging.info(f'worker_rank={jax.process_index()}: key={key}, model={global_avg_val_metrics_current[key]}, restored={global_avg_val_metrics_restored[key]}')
         if not jnp.allclose(global_avg_val_metrics_current[key], global_avg_val_metrics_restored[key]):
             all_similar = False
     
     model.train()
     
-    #print(f'worker_rank={jax.process_index()}:\n    summary of model={str(model)}\n    summary of restored={str(restore_dict["model"])}', flush=True)
+    #logging.info(f'worker_rank={jax.process_index()}:\n    summary of model={str(model)}\n    summary of restored={str(restore_dict["model"])}')
     
     # print out model state
     #_graphdef, model_state = nnx.split(model)
     #_graphdef_restored, model_state_restored = nnx.split(restore_dict['model'])
-    #print(
+    #logging.info(
     #    f'worker_rank={jax.process_index()}:\n    summary of model_state={model_state}\n    summary of restored model_state={model_state_restored}',
-    #    flush=True)
+    #    )
     check_model_state_equality(model, restore_dict['model'])
     
     assert(all_similar)
     assert(n_val_samples_current == n_val_samples_restored)
     
-    print(f'worker_rank={jax.process_index()}:checkpoint validated for {checkpoint_uri}')
+    logging.info(f'worker_rank={jax.process_index()}:checkpoint validated for {checkpoint_uri}')
 
 def check_model_state_equality(model_a, model_b, rtol=1e-5, atol=1e-8) -> bool:
     """
@@ -1277,9 +1280,9 @@ def check_model_state_equality(model_a, model_b, rtol=1e-5, atol=1e-8) -> bool:
     if flat_a.keys() != flat_b.keys():
         missing_in_b = set(flat_a.keys()) - set(flat_b.keys())
         missing_in_a = set(flat_b.keys()) - set(flat_a.keys())
-        print("worker_rank={jax.process_index()}: ❌ Model structures DO NOT match!")
-        if missing_in_b: print(f"   Missing in Restored: {missing_in_b}")
-        if missing_in_a: print(f"   Missing in Current: {missing_in_a}")
+        logging.info("worker_rank={jax.process_index()}: ❌ Model structures DO NOT match!")
+        if missing_in_b: logging.info(f"   Missing in Restored: {missing_in_b}")
+        if missing_in_a: logging.info(f"   Missing in Current: {missing_in_a}")
         return False
     
     # 4. Element-wise value check across every array leaf
@@ -1295,13 +1298,13 @@ def check_model_state_equality(model_a, model_b, rtol=1e-5, atol=1e-8) -> bool:
             v = [f'({a:.3e} , {b:.3e})' for a, b in zip(np.asarray(arr_a).ravel()[:10], np.asarray(arr_b).ravel()[:10])]
             mismatched_vals.append(",".join(v))
     if mismatched_keys:
-        print(f"worker_rank={jax.process_index()}: ❌ Model structures match, but values differ at {len(mismatched_keys)} parameter paths:")
+        logging.info(f"worker_rank={jax.process_index()}: ❌ Model structures match, but values differ at {len(mismatched_keys)} parameter paths:")
         #for ii, path in enumerate(mismatched_keys[:5]):  # Limit output log spam
         for ii, path in enumerate(mismatched_keys):
-            print(f"worker_rank={jax.process_index()}:   -> Mismatch in layer path: {path}, values={mismatched_vals[ii]}")
+            logging.info(f"worker_rank={jax.process_index()}:   -> Mismatch in layer path: {path}, values={mismatched_vals[ii]}")
         #if len(mismatched_keys) > 5:
         #    print(f"worker_rank={jax.process_index()}:   -> ... and {len(mismatched_keys) - 5} more paths.")
         return False
     
-    print("worker_rank={jax.process_index()}: ✅ Success! Both model states are mathematically identical.")
+    logging.info("worker_rank={jax.process_index()}: ✅ Success! Both model states are mathematically identical.")
     return True

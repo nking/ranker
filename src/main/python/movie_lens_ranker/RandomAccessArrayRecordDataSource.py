@@ -53,7 +53,7 @@ class RandomAccessArrayRecordDataSource(
         if self._reader is None:
             self._reader = array_record_module.ArrayRecordReader( self.uri)
             # Register the finalizer only once the reader is actually created
-            print(f'reader.num_records()={self._reader.num_records()}')
+            #print(f'reader.num_records()={self._reader.num_records()}')
             self._finalizer = weakref.finalize(self, self._close_reader,
                 self._reader)
         return self._reader

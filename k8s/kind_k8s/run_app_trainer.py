@@ -9,6 +9,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 #USAGE:
 #   python3 run_app_trainer.py
 
+#NOTE: script assumes output_hyperparams_uri and output_metrics_uri use uri pattern
+#       gs://hpo-results-bucket/<project_id>/<study_name>/<tune|train|test>/hpo_<hparams|metrics>.json
+#       in order to make dynamic changes to train_job.yaml
+
 # ====================================================================
 # CONFIGURATION
 # ====================================================================
@@ -25,12 +29,8 @@ PROJECT_ROOT = os.path.abspath("../../")
 # MAIN LIFECYCLE
 # ====================================================================
 
-def run_training_loop():
-
-    # Apply the custom TrainJob
-    infile = "train_job.yaml"
-    with open(infile, "r") as f:
-        manifest_str = f.read()
+def run_training_loop(manifest_str:str):
+   
     manifest = yaml.safe_load(manifest_str)
     if "spec" not in manifest or "trainer" not in manifest["spec"] or "args" not in manifest["spec"][
         "trainer"]:
@@ -46,17 +46,6 @@ def run_training_loop():
             namespace=namespace,
             phase='tune',
             trial_ids=trial_ids, output_log_dir_uri="./")
-
-def extract_hpo_train_job():
-    infile = f"{PROJECT_ROOT}/k8s/kind_k8s/train_job.yaml"
-    with open(infile, "r") as f:
-        manifest_str = f.read()
-    manifest = yaml.safe_load(manifest_str)
-    namespace = manifest['metadata']['namespace']
-    run_train_job_phase(
-        train_job_yaml_content=manifest_str,
-        namespace=namespace,
-        phase='export-hpo-results')
 
 def assert_logs():
     for i, log_file in enumerate(["tune-master-logs.txt", "tune-worker-1-logs.txt"]):
@@ -89,12 +78,32 @@ if __name__ == "__main__":
         setup_cluster(kind_path=kind_path, kubectl_path=kubectl_path, PROJECT_ROOT=PROJECT_ROOT,
             KUBEFLOW_VERSION=KUBEFLOW_VERSION, NAMESPACE=NAMESPACE)
         
+        infile = f"{PROJECT_ROOT}/k8s/kind_k8s/train_job.yaml"
+        with open(infile, "r") as f:
+            manifest_str = f.read()
+        manifest = yaml.safe_load(manifest_str)
+        namespace = manifest['metadata']['namespace']
+        
         #config.load_kube_config() is in setup_cluster
-        run_training_loop()
-        
+        run_training_loop(manifest_str)
+       
         logging.info("\nExtract HPO results:")
+        run_train_job_phase(
+            train_job_yaml_content=manifest_str,
+            namespace=namespace,
+            phase='export-hpo-results')
         
-        extract_hpo_train_job()
+        logging.info("\nTrain model using best HPO results:")
+        run_train_job_phase(
+            train_job_yaml_content=manifest_str,
+            namespace=namespace,
+            phase='train-best')
+        
+        logging.info("\nTest best trained model:")
+        run_train_job_phase(
+            train_job_yaml_content=manifest_str,
+            namespace=namespace,
+            phase='test-best')
         
         finished = True
         

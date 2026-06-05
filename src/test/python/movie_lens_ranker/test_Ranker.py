@@ -46,7 +46,7 @@ from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
 from movie_lens_ranker.app_runner import main as app_runner, \
     extract_correct_vizier_param_types_dict, \
     get_best_checkpoint_uri_for_testing, get_best_parameters_for_training
-from movie_lens_ranker.app_runner import run_export_hpo_results
+from movie_lens_ranker.app_runner import run_export_results
 
 import unittest
 import subprocess
@@ -373,11 +373,12 @@ class TestRanker(unittest.TestCase):
         # use the method and assert results
         #output_hp_path = os.path.join(get_bin_dir(), "output_hp.json")
         #output_metrics_path = os.path.join(get_bin_dir(), "output_metrics.json")
-        output_hp_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/hpo_hparams.json"
-        output_metrics_path =  f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/hpo_metrics.json"
+        output_hp_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/tune/hparams.json"
+        output_metrics_path =  f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/tune/metrics.json"
         config['output_hyperparams_uri'] = output_hp_path
         config['output_metrics_uri'] = output_metrics_path
-        run_export_hpo_results(config = config)
+        config['phase'] = 'export-hpo-results'
+        run_export_results(config = config)
         with fsspec.open(output_hp_path, mode='r') as f:
             content = f.read()
             output_hp_dict = json.loads(content)
@@ -488,7 +489,23 @@ class TestRanker(unittest.TestCase):
             'val_dataloader', 'rngs', 'global_step', 'config'}
         for key in expected_keys:
             self.assertTrue(key in restore_dict)
+            
+        #check that export-train-results works:
+        output_metrics_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/train/metrics.json"
+        config['output_metrics_uri'] = output_metrics_path
+        config['phase'] = 'export-train-results'
+        run_export_results(config=config)
         
+        #assert that bucket files exist and have expected content
+        with fsspec.open(output_metrics_path, mode='r') as f:
+            output_metrics_dict = json.loads(f.read())
+        self.assertIsNotNone(output_metrics_dict)
+        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
+            key1 = f'train_{key}'
+            key2 = f'val_{key}'
+            self.assertTrue(key1 in output_metrics_dict)
+            self.assertTrue(key2 in output_metrics_dict)
+            
         ## =============== add test uris to config and run tests.  also tests that restore works================
         restore_dict['config']['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
         restore_dict['config']['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
@@ -501,7 +518,7 @@ class TestRanker(unittest.TestCase):
         config['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
         config['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
         #config['test_checkpoint_uri'] = best_checkpoint_uri_tag  #for use when phase is 'test-given'
-        config['best_checkpoint_uri'] = best_checkpoint_uri_tag
+        #config['best_checkpoint_uri'] = best_checkpoint_uri_tag #the method now looks this up in mlflow records
         config['phase'] = 'test-best'
         test_id = 234567
         config['test_id'] = test_id
@@ -527,6 +544,22 @@ class TestRanker(unittest.TestCase):
                     metrics_dict[key_t]['y'].append(float(m.value))
         self.assertTrue(len(metrics_dict), 8)
         
+        # check that export-test-results works:
+        output_metrics_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/test/metrics.json"
+        config['output_metrics_uri'] = output_metrics_path
+        config['phase'] = 'export-train-results'
+        run_export_results(config=config)
+        
+        # assert that bucket files exist and have expected content
+        with fsspec.open(output_metrics_path, mode='r') as f:
+            output_metrics_dict = json.loads(f.read())
+        self.assertIsNotNone(output_metrics_dict)
+        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
+            key1 = f'train_{key}'
+            key2 = f'val_{key}'
+            self.assertTrue(key1 in output_metrics_dict)
+            self.assertTrue(key2 in output_metrics_dict)
+        
         ##====== load train_ for use in stats =======
         TRAIN_BATCH_SIZE = restore_dict['train_dataloader']._sampler.batch_size
         TOTAL_RECORDS = restore_dict['train_dataloader']._sampler.total_records
@@ -543,7 +576,7 @@ class TestRanker(unittest.TestCase):
         epoch = (earlier_restore_dict['global_step']//TRAIN_BATCH_SIZE)//STEPS_PER_EPOCH_GLOBAL
         self.assertEqual(epoch, (num_epochs-2))
         
-        #because this is next to last epoch saved, we shoud see < STEPS_PER_EPOCH_LOCAL loops over the iterator
+        #because this is next to last epoch saved, we should see < STEPS_PER_EPOCH_LOCAL loops over the iterator
         start_step = earlier_restore_dict['global_step'] // NUM_TRAIN_SHARDS
         n_iter = 0
         try:

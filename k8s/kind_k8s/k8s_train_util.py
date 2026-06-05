@@ -10,6 +10,9 @@ def run_train_job_phase(
 ):
     """
     run train_job.yaml for given phase. Authenticate within the cluster before invoking this method.
+    phase based dynamic changes to train_job yaml are performed internally.
+    note that this assumes that yaml args for output_hyperparams_uri and output_metrics_uri use uri pattern
+      gs://hpo-results-bucket/<project_id>/<study_name>/<tune|train|test>/hpo_<hparams|metrics>.json
     :param train_job_yaml_content:
     :param namespace:
     :param phase: can be "tune" or "train-best" or "test-best".  other options not yet implemented
@@ -23,9 +26,10 @@ def run_train_job_phase(
     from kubernetes.client import ApiException
     from json import loads
     
-    if phase not in ("tune", "train-best", "test-best", "export-hpo-results"):
+    allowed_phases = ("tune", "train-best", "test-best", "export-hpo-results", "export-train-results", "export-test-results")
+    if phase not in allowed_phases:
         raise ValueError(
-            f"phase must be one of {('tune', 'train-best', 'test-best', 'export-hpo-results')}")
+            f"phase must be one of {allowed_phases}")
     
     if phase == "tune" and trial_ids is None:
         raise ValueError("trial_ids cannot be None when phase is 'tune'")
@@ -40,7 +44,7 @@ def run_train_job_phase(
             raise ValueError("train_job_yaml_content must be the yaml file read into a string")
         raise ex
         
-    ## ---- begin dynamic edits to the yaml ------
+    ## ---------------------------- begin dynamic edits to the yaml -------------------------------
     if phase == "tune":
         trial_ids_str = trial_ids
         trial_ids = loads(trial_ids)
@@ -86,7 +90,27 @@ def run_train_job_phase(
             break
         # {'name': 'XLA_FLAGS', 'value': '--xla_force_host_platform_device_count=2'}
     
-    ## ---- end dynamic yaml edits ------
+    #gs://hpo-results-bucket/<project_id>/<study_name>/<tune|train|test>/hpo_<hparams|metrics>.json
+    if phase == "export-train-results" or phase == "export-test-results":
+        mod_is = []
+        for i, arg in enumerate(manifest["spec"]["trainer"]["args"]):
+            if arg.find("--output_hyperparams_uri") == 0:
+                mod_is.append(i)
+            elif arg.find("--output_metrics_uri") == 0:
+                mod_is.append(i)
+        if phase == "export-train-results":
+            repl = "train"
+        elif phase == 'export-test-results':
+            repl = "test"
+        import re
+        # Match any non-slash characters that are preceded by a slash
+        # and followed by exactly one slash and the end of the string
+        # example entry: text = "--output_hyperparams_uri=gs://hpo-results-bucket/tune-kind-01/GraphRanker_tuning_kind/tune/hpo_hparams.json"
+        pattern = r'(?<=/)[^/]+(?=/[^/]+$)'
+        for mod_i in mod_is:
+            manifest["spec"]["trainer"]["args"][mod_i] = re.sub(pattern, repl, manifest["spec"]["trainer"]["args"][mod_i])
+        
+    ## ---------------------- end dynamic yaml edits ------------------------------
     
     logging.info(f'deploying {job_name}')
     

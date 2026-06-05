@@ -7,6 +7,8 @@ from array_record.python import array_record_module
 import msgpack
 import numpy as np
 from absl import flags
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # In JAX 0.8+, shard_map is typically in the main namespace
 
@@ -66,7 +68,7 @@ def app_runner_is_missing_minimum_required_keys(config: Dict[str, Any]) -> bool:
     """
     for key in ("study_name", "phase",  "mlflow_tracking_uri"):
         if config.get(key, None) == None:
-            print(f'missing a key', flush=True)
+            logging.info(f'missing a key')
             return True
     return False
     
@@ -235,13 +237,16 @@ def define_flags():
     )
     flags.DEFINE_enum(
         'phase', 'train-best',
-        ['tune', 'train-best', 'train-given', 'test-best', 'test-given', 'export-hpo-results'],
+        ['tune', 'train-best', 'train-given', 'test-best', 'test-given',
+            'export-hpo-results', 'export-train-results', 'export-test-results'],
         'mode for running the train_fn.  tune: HPO run; '
         'train-best: use best HPs from tune; '
         'train-given: use given HPs; '
         'test-best: use test_fn for best model for the given study_name and project_id;'
         'test-given: use test_fn with test_checkpoint_uri; '
-        'export-hpo-results: extract the HPO best results into params and metrics json files'
+        'export-hpo-results: extract the HPO best results into params and metrics json files; '
+        'export-test-results: extract the test results into params and metrics json files; '
+        'export-train-results: extract the train results into params and metrics json files'
     )
     flags.DEFINE_string("mlflow_tracking_uri", default=None,
         help="MLFlow tracking uri"
@@ -348,7 +353,7 @@ def _read_embeddings(embeddings_uri:str, batch_size:int=1024) ->  jnp.ndarray:
         #just in case the array_record was not written in order, sort by id
         embeddings = [val for _, val in sorted(zip(ids, embeddings))]
     except Exception as e:
-        print(f'error in _read_embeddings: {e}', flush=True)
+        logging.exception(f'error in _read_embeddings: {e}')
         raise e
     finally:
         if reader is not None:
@@ -427,7 +432,7 @@ def read_movies_array_record(movies_uri:str, batch_size:int=1048) -> List[int]:
     movie_ids = []
     reader = None
     try:
-        print(f'about to read movies_uri={movies_uri}', flush=True)
+        logging.info(f'about to read movies_uri={movies_uri}')
         reader = array_record_module.ArrayRecordReader(movies_uri)
         n_records = reader.num_records()
         for i in range(0, n_records, batch_size):
@@ -439,7 +444,7 @@ def read_movies_array_record(movies_uri:str, batch_size:int=1048) -> List[int]:
         #not necessary, but might as well sort in case written out of order
         movie_ids.sort()
     except Exception as e:
-        print(f'Error in read_movies_array_record: {e}', flush=True)
+        logging.exception(f'Error in read_movies_array_record: {e}')
         raise e
     finally:
         if reader is not None:
@@ -487,12 +492,12 @@ def build_history_lookup(ratings_uri_list: Union[str, List[str]], batch_size: in
                     lookup[u]["rating"].append(record[2])
                     lookup[u]["ts"].append(record[3])
         except Exception as e:
-            print(f'Error in build_history_lookup: {e}', flush=True)
+            logging.exception(f'Error in build_history_lookup: {e}')
             raise e
         finally:
             if reader is not None:
                 reader.close()
-    print(f'rewrite lookup size = {len(lookup)}')
+    logging.info(f'rewrite lookup size = {len(lookup)}')
     max_history = 0
     lookup2 = {}
     for u in lookup:

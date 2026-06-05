@@ -67,7 +67,6 @@ def plot_mlflow_metrics(metrics_dict:dict):
         
         df_long = df.unpivot(index="epoch", on=["train", "val"])
         df_long = df_long.rename({"value": key})
-        print(f'df_long: {df_long}')
         chart = df_long.plot.line(
             x="epoch",
             y=key,

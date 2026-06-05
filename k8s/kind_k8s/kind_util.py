@@ -102,7 +102,7 @@ def apply_templated_yaml(api_client, filepath, replacements):
                 if "AlreadyExists" not in str(e):
                     raise e
 
-def wait_for_deployment(apps_v1, name, namespace, timeout=180):
+def wait_for_deployment(apps_v1, name, namespace, timeout=240):
     """Poll a deployment until readyReplicas matches availableReplicas."""
     logging.info(f"⏳ Waiting for deployment {name} in {namespace} to roll out...")
     start_time = time.time()

@@ -4,7 +4,8 @@ import numpy as np
 from array_record.python import array_record_module
 
 from movie_lens_ranker.util import build_history_lookup
-
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 class UserHistory (object):
     def __init__(self, ratings_uri_list: Union[str, List[str]], fixed_size:int = 2048):
@@ -20,7 +21,7 @@ class UserHistory (object):
         #buildnumpy vectors, making padded lists of length fixed_history_length for movies, ratings, and timestamps
         lookup, max_history = build_history_lookup(ratings_uri_list)
         self.max_history = max_history
-        print(f'max_history found = {max_history}.  fixed_size={fixed_size}')
+        logging.info(f'max_history found = {max_history}.  fixed_size={fixed_size}')
         
         n_users = len(lookup)
         

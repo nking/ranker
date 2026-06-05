@@ -339,8 +339,8 @@ def main(_):
                     'phase': phase,
                     'validate_checkpoint_restores': False,
                     "debug": True,
-                    'output_hyperparams_uri': f"gs://hpo-results-bucket/{project_id}/{study_name}/hpo_hparams.json",
-                    'output_metrics_uri': f"gs://hpo-results-bucket/{project_id}/{study_name}/hpo_metrics.json",
+                    'output_hyperparams_uri': f"gs://hpo-results-bucket/{project_id}/{study_name}/tune/hparams.json",
+                    'output_metrics_uri': f"gs://hpo-results-bucket/{project_id}/{study_name}/tune/metrics.json",
                 },
             )
             logging.info(f'adding {phase} job')

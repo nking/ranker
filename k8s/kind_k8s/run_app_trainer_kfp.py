@@ -132,7 +132,7 @@ def hpo_train_test_pipeline(train_job_yaml_content:str, namespace:str = 'ranker-
     )
     
     # Single-node extractor using the same image
-    extraction_task = run_train_job(
+    tune_extraction_task = run_train_job(
         train_job_yaml_content=train_job_yaml_content,
         namespace=namespace,
         phase="export-hpo-results")
@@ -142,17 +142,27 @@ def hpo_train_test_pipeline(train_job_yaml_content:str, namespace:str = 'ranker-
         namespace=namespace,
         phase="train-best")
     
+    train_extraction_task = run_train_job(
+        train_job_yaml_content=train_job_yaml_content,
+        namespace=namespace,
+        phase="export-train-results")
+    
     test_task = run_train_job(
         train_job_yaml_content=train_job_yaml_content,
         namespace=namespace,
         phase="test-best")
     
-    extraction_task.after(hpo_task)
-    train_task.after(extraction_task)
+    test_extraction_task = run_train_job(
+        train_job_yaml_content=train_job_yaml_content,
+        namespace=namespace,
+        phase="export-test-results")
+    
+    train_task.after(hpo_task)
     test_task.after(train_task)
-    
-    #TODO: make targets for "export_train_results" and "export_test_results"
-    
+    #after test task, the extraction tasks can be run in parallel, but they're all fast, so sequential is fine
+    tune_extraction_task.after(test_task)
+    train_extraction_task.after(tune_extraction_task)
+    test_extraction_task.after(train_extraction_task)
     
 @dsl.component(base_image="python:3.12-slim")
 def cleanup_cluster_resources(kind_path: str):

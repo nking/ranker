@@ -88,3 +88,20 @@ Events:
 
 kubectl get trainjobs.trainer.kubeflow.org --all-namespaces
 
+=========================================================
+
+kubectl get pods -n ranker-ns
+NAME                             READY   STATUS    RESTARTS   AGE
+gcs-emulator-64467f78fd-z6wxp    1/1     Running   0          30m
+local-db-store-55f994f95-wc5zk   1/1     Running   0          30m
+vizier-server-67c85cd769-xwpxh   1/1     Running   0          30m
+
+
+mlflow table called runs has columns:
+    run_uuid | name | source_type | source_name | entry_point_name | user_id | status | start_time | end_time | source_version | lifecycle_stage | artifact_uri | experiment_id | deleted_time
+       
+and is in local-db-store which is postgres
+
+can see the uri and port in kind-cluster.yaml
+    172.17.0.1:5432
+   see get_runs.py in ${project_root}/scripts

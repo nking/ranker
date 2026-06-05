@@ -21,8 +21,9 @@ spec:
       - "--vizier_endpoint=vizier-service:8000"
       - "--latest_checkpoint_uri=gs://checkpoint-bucket/latest"
       - "--best_checkpoint_uri=gs://checkpoint-bucket/best"
-      - "--output_hyperparams_uri=gs://hpo-results-bucket/tune-kind-01/GraphRanker_tuning_kind/hpo_hparams.json"
-      - "--output_metrics_uri=gs://hpo-results-bucket/tune-kind-01/GraphRanker_tuning_kind/hpo_metrics.json"
+      # for output hparams and metrics, use gs://hpo-results-bucket/<project_id>/<study_name>/<tune|train|test>/hpo_<hparams|metrics>.json
+      - "--output_hyperparams_uri=gs://hpo-results-bucket/tune-kind-01/GraphRanker_tuning_kind/tune/hparams.json"
+      - "--output_metrics_uri=gs://hpo-results-bucket/tune-kind-01/GraphRanker_tuning_kind/tune/metrics.json"
       - "--movies_uri=gs://data/movies-00000-of-00001.array_record"
       - "--recommendations_uri=gs://data/recommended_movies.array_record"
       - "--recommendations_ts_uri=gs://data/recommended_movies_timestamps.array_record"

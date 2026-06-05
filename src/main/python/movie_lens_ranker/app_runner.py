@@ -9,7 +9,8 @@ from typing import Dict, Union, Any
 
 import jax
 from mlflow import MlflowClient
-
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 def safe_jax_init():
     def get_process_id():
@@ -31,12 +32,12 @@ def safe_jax_init():
              
     try:
         if "LOCAL_SIMULATION" in os.environ and os.environ.get("LOCAL_SIMULATION") == "True":
-            print("🛠️ Detected local simulation. Applying manual jax initialization...", flush=True)
+            logging.info("🛠️ Detected local simulation. Applying manual jax initialization...")
             process_id = get_process_id()
             coord_addr = os.environ.get("JAX_COORDINATOR_ADDRESS")
             num_processes = int(os.environ.get("JAX_NUM_PROCESSES", 1))
             
-            print(f'process_id = {process_id} coord_addr={coord_addr} num_processes={num_processes}',  flush=True)
+            logging.info(f'process_id = {process_id} coord_addr={coord_addr} num_processes={num_processes}')
 
             jax.distributed.initialize(
                 coordinator_address=coord_addr,
@@ -46,16 +47,16 @@ def safe_jax_init():
     
         # Try jax[k8s] auto-discovery if no coordinator is provided
         elif 'KUBERNETES_SERVICE_HOST' in os.environ:
-            print("Initializing JAX via jax[k8s] auto-discovery...")
+            logging.info("Initializing JAX via jax[k8s] auto-discovery...")
             jax.distributed.initialize()
         
         # Standard local run (e.g., unit tests on your laptop)
         else:
-            print("No distributed environment detected. Running locally.")
+            logging.info("No distributed environment detected. Running locally.")
     
     except RuntimeError as e:
         #absorb the error to avoid failure from more than one init attempt
-        print(f'WARNING while trying to initialize JAX distributed: {e}', flush=True)
+        logging.exception(f'WARNING while trying to initialize JAX distributed: {e}')
 
 safe_jax_init()
 
@@ -107,12 +108,12 @@ def wait_for_gcs(fake_gcs_uri, timeout=30):
         try:
             with urllib.request.urlopen(fake_gcs_uri) as response:
                 if response.getcode() == 200:
-                    print("Successfully connected to GCS emulator!")
+                    logging.info("Successfully connected to GCS emulator!")
                     return True
         except Exception:
-            print("Waiting for GCS emulator...")
+            logging.exception("Waiting for GCS emulator...")
             time.sleep(2)
-    print("GCS emulator connection timed out.")
+    logging.exception("GCS emulator connection timed out.")
     sys.exit(1)
 
 def get_or_create_mlflow_experiment(experiment_name:str):
@@ -214,7 +215,7 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
             return vz_clients.Study.from_owner_and_id(owner=project_id, study_id=study_name)
         except grpc.RpcError as e:
             if e.code() == grpc.StatusCode.NOT_FOUND:
-                print(f"Worker {jax.process_index()} waiting for study to be created...")
+                logging.exception(f"Worker {jax.process_index()} waiting for study to be created...")
                 time.sleep(5)  # Back off to avoid spamming the gRPC server
             else:
                 # If it's a connection or permission error, crash early
@@ -250,17 +251,17 @@ def sync_hyperparams(params_dict) -> Dict[str, Union[int, float]]:
 def run_tune(config):
     
     if "debug" in config and config['debug']:
-        print(f'tune_run config: {config}', flush=True)
+        logging.info(f'tune_run config: {config}')
     
     if "phase" not in config:
-        print("ERROR: expecting phase='tune'")
+        logging.error("ERROR: expecting phase='tune'")
         return
     
     worker_rank = jax.process_index()
     
     study = None
     if worker_rank == 0:
-        print(f"worker_{worker_rank}: creating MLFlow parent run")
+        logging.info(f"worker_{worker_rank}: creating MLFlow parent run")
         mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
         #create an ML-Flow parent study if it does not exist
         experiment = mlflow.get_experiment_by_name(name=config['study_name'])
@@ -291,7 +292,7 @@ def run_tune(config):
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
         config['mlflow_experiment_name'] = config['study_name']
         config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
-        print(f"worker_{worker_rank}: done creating MLFlow parent run")
+        logging.info(f"worker_{worker_rank}: done creating MLFlow parent run")
         
     trial_ids = json.loads(config['trial_ids'])
     n_large = len(trial_ids) > 10
@@ -299,7 +300,7 @@ def run_tune(config):
     jax.experimental.multihost_utils.sync_global_devices( "sync_barrier_for_vizier")
     
     if worker_rank == 0:
-        print(f"worker_{worker_rank}: creating vizier study", flush=True)
+        logging.info(f"worker_{worker_rank}: creating vizier study")
         study = setup_vizier_study(project_id=config['project_id'], study_name=config['study_name'],
             endpoint=config['vizier_endpoint'], top_k=config['top_k'], use_batching_alg=n_large)
         unique_id = uuid.uuid4().hex[:8]
@@ -307,7 +308,7 @@ def run_tune(config):
         client_id = f"{resource_name}_{unique_id}"
         #suggested_trials = study.suggest(count=len(trial_ids), client_id=study._client._client_id)
         suggested_trials = study.suggest(count=len(trial_ids), client_id=client_id)
-        print(f"worker_{worker_rank}: has suggested trials", flush=True)
+        logging.info(f"worker_{worker_rank}: has suggested trials")
         
     trial_suggestion = None
     hparams = {}
@@ -317,13 +318,13 @@ def run_tune(config):
             trial_suggestion = suggested_trials[i]
             hparams = {k: v for k, v in trial_suggestion.parameters.items()}
         
-        print(f"worker_{worker_rank}: wait at barrier for trial_id={trial_id}")
+        logging.info(f"worker_{worker_rank}: wait at barrier for trial_id={trial_id}")
         jax.experimental.multihost_utils.sync_global_devices(f"sync_barrier_for_trial_{{trial_id}}")
-        print(f"worker_{worker_rank}: passed barrier for trial_id={trial_id}")
+        logging.info(f"worker_{worker_rank}: passed barrier for trial_id={trial_id}")
 
         hparams = sync_hyperparams(hparams)
         
-        print(f"worker_{worker_rank}: synchronized params for trial_id={trial_id}", flush=True)
+        logging.info(f"worker_{worker_rank}: synchronized params for trial_id={trial_id}")
 
         config2 = {
             **config,
@@ -331,7 +332,7 @@ def run_tune(config):
         }
         for k, v in config2.items():
             if k.find('?') > -1:
-                print(f"problem key from trial: {k}={v}", flush=True)
+                logging.info(f"problem key from trial: {k}={v}")
         
         config2['trial_id'] = trial_id
         
@@ -348,10 +349,10 @@ def run_tune(config):
 def run_train(config):
    
     if "debug" in config and config['debug']:
-        print(f'train_run config: {config}', flush=True)
+        logging.info(f'train_run config: {config}')
     
     if "phase" not in config:
-        print("ERROR: expecting phase='train-best' or 'train-given'")
+        logging.info("ERROR: expecting phase='train-best' or 'train-given'")
         return
     
     worker_rank = jax.process_index()
@@ -449,10 +450,10 @@ def get_best_checkpoint_uri_for_testing(config:Dict[str, Any]) -> str:
 
 def run_test(config):
     if "debug" in config and config['debug']:
-        print(f'test_run config: {config}', flush=True)
+        logging.info(f'test_run config: {config}')
     
     if "phase" not in config:
-        print("ERROR: expecting phase='test-best' or 'test-given'")
+        logging.info("ERROR: expecting phase='test-best' or 'test-given'")
         return
     
     worker_rank = jax.process_index()
@@ -499,9 +500,9 @@ def run_test(config):
     
     test_metrics = test_fn(config=config)
         
-    print(f'TEST METRICS: {test_metrics}', flush=True)
+    logging.info(f'TEST METRICS: {test_metrics}')
    
-def run_export_hpo_results(config: Dict[str, Any]):
+def run_export_results(config: Dict[str, Any]):
     """
     given a dictionary which includes vizier mappings: study_name, project_id, vizier_endpoint
     and MLFlow mappings: mlflow_tracking_uri, extract the best found hyperparameters from the
@@ -512,51 +513,77 @@ def run_export_hpo_results(config: Dict[str, Any]):
     :param output_hyperparams_uri: uri to write the best found hyper-parameters to
     :param output_metrics_uri: uri to write the metrics dictionary from the best-hyper parameters run.
     """
-    print(f'run_export_hpo_results')
     
     for key in ("study_name", "project_id", "vizier_endpoint", "mlflow_tracking_uri", "output_hyperparams_uri", "output_metrics_uri"):
         if key not in config:
-            raise ValueError(f"Missing key {key} in config")
-        
+            raise ValueError(f"Missing key {key} in config in run_export_results")
+    
+    phase = config["phase"]
+    logging.info(f'run {phase}')
+    
     STUDY_NAME = config["study_name"]
     project_id = config['project_id']
     
-    vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
-    print(f'looking for study_name {STUDY_NAME} at endpoint {config["vizier_endpoint"]}', flush=True)
-    #resource_name = f"owners/{project_id}/studies/{STUDY_NAME}"
-
-    study = vz_clients.Study.from_owner_and_id(owner=project_id, study_id=STUDY_NAME)
-    
-    optimal_trials = study.optimal_trials()
-    best_trial = next(iter(optimal_trials), None)
-    best_trial_data = best_trial.materialize()
-    #best_params contains only the params being tuned, not all params needed for train_fn
-    best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
-    #print("Available metrics:", list(best_trial_data.final_measurement.metrics.keys()), flush=True)
-    bfm = best_trial_data.final_measurement
-    bfm = bfm.metrics.get(f'ndcg_20')
-    best_value = bfm.value
-    
-    print(f"Loaded Best Objective: {best_value}")
-    print(f"Loaded Best Parameters: {best_params}")
+    if phase == "export-hpo-results":
+        run_name = "tune"
+    elif phase == "export-train-results":
+        run_name = "train"
+    elif phase == "export-test-results":
+        run_name = 'test'
+    else:
+        raise ValueError(f"unrecognized phase for run_export_results: {phase}")
     
     mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
+    vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
     
+    logging.info(f'looking for study_name {STUDY_NAME} at endpoint {config["vizier_endpoint"]} with run name={run_name}')
+    #resource_name = f"owners/{project_id}/studies/{STUDY_NAME}"
+
+    if run_name == "tune":
+        study = vz_clients.Study.from_owner_and_id(owner=project_id, study_id=STUDY_NAME)
+        
+        optimal_trials = study.optimal_trials()
+        best_trial = next(iter(optimal_trials), None)
+        best_trial_data = best_trial.materialize()
+        #best_params contains only the params being tuned, not all params needed for train_fn
+        best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
+        #print("Available metrics:", list(best_trial_data.final_measurement.metrics.keys()), flush=True)
+        bfm = best_trial_data.final_measurement
+        bfm = bfm.metrics.get(f'ndcg_20')
+        best_value = bfm.value
+    
+        logging.info(f"Loaded Best Objective: {best_value}")
+        logging.info(f"Loaded Best Parameters: {best_params}")
+        
+        # run_uuid is this:
+        mlflow_run_id = best_trial_data.metadata.get('mlflow_run_id')
+    else:
+        experiment = mlflow.get_experiment_by_name(config['mlflow_experiment_name'])
+        if experiment is None:
+            raise LookupError(f"Experiment {config['mlflow_experiment_name']} not found.")
+        runs = mlflow.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            filter_string=f"attributes.run_name = '{run_name}'",
+            output_format="list"
+        )
+        if runs is None or len(runs) == 0:
+            raise LookupError(f"No runs found for experiment_name={config['mlflow_experiment_name']} and run name={run_name}")
+        mlflow_run_id = runs[0].info.run_id
+   
     # mlflow table called runs has columns:
     # run_uuid | name | source_type | source_name | entry_point_name | user_id | status | start_time | end_time | source_version | lifecycle_stage | artifact_uri | experiment_id | deleted_time
     
-    # run_uuid is this:
-    mlflow_run_id = best_trial_data.metadata.get('mlflow_run_id')
     mlflow_run = mlflow.get_run(mlflow_run_id)
     
-    hparams = destringify_mlflow_params(mlflow_run.data.params)
-    hparams_json = json.dumps(hparams, indent=4, sort_keys=True)
-    try:
-        with fsspec.open(config['output_hyperparams_uri'], mode="w") as f:
-            f.write(hparams_json)
-    except Exception as e:
-        print(f'ERROR while trying to write to {config["output_hyperparams_uri"]}: {e}')
-        raise e
+    if run_name == "tune":
+        hparams = destringify_mlflow_params(mlflow_run.data.params)
+        hparams_json = json.dumps(hparams, indent=4, sort_keys=True)
+        try:
+            with fsspec.open(config['output_hyperparams_uri'], mode="w") as f:
+                f.write(hparams_json)
+        except Exception as e:
+            logging.exception(f'ERROR while trying to write to {config["output_hyperparams_uri"]}: {e}.  Check for permission errors')
+            raise e
     
     #get the metrics:
     mlflow_client = MlflowClient(tracking_uri=config['mlflow_tracking_uri'])
@@ -574,19 +601,19 @@ def run_export_hpo_results(config: Dict[str, Any]):
         with fsspec.open(config['output_metrics_uri'], mode="w") as f:
             f.write(metrics_json)
     except Exception as e:
-        print(f'ERROR while trying to write to {config["output_metrics_uri"]}: {e}')
+        logging.exception(f'ERROR while trying to write to {config["output_metrics_uri"]}: {e}.  Check for permission errors')
         raise e
 
 def main(_):
     config = FLAGS.flag_values_dict()
     
     if "debug" in config and config['debug']:
-        print(f'all args received from flags: {config}', flush=True)
+        logging.info(f'all args received from flags: {config}', flush=True)
     
     config = {k:v for k, v in config.items() if k in get_recognized_keys()}
     
     if app_runner_is_missing_minimum_required_keys(config):
-        print(f'warning: missing the minimum required flags')
+        logging.info(f'warning: missing the minimum required flags')
         return
     
     # work-around for xmanager encapsulating the json dumps string of array with extra quotes
@@ -595,14 +622,14 @@ def main(_):
         config['trial_ids'] = config['trial_ids'].strip("'").strip('"')
     
     if "debug" in config and config['debug']:
-        print(f'recognized args: {config}', flush=True)
+        logging.info(f'recognized args: {config}', flush=True)
         
     # static top_k is throughout code
     config['top_k'] = 20
     
-    print(f'jax_process_index={jax.process_index()}; '
+    logging.info(f'jax_process_index={jax.process_index()}; '
           f'jax.local_devices={jax.local_devices()}; '
-          f'jax.devices={jax.devices()}, phase={config["phase"]}', flush=True)
+          f'jax.devices={jax.devices()}, phase={config["phase"]}')
 
     if config['phase'] == 'tune':
         run_tune(config)
@@ -611,7 +638,7 @@ def main(_):
     elif config['phase'].find('train') == 0:
         run_train(config)
     elif config['phase'].find('export') == 0:
-        run_export_hpo_results(config)
+        run_export_results(config)
     else:
         raise ValueError('unknown phase: {config["phase"]}')
     

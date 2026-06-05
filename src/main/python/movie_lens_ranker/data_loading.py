@@ -20,6 +20,8 @@ from movie_lens_ranker.SparseLocalSubgraphTransform import \
     SparseLocalSubgraphTransform
 from movie_lens_ranker.UserHistory import UserHistory
 from movie_lens_ranker.util import read_movies_array_record
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 def create_train_and_val_dataloaders(
         movies_uri:str, recommendations_uri:str, recommendations_ts_uri:str,
@@ -80,7 +82,7 @@ def _create_dataloader(
         num_epochs:int, batch_size: int, seed: int, shuffle:bool=True) -> DataLoader:
     
     shard_opts = grain.sharding.ShardByJaxProcess()
-    print(f'shard_opts={shard_opts}')
+    logging.info(f'grain shard_opts={shard_opts}')
     
     read_opts = grain.ReadOptions(
         num_threads = int(os.environ.get("grain_read_options_num_threads", 16))
