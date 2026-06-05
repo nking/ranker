@@ -259,17 +259,20 @@ def run_tune(config):
     
     worker_rank = jax.process_index()
     
+    experiment_name = config.get('mlflow_experiment_name', config['study_name'])
+    config['mlflow_experiment_name'] = experiment_name
+    
     study = None
     if worker_rank == 0:
         logging.info(f"worker_{worker_rank}: creating MLFlow parent run")
         mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
         #create an ML-Flow parent study if it does not exist
-        experiment = mlflow.get_experiment_by_name(name=config['study_name'])
+        experiment = mlflow.get_experiment_by_name(name=experiment_name)
         if experiment is None:
-            experiment = mlflow.set_experiment(experiment_name=config['study_name'])
+            experiment = mlflow.set_experiment(experiment_name=experiment_name)
             # Create the parent run and get its ID
             try:
-                parent_run = mlflow.start_run(run_name="tune")
+                parent_run = mlflow.start_run(run_name="tune", experiment_id=experiment.experiment_id)
                 mlflow_parent_run_id = parent_run.info.run_id
             finally:
                 mlflow.end_run()
@@ -284,14 +287,12 @@ def run_tune(config):
                 mlflow_parent_run_id = runs[0].info.run_id
             else:
                 try:
-                    parent_run = mlflow.start_run(run_name="tune")
+                    parent_run = mlflow.start_run(run_name="tune", experiment_id=experiment.experiment_id)
                     mlflow_parent_run_id = parent_run.info.run_id
                 finally:
                     mlflow.end_run()
         config['mlflow_experiment_id'] = experiment.experiment_id
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
-        config['mlflow_experiment_name'] = config['study_name']
-        config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
         logging.info(f"worker_{worker_rank}: done creating MLFlow parent run")
         
     trial_ids = json.loads(config['trial_ids'])
@@ -357,16 +358,19 @@ def run_train(config):
     
     worker_rank = jax.process_index()
     
+    experiment_name = config.get('mlflow_experiment_name', config['study_name'])
+    config['mlflow_experiment_name'] = experiment_name
+    
     study = None
     if worker_rank == 0:
         mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
         #create an ML-Flow parent study if it does not exist
-        experiment = mlflow.get_experiment_by_name(name=config['study_name'])
+        experiment = mlflow.get_experiment_by_name(name=experiment_name)
         if experiment is None:
-            experiment = mlflow.set_experiment(experiment_name=config['study_name'])
+            experiment = mlflow.set_experiment(experiment_name=experiment_name)
             # Create the parent run and immediately get its ID
             try:
-                parent_run = mlflow.start_run(run_name="train")
+                parent_run = mlflow.start_run(run_name="train", experiment_id=experiment.experiment_id)
                 mlflow_parent_run_id = parent_run.info.run_id
             finally:
                 mlflow.end_run()
@@ -381,14 +385,12 @@ def run_train(config):
                 mlflow_parent_run_id = runs[0].info.run_id
             else:
                 try:
-                    parent_run = mlflow.start_run(run_name="train")
+                    parent_run = mlflow.start_run(run_name="train", experiment_id=experiment.experiment_id)
                     mlflow_parent_run_id = parent_run.info.run_id
                 finally:
                     mlflow.end_run()
         config['mlflow_experiment_id'] = experiment.experiment_id
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
-        config['mlflow_experiment_name'] = config['study_name']
-        config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
     
     if config['phase'] == 'train-best':
         #worker==0 fetches the best parameters and then all workers synchronize to get best params
@@ -435,7 +437,7 @@ def get_best_checkpoint_uri_for_testing(config:Dict[str, Any]) -> str:
     if 'mlflow_experiment_id' not in config:
         experiment = mlflow.get_experiment_by_name(name=config['mlflow_experiment_name'])
         if experiment is None:
-            raise ValueError(f"Experiment {config['mlflow_experiment_name']} is not found")
+            raise LookupError(f"Experiment {config['mlflow_experiment_name']} is not found")
         config['mlflow_experiment_id'] = experiment.experiment_id
     runs = mlflow.search_runs(
         experiment_ids=[config['mlflow_experiment_id']],
@@ -462,18 +464,20 @@ def run_test(config):
         #all worker ranks need this in order to get the checkpoint
         config['best_checkpoint_uri'] = get_best_checkpoint_uri_for_testing(config)
     
+    experiment_name = config.get('mlflow_experiment_name', config['study_name'])
+    config['mlflow_experiment_name'] = experiment_name
+    
     study = None
     if worker_rank == 0:
         
         mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
         # create an ML-Flow parent study if it does not exist
-        experiment = mlflow.get_experiment_by_name(name=config['study_name'])
+        experiment = mlflow.get_experiment_by_name(name=experiment_name)
         if experiment is None:
-            experiment = mlflow.set_experiment(
-                experiment_name=config['study_name'])
+            experiment = mlflow.set_experiment(experiment_name=experiment_name)
             # Create the parent run and immediately get its ID
             try:
-                parent_run = mlflow.start_run(run_name="test")
+                parent_run = mlflow.start_run(run_name="test", experiment_id=experiment.experiment_id)
                 mlflow_parent_run_id = parent_run.info.run_id
             finally:
                 mlflow.end_run()
@@ -488,15 +492,12 @@ def run_test(config):
                 mlflow_parent_run_id = runs[0].info.run_id
             else:
                 try:
-                    parent_run = mlflow.start_run(run_name="test")
+                    parent_run = mlflow.start_run(run_name="test", experiment_id=experiment.experiment_id)
                     mlflow_parent_run_id = parent_run.info.run_id
                 finally:
                     mlflow.end_run()
         config['mlflow_experiment_id'] = experiment.experiment_id
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
-    
-        config['mlflow_experiment_name'] = config['study_name']
-        config['mlflow_experiment_id'] = get_or_create_mlflow_experiment(config['mlflow_experiment_name'])
     
     test_metrics = test_fn(config=config)
         
@@ -547,7 +548,7 @@ def run_export_results(config: Dict[str, Any]):
         best_trial_data = best_trial.materialize()
         #best_params contains only the params being tuned, not all params needed for train_fn
         best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
-        #print("Available metrics:", list(best_trial_data.final_measurement.metrics.keys()), flush=True)
+        #logging.info("Available metrics:", list(best_trial_data.final_measurement.metrics.keys()))
         bfm = best_trial_data.final_measurement
         bfm = bfm.metrics.get(f'ndcg_20')
         best_value = bfm.value
@@ -608,7 +609,7 @@ def main(_):
     config = FLAGS.flag_values_dict()
     
     if "debug" in config and config['debug']:
-        logging.info(f'all args received from flags: {config}', flush=True)
+        logging.info(f'all args received from flags: {config}')
     
     config = {k:v for k, v in config.items() if k in get_recognized_keys()}
     
@@ -622,7 +623,7 @@ def main(_):
         config['trial_ids'] = config['trial_ids'].strip("'").strip('"')
     
     if "debug" in config and config['debug']:
-        logging.info(f'recognized args: {config}', flush=True)
+        logging.info(f'recognized args: {config}')
         
     # static top_k is throughout code
     config['top_k'] = 20

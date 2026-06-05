@@ -10,6 +10,7 @@ import mlflow
 import optax
 from math import log
 import jax
+from hydra.test_utils.a_module import experiment
 from jax.sharding import PartitionSpec as P
 from jax import shard_map, Array
 import numpy as np
@@ -655,7 +656,7 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     :return: val_ndcg_20, mlflow_run_id
     """
     if "phase" not in config:
-        raise ValueError(f"config is missing key 'phase'")
+        raise LookupError(f"config is missing key 'phase'")
     
     #fixed top_k for consistent stats with retrieval and reranker
     config['top_k'] = 20
@@ -668,7 +669,7 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
         for key in {"phase", "mlflow_experiment_name", "mlflow_experiment_id",
             "mlflow_parent_run_id"}:
             if key not in config:
-                raise ValueError(f"config is missing {key}")
+                raise LookupError(f"config is missing {key}")
     
     rngs = nnx.Rngs(config.get('seed', 0))
     
@@ -688,15 +689,14 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     
         if worker_rank == 0:
             logging.info(f"mlflow set experiment: {config['mlflow_experiment_name']}")
-            mlflow.set_experiment(
-                experiment_name=config['mlflow_experiment_name'],
-            )
+            experiment = mlflow.set_experiment(experiment_name=config['mlflow_experiment_name'])
             # don't use nested=True because the parent isn't in the same thread in production
             logging.info(f"mlflow start run: {run_name}")
             mlflow_run = mlflow.start_run(
                 run_name=run_name,
                 #tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
-                tags = {"mlflow.parentRunId" : config['mlflow_parent_run_id']}
+                tags = {"mlflow.parentRunId" : config['mlflow_parent_run_id']},
+                experiment_id=experiment.experiment_id,
             )
             config['mlflow_run_id'] = mlflow_run.info.run_id
             mlflow.set_tag("phase", config["phase"]) #do not move this before start_run
@@ -878,7 +878,10 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
 def test_fn(config: dict):
     
     if "phase" not in config:
-        raise ValueError("config requires a 'phase' parameter")
+        raise LookupError("config requires a 'phase' parameter")
+    
+    if config['phase'] not in {"test-best", "test-given"}:
+        raise ValueError("'phase' must be 'test-best' or 'test-given'")
     
     for key in ('seed', 'ratings_test_uri', 'train_negatives_uri'):
         if key not in config:
@@ -893,7 +896,7 @@ def test_fn(config: dict):
         for key in {"mlflow_experiment_name", "mlflow_experiment_id",
             "mlflow_parent_run_id"}:
             if key not in config:
-                raise ValueError(f"config is missing {key}")
+                raise LookupError(f"config is missing {key}")
     
     if config['phase'] == 'test-best':
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
@@ -907,16 +910,18 @@ def test_fn(config: dict):
     config['phase'] = 'test-best'
     
     mlflow_run = None
-    run_name = f"test_{config.get('test_id', 0)}"
+    run_name = get_canonical_mlflow_run_name(config)
     try:
         if worker_rank == 0:
             mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
             # don't use nested=True because the parent isn't in the same thread in production
             #there may be ACL to solve for this:
+            experiment = mlflow.get_experiment_by_name(config['mlflow_experiment_name'])
             mlflow_run = mlflow.start_run(
                 run_name=run_name,
                 # tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
-                tags={"mlflow.parentRunId": config['mlflow_parent_run_id']}
+                tags={"mlflow.parentRunId": config['mlflow_parent_run_id']},
+                experiment_id=experiment.experiment_id,
             )
             config['mlflow_run_id'] = mlflow_run.info.run_id
             mlflow.set_tag("phase", config["phase"])  # do not move this before start_run
@@ -962,29 +967,37 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
     
     worker_rank = jax.process_index()
     
+    if worker_rank == 0:
+        for key in {"phase", "mlflow_experiment_name", "mlflow_experiment_id",
+            "mlflow_parent_run_id"}:
+            if key not in config:
+                raise LookupError(f"config is missing {key}")
+    
     restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['latest_checkpoint_uri'])
     
     best_val_ndcg_k = -1.0
     mlflow_run = None
+    run_name = get_canonical_mlflow_run_name(config)
     try:
         if worker_rank == 0:
             mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
+            experiment = mlflow.set_experiment(experiment_name=config['mlflow_experiment_name'])
             # Start a run specifically for this HPO trial
             # don't use nested=True because the parent isn't in the same thread in production
             run_id = config.get('mlflow_run_id', None)  # is not None for a "restore, resume training"
             # in production, there may be ACL to solve for this:
             if run_id is None:
                 mlflow_run = mlflow.start_run(
-                    run_name=f"trial_{config.get('trial_id', 0)}",
+                    run_name=run_name,
                     # tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
-                    tags={"mlflow.parentRunId": config['mlflow_parent_run_id']}
+                    tags={"mlflow.parentRunId": config['mlflow_parent_run_id']},
+                    experiment_id=experiment.experiment_id,
                 )
             else:
                 mlflow_run = mlflow.start_run(
                     run_id=run_id,
-                    run_name=f"trial_{config.get('trial_id', 0)}",
                     # tags = {mlflow.utils.mlflow_tags.MLFLOW_PARENT_RUN_ID: config['mlflow_parent_run_id']},
-                    tags={"mlflow.parentRunId": config['mlflow_parent_run_id']}
+                    tags={"mlflow.parentRunId": config['mlflow_parent_run_id']},
                 )
             config['mlflow_run_id'] = mlflow_run.info.run_id
         
