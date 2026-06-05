@@ -105,3 +105,252 @@ and is in local-db-store which is postgres
 can see the uri and port in kind-cluster.yaml
     172.17.0.1:5432
    see get_runs.py in ${project_root}/scripts
+
+=======================================
+
+run_app_trainer.py pipeline
+failed at 'export-train-results', but I had modified the script to not delete
+pods unless completed, and not to delete cluster, so resources are still alive 
+to debug:
+
+kubectl get trainjobs.trainer.kubeflow.org --all-namespaces
+        printed:
+            NAMESPACE   NAME                                   STATE    AGE
+            ranker-ns   graphranker-export-train-results-job   Failed   11m
+
+at this point, error details are preserved inside the Kubernetes control plane and the Kubeflow controller logs.
+
+kubectl describe trainjob graphranker-export-train-results-job -n ranker-ns
+Name:         graphranker-export-train-results-job
+Namespace:    ranker-ns
+Labels:       <none>
+Annotations:  <none>
+API Version:  trainer.kubeflow.org/v1alpha1
+Kind:         TrainJob
+Metadata:
+  Creation Timestamp:  2026-06-05T17:46:57Z
+  Generation:          1
+  Resource Version:    6403
+  UID:                 0fdc55c1-7679-4fc2-a43c-94fb922f3ef2
+Spec:
+  Managed By:  trainer.kubeflow.org/trainjob-controller
+  Runtime Patches:
+    Manager:  app-runner.patch/trainer
+    Time:     2026-06-05T17:46:57Z
+    Training Runtime Spec:
+      Template:
+        Spec:
+          Replicated Jobs:
+            Name:  node
+            Template:
+              Spec:
+                Template:
+  Runtime Ref:
+    API Group:  trainer.kubeflow.org
+    Kind:       ClusterTrainingRuntime
+    Name:       jax-distributed
+  Suspend:      false
+  Trainer:
+    Args:
+      --LOGNAME=runner
+      --USER=runner
+      --study_name=GraphRanker_tuning_kind
+      --mlflow_experiment_name=GraphRanker_tuning_kind
+      --mlflow_tracking_uri=postgresql://runner:password123@db-service:5432/mlflow_db
+      --vizier_endpoint=vizier-service:8000
+      --latest_checkpoint_uri=gs://checkpoint-bucket/latest
+      --best_checkpoint_uri=gs://checkpoint-bucket/best
+      --output_hyperparams_uri=gs://hpo-results-bucket/tune-kind-01/GraphRanker_tuning_kind/train/hparams.json
+      --output_metrics_uri=gs://hpo-results-bucket/tune-kind-01/GraphRanker_tuning_kind/train/metrics.json
+      --movies_uri=gs://data/movies-00000-of-00001.array_record
+      --recommendations_uri=gs://data/recommended_movies.array_record
+      --recommendations_ts_uri=gs://data/recommended_movies_timestamps.array_record
+      --ratings_train_uri=gs://data/small/ratings_train_liked.array_record
+      --ratings_val_uri=gs://data/small/ratings_val_liked.array_record
+      --ratings_test_uri=gs://data/small/ratings_test_liked.array_record
+      --train_negatives_uri=gs://data/train_negatives.array_record
+      --val_negatives_uri=gs://data/val_negatives.array_record
+      --test_negatives_uri=gs://data/test_negatives.array_record
+      --movie_embeddings_uri=gs://data/movie_emb-00000-of-00001.array_record
+      --user_embeddings_uri=gs://data/user_emb-00000-of-00001.array_record
+      --num_epochs=2
+      --batch_size=64
+      --seed=12345
+      --phase=export-train-results
+      --project_id=tune-kind-01
+      --grain_num_threads_fetching_records=2
+      --grain_num_threads_computing_num_records=2
+      --debug=True
+    Env:
+      Name:   XLA_FLAGS
+      Value:  --xla_force_host_platform_device_count=2
+      Name:   POD_NAME
+      Value From:
+        Field Ref:
+          Field Path:  metadata.name
+      Name:            JAX_PROCESS_ID
+      Value From:
+        Field Ref:
+          Field Path:  metadata.annotations['training.kubeflow.org/job-rank']
+      Name:            JAX_COORDINATOR_ADDRESS
+      Value:           graphranker-export-train-results-job-node-0-0.graphranker-export-train-results-job:8888
+      Name:            JAX_NUM_PROCESSES
+      Value:           2
+      Name:            LOCAL_SIMULATION
+      Value:           True
+      Name:            ABSL_MIN_LOG_LEVEL
+      Value:           0
+      Name:            GLOG_minloglevel
+      Value:           0
+      Name:            TENSORSTORE_VERBOSE_LOGGING
+      Value:           1
+      Name:            UID
+      Value From:
+        Config Map Key Ref:
+          Key:   UID
+          Name:  app-runner-env
+      Name:      GID
+      Value From:
+        Config Map Key Ref:
+          Key:   GID
+          Name:  app-runner-env
+      Name:      GOOGLE_CLOUD_PROJECT
+      Value From:
+        Config Map Key Ref:
+          Key:   GOOGLE_CLOUD_PROJECT
+          Name:  app-runner-env
+      Name:      GCSFS_ENDPOINT_URL
+      Value From:
+        Config Map Key Ref:
+          Key:   GCSFS_ENDPOINT_URL
+          Name:  app-runner-env
+      Name:      TENSORSTORE_GCS_HTTP_URL
+      Value From:
+        Config Map Key Ref:
+          Key:   TENSORSTORE_GCS_HTTP_URL
+          Name:  app-runner-env
+      Name:      STORAGE_EMULATOR_HOST
+      Value From:
+        Config Map Key Ref:
+          Key:   STORAGE_EMULATOR_HOST
+          Name:  app-runner-env
+      Name:      CLOUD_STORAGE_EMULATOR_HOST
+      Value From:
+        Config Map Key Ref:
+          Key:   CLOUD_STORAGE_EMULATOR_HOST
+          Name:  app-runner-env
+      Name:      CLOUD_STORAGE_EMULATOR_ENDPOINT
+      Value From:
+        Config Map Key Ref:
+          Key:   CLOUD_STORAGE_EMULATOR_ENDPOINT
+          Name:  app-runner-env
+      Name:      TENSORSTORE_GCS_NO_AUTH
+      Value From:
+        Config Map Key Ref:
+          Key:   TENSORSTORE_GCS_NO_AUTH
+          Name:  app-runner-env
+      Name:      NO_GCE_CHECK
+      Value From:
+        Config Map Key Ref:
+          Key:   NO_GCE_CHECK
+          Name:  app-runner-env
+      Name:      GCS_LAMBDA_TOKEN
+      Value From:
+        Config Map Key Ref:
+          Key:   GCS_LAMBDA_TOKEN
+          Name:  app-runner-env
+      Name:      GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS
+      Value From:
+        Config Map Key Ref:
+          Key:   GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS
+          Name:  app-runner-env
+      Name:      STORAGE_EMULATOR_HOST_HTTP
+      Value From:
+        Config Map Key Ref:
+          Key:   STORAGE_EMULATOR_HOST_HTTP
+          Name:  app-runner-env
+      Name:      GOOGLE_AUTH_EXTERNAL_ACCOUNT_TOKEN_PROHIBIT
+      Value From:
+        Config Map Key Ref:
+          Key:   GOOGLE_AUTH_EXTERNAL_ACCOUNT_TOKEN_PROHIBIT
+          Name:  app-runner-env
+      Name:      GOOGLE_APPLICATION_CREDENTIALS
+      Value From:
+        Config Map Key Ref:
+          Key:   GOOGLE_APPLICATION_CREDENTIALS
+          Name:  app-runner-env
+      Name:      TENSORSTORE_GCS_REQUEST_CONCURRENCY
+      Value From:
+        Config Map Key Ref:
+          Key:   TENSORSTORE_GCS_REQUEST_CONCURRENCY
+          Name:  app-runner-env
+    Image:       ranker-app:local
+    Num Nodes:   2
+Status:
+  Conditions:
+    Last Transition Time:  2026-06-05T17:48:04Z
+    Message:               jobset failed due to one or more job failures (first failed job: graphranker-export-train-results-job-node-0)
+    Reason:                FailedJobs
+    Status:                True
+    Type:                  Failed
+  Jobs Status:
+    Active:     0
+    Failed:     1
+    Name:       node
+    Ready:      0
+    Succeeded:  0
+    Suspended:  0
+Events:         <none>
+
+==> I see that I should be using JAX_NUM_PROCESS="1" and numNodes=1 for this job, but
+those are not the cause of the error.
+
+==> I'm just realizing that I added phase "export-train-results' to the application code
+    but did not rebuild the container image.
+    there should have been an "unknown phase: {phase}" ValueError though,
+    but only if the FLAGS phase enum didn't catch it first.
+        ==> this is the main error, but will continue with a couple of other debugging steps
+
+kubectl get trainjob graphranker-export-train-results-job -n ranker-ns -o yaml
+   prints the same yaml as above but appends to it:
+     status:
+  conditions:
+  - lastTransitionTime: "2026-06-05T17:48:04Z"
+    message: 'jobset failed due to one or more job failures (first failed job: graphranker-export-train-results-job-node-0)'
+    reason: FailedJobs
+    status: "True"
+    type: Failed
+  jobsStatus:
+  - active: 0
+    failed: 1
+    name: node
+    ready: 0
+    succeeded: 0
+    suspended: 0
+
+check the kubeflow container logs:
+kubectl get pods -A | grep -E "trainer|training|operator"
+kubeflow-system      kubeflow-trainer-controller-manager-788ff8cfd9-z5bhj                        1/1     Running   1 (63m ago)   68m
+
+then get logs:
+kubectl logs <CONTROLLER_POD_NAME> -n <CONTROLLER_NAMESPACE> --tail=200
+kubectl logs kubeflow-trainer-controller-manager-788ff8cfd9-z5bhj -n kubeflow-system --tail=200
+
+
+kubectl delete trainjob graphranker-export-train-results-job -n ranker-ns
+
+after rebuilding ranker-app:local, I can update kind and the cluster for that:
+   kind load docker-image ranker-app:local --name <your-cluster-name>
+       where the cluster name is in kind-cluster-yaml
+       or use kind get clusters
+   kind load docker-image ranker-app:local --name graphranker-tune-train-test-cluster
+
+   
+
+==========================================================================
+
+kubectl get pods -n ranker-ns
+        kubectl logs graphranker-export-hpo-results-job-node-0-0-8h5gl -n ranker-ns -p  <-- with and without -p
+        kubectl describe pod graphranker-export-hpo-results-job-node-0-0-8h5gl -n ranker-ns
+        
+

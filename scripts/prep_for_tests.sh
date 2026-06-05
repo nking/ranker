@@ -6,6 +6,7 @@ mkdir -p ../fake-gcs-server/hpo-results-bucket
 mkdir -p ../fake-gcs-server/mlflow_artifact_bucket
 cp -rf ../src/test/resources/data/* ../fake-gcs-server/data/
 chmod -R 775 ../fake-gcs-server
+#additionally, might want to set the group to docker recursively
 
 #make sure docker is running
 systemctl status docker.service

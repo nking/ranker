@@ -19,11 +19,19 @@
 - add ability to introduce a delay to some of the gradient computations on one worker
   to test that synchronization occurs even when one Pod might be busier than others.
 
-- implement the model export method 
-  - requires tensorflow install for orbax-export to tf savedmodel
-  - when add it to the KFP pipeline, consider a PVC for the fakegcs
-    server to hold output artifact... not needed in development
-    because I'm using mounts and mount paths to local disk
+- consider the remaining MLOps components needed:
+  - data statistics for raw ingested data and for the features
+    - the raw data stats component can use TFDV and pandas
+    - the features data would be best handled after the python or c++ code
+      below that replaces the grain data loader for inference.
+      - then data stats can be used on training or production data features too
+  - export model
+    - requires tensorflow install for orbax-export to tf savedmodel
+    - when add it to the KFP pipeline, consider a PVC for the fakegcs
+      server to hold output artifact... not needed in development
+      because I'm using mounts and mount paths to local disk
+  - monitoring
+  - consider NannyML in monitoring
 
 - implement the python or C++ code to replace the grain dataloaders
   for inference using the tf saved model

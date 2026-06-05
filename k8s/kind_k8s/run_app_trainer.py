@@ -98,12 +98,25 @@ if __name__ == "__main__":
             train_job_yaml_content=manifest_str,
             namespace=namespace,
             phase='train-best')
+        '''
+        
+        logging.info("\nExtract train results:")
+        run_train_job_phase(
+            train_job_yaml_content=manifest_str,
+            namespace=namespace,
+            phase='export-train-results')
         
         logging.info("\nTest best trained model:")
         run_train_job_phase(
             train_job_yaml_content=manifest_str,
             namespace=namespace,
             phase='test-best')
+        
+        logging.info("\nExtract test results:")
+        run_train_job_phase(
+            train_job_yaml_content=manifest_str,
+            namespace=namespace,
+            phase='export-test-results')
         
         finished = True
         

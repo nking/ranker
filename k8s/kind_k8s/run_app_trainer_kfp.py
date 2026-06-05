@@ -157,12 +157,11 @@ def hpo_train_test_pipeline(train_job_yaml_content:str, namespace:str = 'ranker-
         namespace=namespace,
         phase="export-test-results")
     
-    train_task.after(hpo_task)
-    test_task.after(train_task)
-    #after test task, the extraction tasks can be run in parallel, but they're all fast, so sequential is fine
-    tune_extraction_task.after(test_task)
-    train_extraction_task.after(tune_extraction_task)
-    test_extraction_task.after(train_extraction_task)
+    tune_extraction_task.after(hpo_task)
+    train_task.after(tune_extraction_task)
+    train_extraction_task.after(train_task)
+    test_task.after(train_extraction_task)
+    test_extraction_task.after(test_task)
     
 @dsl.component(base_image="python:3.12-slim")
 def cleanup_cluster_resources(kind_path: str):

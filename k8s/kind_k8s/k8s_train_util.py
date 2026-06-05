@@ -1,6 +1,29 @@
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+def _append_or_replace_spec_trainer_args(manifest: dict, arg_key:str, arg_value:str):
+    mod_i = -1
+    key = f"--{arg_key}"
+    for i, arg in enumerate(manifest["spec"]["trainer"]["args"]):
+        if arg.find(key) == 0:
+            mod_i = i
+            break
+    if mod_i == -1:
+        manifest["spec"]["trainer"]["args"].append(f"{key}={arg_value}")
+    else:
+        manifest["spec"]["trainer"]["args"][mod_i] = f"{key}={arg_value}"
+
+def _append_or_replace_spec_trainer_env(manifest: dict, env_key:str, env_value:str):
+    mod_i = -1
+    for i, env_dict in enumerate(manifest["spec"]["trainer"]["env"]):
+        if env_dict["name"] == env_key:
+            mod_i = i
+            break
+    if mod_i == -1:
+        manifest["spec"]["trainer"]["env"].append({"name": env_key, "value": env_value})
+    else:
+        manifest["spec"]["trainer"]["env"][mod_i]["value"] = env_value
+
 def run_train_job_phase(
         train_job_yaml_content: str,
         namespace: str = "ranker-ns",
@@ -48,60 +71,42 @@ def run_train_job_phase(
     if phase == "tune":
         trial_ids_str = trial_ids
         trial_ids = loads(trial_ids)
+        if not isinstance(trial_ids, list):
+            raise ValueError("trial_ids is expected to be string made from json.dumps(list(int_list))")
         if not all(isinstance(x, int) and x > -1 for x in trial_ids):
             raise ValueError("trial_ids must only contain non-negative integers")
-        if "spec" not in manifest or "trainer" not in manifest[
-            "spec"] or "args" not in manifest["spec"][
-            "trainer"]:
-            raise ValueError("train_job.yaml is missing spec.trainer.args")
+        if ("spec" not in manifest or "trainer" not in
+                manifest["spec"] or "args" not in manifest["spec"]["trainer"]):
+            raise KeyError("train_job.yaml is missing spec.trainer.args")
         job_name = f'{job_name}-{trial_ids[0]}'
-        for i, arg in enumerate(manifest["spec"]["trainer"]["args"]):
-            if arg.find("--trial_ids") == 0:
-                mod_i = i
-                break
-        manifest["spec"]["trainer"]["args"][mod_i] = f"--trial_ids={trial_ids_str}"
-    elif phase == "export-hpo-results":
-        # this one only needs to run on 1 node no matter what is in train_job.yaml
+        _append_or_replace_spec_trainer_args(manifest, "trial_ids", trial_ids_str)
+        
+    elif phase in {"export-hpo-results", "export-train-results", "export-test-results"}:
+        # only needs to run on 1 node no matter what is in train_job.yaml
         manifest["spec"]["trainer"]["numNodes"] = 1
-        for env_dict in manifest["spec"]["trainer"]["env"]:
-            if env_dict["name"] == "JAX_NUM_PROCESSES":
-                env_dict["value"] = "1"
-    
+        _append_or_replace_spec_trainer_env(manifest, "JAX_NUM_PROCESSES", "1")
+        
     if phase != "tune":
         #remove the environment variable in train_job.yaml
         for i, arg in enumerate(manifest["spec"]["trainer"]["args"]):
             if arg.find("--trial_ids") == 0:
-                rm_i = i
+                del manifest["spec"]["trainer"]["args"][i]
                 break
-        del manifest["spec"]["trainer"]["args"][rm_i]
        
-    #modify the phase in args
-    for i, arg in enumerate(manifest["spec"]["trainer"]["args"]):
-        if arg.find("--phase") == 0:
-            mod_i = i
-            break
-    manifest["spec"]["trainer"]["args"][mod_i] = f"--phase={phase}"
-    
+    _append_or_replace_spec_trainer_args(manifest, "phase", phase)
     manifest['metadata']['name'] = job_name
     manifest['metadata']['namespace'] = namespace
-    for env_dict in manifest["spec"]["trainer"]["env"]:
-        if env_dict["name"] == "JAX_COORDINATOR_ADDRESS":
-            env_dict["value"] = f"{job_name}-node-0-0.{job_name}:8888"
-            break
-        # {'name': 'XLA_FLAGS', 'value': '--xla_force_host_platform_device_count=2'}
+    _append_or_replace_spec_trainer_env(manifest, "JAX_COORDINATOR_ADDRESS", f"{job_name}-node-0-0.{job_name}:8888")
     
     #gs://hpo-results-bucket/<project_id>/<study_name>/<tune|train|test>/hpo_<hparams|metrics>.json
-    if phase == "export-train-results" or phase == "export-test-results":
+    if phase in {"export-train-results", "export-test-results"}:
         mod_is = []
         for i, arg in enumerate(manifest["spec"]["trainer"]["args"]):
             if arg.find("--output_hyperparams_uri") == 0:
                 mod_is.append(i)
             elif arg.find("--output_metrics_uri") == 0:
                 mod_is.append(i)
-        if phase == "export-train-results":
-            repl = "train"
-        elif phase == 'export-test-results':
-            repl = "test"
+        repl = "train" if phase == "export-train-results" else "test"
         import re
         # Match any non-slash characters that are preceded by a slash
         # and followed by exactly one slash and the end of the string
@@ -142,6 +147,40 @@ def run_train_job_phase(
                     elif condition.get('type') == 'Failed' and condition.get( 'status') == 'True':
                         reason = condition.get('reason', 'UnknownReason')
                         message = condition.get('message','No error message provided.')
+                        # FETCH POD LOGS BEFORE TEARDOWN
+                        try:
+                            core_v1_api = client.CoreV1Api()
+                            # Find all pods belonging to this TrainJob
+                            label_selector = f"jobset.sigs.k8s.io/jobset-name={job_name}"
+                            pods = core_v1_api.list_namespaced_pod(namespace=namespace,
+                                label_selector=label_selector)
+                            if not pods.items:
+                                logging.warning( f"⚠️ No pods found for TrainJob {job_name}. "
+                                                 f"The job may have failed before pods could be scheduled.")
+                            # Iterate through them and dump the logs
+                            for pod in pods.items:
+                                pod_name = pod.metadata.name
+                                logging.info(f"\n{'=' * 20} Logs for Pod: {pod_name} {'=' * 20}")
+                                try:
+                                    # Try fetching current logs
+                                    pod_logs = core_v1_api.read_namespaced_pod_log(
+                                        name=pod_name, namespace=namespace)
+                                    logging.info(f"\n{pod_logs}")
+                                except Exception as current_err:
+                                    logging.warning( f"Could not get current logs, attempting "
+                                                     f"to fetch previous (crash-looped) logs...")
+                                    try:
+                                        # Fallback: Try fetching previous logs (equivalent to kubectl logs -p)
+                                        pod_logs_prev = core_v1_api.read_namespaced_pod_log(
+                                            name=pod_name, namespace=namespace,
+                                            previous=True)
+                                        logging.info(f"\n[PREVIOUS CONTAINER INSTANCE]\n{pod_logs_prev}")
+                                    except Exception as prev_err:
+                                        logging.error(f"Could not fetch any logs for {pod_name}: {prev_err}")
+                                logging.info(f"{'=' * 60}\n")
+                        except Exception as e3:
+                            logging.exception(
+                                f"⚠️ Failed to retrieve pod logs during error handling: {e3}")
                         raise RuntimeError(f"❌ TrainJob {job_name} failed! reason: {reason}, message: {message}")
             except ApiException as e:
                 logging.exception(f"API Error fetching TrainJob: {e}")
@@ -165,14 +204,27 @@ def run_train_job_phase(
                     with fsspec.open(f"{output_log_dir_uri}/{phase}-worker-{i}-logs.txt", "a") as f:
                         f.write(worker_logs)
                        
-    except Exception as e2:
-        logging.exception(f'Error during Train Job: {e2}')
-        raise e2
-    finally:
-        # Lifecycle cleanup
+        #DEBUG: remove when done:
         logging.info(f"🧹 Tearing down TrainJob custom resource: {job_name}")
         crd_api.delete_namespaced_custom_object(
             group="trainer.kubeflow.org", version="v1alpha1",
             namespace=namespace, plural="trainjobs", name=job_name
         )
+    except Exception as e2:
+        logging.exception(f'Error during Train Job: {e2}')
+        '''
+        debugging:
         
+        
+        '''
+        raise e2
+    finally:
+        # Lifecycle cleanup
+        #DEBUG: uncomment when done:
+        '''
+        logging.info(f"🧹 Tearing down TrainJob custom resource: {job_name}")
+        crd_api.delete_namespaced_custom_object(
+            group="trainer.kubeflow.org", version="v1alpha1",
+            namespace=namespace, plural="trainjobs", name=job_name
+        )
+        '''
