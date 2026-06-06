@@ -1,10 +1,13 @@
 import os
 import argparse
+import subprocess
+import time
+from typing import Tuple
+
 import yaml
 import fsspec
 
 from util_kfpv2 import setup_kfpv2_backend
-from util_k8s_train import run_train_job_phase
 from util_kind import setup_cluster, delete_cluster, find_executable_path
 #pip install kfp==2.16.1
 from kfp import dsl, compiler, client as kfp_client
@@ -104,12 +107,11 @@ def setup_rbac_yaml(rbac_yaml_uri: str = "./rbac.yaml", namespace: str = "ranker
 @dsl.component(base_image='python:3.12-slim')
 def generate_trial_ids(trial_ids_str:str = None, num_trials: int = None) -> str:
     """
-    if trial_ids_str is not None,
-    it will check the format and return it, else if num_trials is given but trial_ids is None,
+    if trial_ids_str is not None, it will check the format and return it, else if num_trials is given but trial_ids is None,
     the method will create a string  of list of trial ids 0 through num_trials - 1, else.
-    :param trial_ids_str: a string of trial_ids to be used in HPO to identify trials.  e.g. "[0,1,2,3]"
+    :param trial_ids_str: a string of trial_ids to be used in HPO to identify trials.  e.g. '[0,1,2,3]'
     :param num_trials: if trial_ids_str is None, this is used to create a string list of trial_ids.
-    e.g. num_trials=3 results in "[0,1,2]"
+    e.g. num_trials=3 results in '[0,1,2]'
     :return: string of list of trial ids
     """
     from json import loads
@@ -147,12 +149,20 @@ def run_train_job(
     
     # Authenticate within the cluster
     from kubernetes import config
+    import logging
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    
     try:
         config.load_incluster_config()
         logging.info("Loaded in-cluster Kubernetes configuration.")
     except config.ConfigException:
         config.load_kube_config()
         logging.info("Loaded local kube_config for development.")
+    
+    import base64
+    from util_k8s_train import run_train_job_phase
+    
+    train_job_yaml_content = base64.b64decode(train_job_yaml_content).decode('utf-8')
     
     run_train_job_phase(train_job_yaml_content, namespace, phase, trial_ids, output_log_dir_uri)
 
@@ -164,14 +174,14 @@ def run_train_job(
     name="graphranker-sequential-hpo-train-test",
     description="Sequential HPO execution loop powered by embedded layout manifests.",
 )
-def hpo_train_test_pipeline(train_job_yaml_content:str, namespace:str = 'ranker-ns',
+def hpo_train_test_pipeline(train_job_yaml_content:str="", namespace:str = 'ranker-ns',
     trial_ids_str:str=None, num_trials:int=20):
     """
     define the pipeline tasks by using the given train_job yaml content, the given namespace and for trials
     given as trial_ids_str or enumerated by num_trials.
-    :param trial_ids_str: a string of trial_ids to be used in HPO to identify trials.  e.g. "[0,1,2,3]"
+    :param trial_ids_str: a string of trial_ids to be used in HPO to identify trials.  e.g. '[0,1,2,3]'
     :param num_trials: if trial_ids_str is None, this is used to create a string list of trial_ids.
-    e.g. num_trials=3 results in "[0,1,2]"
+    e.g. num_trials=3 results in '[0,1,2]'
     :param train_job_yaml_content: the string of the train_job.yaml file contents.
     :param namespace: the namespace for the k8s objects within the cluster
     """
@@ -232,15 +242,15 @@ def cleanup_cluster_resources(kind_path: str):
     delete_cluster(kind_path)
 
 def compile_pipeline_yaml(output_pipeline_yaml_uri: str = 'graphranker_pipeline.yaml',
-    train_job_yaml_uri:str = "./train_job.yaml", trial_ids_str:str=None, num_trials:int=20) -> str:
+    train_job_yaml_uri:str = "./train_job.yaml", trial_ids_str:str=None, num_trials:int=20) -> Tuple[str, str]:
     """
     compile the pipeline to yaml and return the namespace.  the train_job.yaml contains the namespace to use for the Trainer v2 job.
     the HPO trials are identified using trial_ids_str or enumerated by num_trials.
-    :param trial_ids_str: a string of trial_ids to be used in HPO to identify trials.  e.g. "[0,1,2,3]"
+    :param trial_ids_str: a string of trial_ids to be used in HPO to identify trials.  e.g. '[0,1,2,3]'
     :param num_trials: if trial_ids_str is None, this is used to create a string list of trial_ids.
-    e.g. num_trials=3 results in "[0,1,2]"
+    e.g. num_trials=3 results in '[0,1,2]'
     :param output_pipeline_yaml_uri: name of the pipeline yaml file to write to
-    :return: the namespace parsed from the train_job.yaml file train_job_yaml_uri
+    :return: the namespace parsed from the train_job.yaml file train_job_yaml_uri and the content of the train job yaml file as a string
     """
     logging.info( f"🛠️ Ingesting train job template and compiling pipeline to {output_pipeline_yaml_uri}...")
     TRAIN_JOB_YAML_PATH = train_job_yaml_uri
@@ -256,12 +266,13 @@ def compile_pipeline_yaml(output_pipeline_yaml_uri: str = 'graphranker_pipeline.
         package_path=output_pipeline_yaml_uri,
         pipeline_parameters={
             'namespace': namespace,
-            'train_job_yaml_content': train_job_yaml_content,
+            #'train_job_yaml_content': train_job_yaml_content,#<-- pass in at runtime instead
             'trial_ids_str' : trial_ids_str,
             'num_trials' : num_trials
         }
     )
-    return namespace
+    logging.info(f'wrote pipeline to uri={output_pipeline_yaml_uri}')
+    return namespace, train_job_yaml_content
     
 def run_pipeline_local(train_job_yaml_uri:str = "./train_job.yaml", trial_ids_str = None, num_trials:int=20):
     import kfp.local
@@ -291,16 +302,17 @@ def run_pipeline_on_kfpv2(output_pipeline_yaml_uri: str = 'graphranker_pipeline.
     """
     run the pipeline defined by tasks that are using the train_job yaml.
     the HPO trials are identified using trial_ids_str or enumerated by num_trials.
-    :param trial_ids_str: a string of trial_ids to be used in HPO to identify trials.  e.g. "[0,1,2,3]"
+    :param trial_ids_str: a string of trial_ids to be used in HPO to identify trials.  e.g. '[0,1,2,3]'
     :param num_trials: if trial_ids_str is None, this is used to create a string list of trial_ids.
-    e.g. num_trials=3 results in "[0,1,2]"
+    e.g. num_trials=3 results in '[0,1,2]'
     :param output_pipeline_yaml_uri: where to write the compiled pipeline yaml to
     :param train_job_yaml_uri: uri for input train_job.yaml file
     """
-    
+    tunnel = None
     try:
-        namespace = compile_pipeline_yaml(output_pipeline_yaml_uri, train_job_yaml_uri, trial_ids_str=trial_ids_str, num_trials=num_trials)
-        
+        namespace, train_job_yaml_content = compile_pipeline_yaml(output_pipeline_yaml_uri,
+            train_job_yaml_uri, trial_ids_str=trial_ids_str, num_trials=num_trials)
+
         kind_path = find_executable_path("kind")
         kubectl_path = find_executable_path("kubectl")
         
@@ -313,26 +325,47 @@ def run_pipeline_on_kfpv2(output_pipeline_yaml_uri: str = 'graphranker_pipeline.
         
         setup_rbac(namespace)
         
+        # DEBUG: uncomment when done debugging
+        '''
         setup_kfpv2_backend(kubectl_path)
+        '''
+        
+        logging.info("create port-forward tunnel")
+        tunnel = subprocess.Popen(
+            [kubectl_path, "port-forward", "svc/ml-pipeline-ui", "-n",
+                "kubeflow", "8080:80"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        time.sleep(3)
         
         # Send the compiled asset to the Kind KFP engine
         logging.info("📤 Submitting pipeline run to local backend...")
         
+        import base64
+        train_job_yaml_content = base64.b64encode(train_job_yaml_content.encode('utf-8')).decode('utf-8')
+        
         try:
-            client = kfp_client.Client(host="http://localhost:80")
+            client = kfp_client.Client(host="http://localhost:8080")
             
             kfp_experiment = client.create_experiment("GraphRanker-HPO")
             
             #asynchronous:
             run = client.run_pipeline(
-                experiment_id=kfp_experiment.id,
+                experiment_id=kfp_experiment.experiment_id,
                 job_name="hermetic-sequential-hpo-run",
-                pipeline_package_path=output_pipeline_yaml_uri
+                pipeline_package_path=output_pipeline_yaml_uri,
+                params={
+                    # Inject the massive string here at runtime
+                    "train_job_yaml_content": train_job_yaml_content
+                }
             )
-            logging.info(f"🎉 Run initiated! Dashboard URL: {run.url}")
+
+            dashboard_url = f"http://localhost:8080/#/runs/details/{run.run_id}"
+            logging.info(f"🎉 Run initiated! Dashboard URL: {dashboard_url}")
             
-            logging.info(f"⏳ Waiting for run {run.id} to complete...")
-            client.wait_for_run_completion(run_id=run.id, timeout=3600)  # 1 hour timeout
+            logging.info(f"⏳ Waiting for run {run.run_id} to complete...")
+            client.wait_for_run_completion(run_id=run.run_id, timeout=3600)  # 1 hour timeout
             
             logging.info("✅ Pipeline finished!")
             
@@ -341,6 +374,9 @@ def run_pipeline_on_kfpv2(output_pipeline_yaml_uri: str = 'graphranker_pipeline.
                 "You can manually upload 'graphranker_pipeline.yaml' directly inside the KFP UI website."))
         
     finally:
+        if tunnel:
+            tunnel.terminate()
+            
         logging.info(f'deleting cluster')
         #DEBUG: uncomment when done debugging
         #cleanup_cluster_resources(kind_path)
@@ -355,7 +391,7 @@ if __name__ == '__main__':
         '--num_trials',
         help="number of HPO trials to run",
         type=int,
-        default=20
+        default=4
     )
     parser.add_argument(
         '--trial_ids_str',

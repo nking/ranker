@@ -189,9 +189,3 @@ spec:
                               path: /app/src
                               type: Directory
 
-#debugging:
-#kubectl get clustertrainingruntime jax-distributed -o yaml
-#kubectl explain trainjob.spec.trainer
-#kubectl explain trainjob.spec.runtimePatches.trainingRuntimeSpec
-#kubectl explain trainjob.spec.runtimePatches.trainingRuntimeSpec.template.spec
-# kubectl explain trainjob.spec.runtimePatches.trainingRuntimeSpec.template.spec.replicatedJobs.template.spec.template.spec.containers

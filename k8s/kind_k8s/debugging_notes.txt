@@ -1,3 +1,5 @@
+see notes in indiv scripts too
+=============================================
 pod deployment timed out before finishing:
 
 list pods to get names:
@@ -369,4 +371,32 @@ kubectl create namespace ranker-ns
 docker image prune -f
 
 ======================
+
+#debugging:
+#kubectl get clustertrainingruntime jax-distributed -o yaml
+#kubectl explain trainjob.spec.trainer
+#kubectl explain trainjob.spec.runtimePatches.trainingRuntimeSpec
+#kubectl explain trainjob.spec.runtimePatches.trainingRuntimeSpec.template.spec
+# kubectl explain trainjob.spec.runtimePatches.trainingRuntimeSpec.template.spec.replicatedJobs.template.spec.template.spec.containers
+
+=====================
+
+# 1. Delete all failed pods (these are the ones causing 0/2 or Error status)
+kubectl delete pods -n kubeflow --field-selector=status.phase=Failed
+
+# 2. Delete any hanging 'TrainJobs' (the custom resource you are using)
+# If these exist, they will block the next run
+kubectl delete trainjobs --all -n ranker-ns
+
+# 3. Clean up KFP Experiments/Runs (Optional but cleaner)
+# You don't HAVE to do this, but it stops the UI from getting cluttered
+kubectl delete runs --all -n kubeflow
+kubectl delete experiments --all -n kubeflow
+
+=================================================
+
+kubectl get pods -n kubeflow
+
+find the pod in error and get logs:
+    kubectl logs graphranker-sequential-hpo-train-test-xm8w4-system-container-impl-2554816360 -n kubeflow -c main
 

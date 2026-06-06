@@ -123,7 +123,8 @@ def wait_for_deployment(apps_v1, name, namespace, timeout=240):
 
 def setup_cluster(kind_path:str, kubectl_path:str, PROJECT_ROOT:str, KUBEFLOW_VERSION:str, NAMESPACE:str):
     logging.info("🌐 Checking internet connection...")
-    run_cmd(["ping", "-c", "1", "-W", "3", "google.com"])
+    #time.google.com is 216.239.35.0
+    run_cmd(["ping", "-c", "1", "-W", "3", "216.239.35.0"])
 
     try:
         logging.info("🚀 Creating Kind cluster...")
