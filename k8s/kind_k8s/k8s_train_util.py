@@ -122,6 +122,7 @@ def run_train_job_phase(
     crd_api = client.CustomObjectsApi()
     
     try:
+        
         # Deploy to Kubernetes
         logging.info(f"🚀 Launching TrainJob: {job_name}")
         crd_api.create_namespaced_custom_object(
@@ -204,12 +205,6 @@ def run_train_job_phase(
                     with fsspec.open(f"{output_log_dir_uri}/{phase}-worker-{i}-logs.txt", "a") as f:
                         f.write(worker_logs)
                        
-        #DEBUG: remove when done:
-        logging.info(f"🧹 Tearing down TrainJob custom resource: {job_name}")
-        crd_api.delete_namespaced_custom_object(
-            group="trainer.kubeflow.org", version="v1alpha1",
-            namespace=namespace, plural="trainjobs", name=job_name
-        )
     except Exception as e2:
         logging.exception(f'Error during Train Job: {e2}')
         '''
@@ -219,12 +214,9 @@ def run_train_job_phase(
         '''
         raise e2
     finally:
-        # Lifecycle cleanup
-        #DEBUG: uncomment when done:
-        '''
+        # Lifecycle cleanup'
         logging.info(f"🧹 Tearing down TrainJob custom resource: {job_name}")
         crd_api.delete_namespaced_custom_object(
             group="trainer.kubeflow.org", version="v1alpha1",
             namespace=namespace, plural="trainjobs", name=job_name
         )
-        '''

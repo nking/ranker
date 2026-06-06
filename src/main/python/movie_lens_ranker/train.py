@@ -10,7 +10,6 @@ import mlflow
 import optax
 from math import log
 import jax
-from hydra.test_utils.a_module import experiment
 from jax.sharding import PartitionSpec as P
 from jax import shard_map, Array
 import numpy as np
