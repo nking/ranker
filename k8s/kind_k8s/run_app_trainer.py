@@ -1,8 +1,8 @@
 import os
 from json import dumps
 import yaml
-from k8s_train_util import run_train_job_phase
-from kind_util import setup_cluster, delete_cluster, find_executable_path
+from util_k8s_train import run_train_job_phase
+from util_kind import setup_cluster, delete_cluster, find_executable_path
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 

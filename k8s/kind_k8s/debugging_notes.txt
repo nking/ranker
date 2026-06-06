@@ -354,4 +354,19 @@ kubectl get pods -n ranker-ns
         kubectl logs graphranker-export-hpo-results-job-node-0-0-8h5gl -n ranker-ns -p  <-- with and without -p
         kubectl describe pod graphranker-export-hpo-results-job-node-0-0-8h5gl -n ranker-ns
         
+===========================================================
+
+kubectl get svc -A
+
+=====================
+
+kubectl delete namespace ranker-ns
+# Wait for the namespace to finish terminating
+kubectl create namespace ranker-ns
+
+==========================
+
+docker image prune -f
+
+======================
 
