@@ -74,9 +74,12 @@ if __name__ == "__main__":
         for log_file in ["tune-master-logs.txt", "tune-worker-1-logs.txt"]:
             if os.path.exists(log_file):
                 os.remove(log_file)
-        
+       
+        #DEBUG: uncomment when done
+        '''
         setup_cluster(kind_path=kind_path, kubectl_path=kubectl_path, PROJECT_ROOT=PROJECT_ROOT,
             KUBEFLOW_VERSION=KUBEFLOW_VERSION, NAMESPACE=NAMESPACE)
+        '''
         
         infile = f"{PROJECT_ROOT}/k8s/kind_k8s/train_job.yaml"
         with open(infile, "r") as f:
@@ -84,12 +87,12 @@ if __name__ == "__main__":
         manifest = yaml.safe_load(manifest_str)
         namespace = manifest['metadata']['namespace']
         
-        #config.load_kube_config() is in setup_cluster
-        run_training_loop(manifest_str)
-       
         #DEBUG:  remove when done
-        #from kubernetes import config
-        #config.load_kube_config()
+        from kubernetes import config
+        config.load_kube_config()
+        
+        # config.load_kube_config() is in setup_cluster
+        run_training_loop(manifest_str)
         
         logging.info("\nExtract HPO results:")
         run_train_job_phase(
@@ -128,6 +131,9 @@ if __name__ == "__main__":
     except Exception as e:
         logging.exception(f"\n❌ Unhandled Exception: {e}")
     finally:
+        #DEBUG: uncomment when done
+        '''
         delete_cluster(kind_path)
         if finished:
             assert_logs()
+        '''
