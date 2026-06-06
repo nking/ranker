@@ -87,6 +87,10 @@ if __name__ == "__main__":
         #config.load_kube_config() is in setup_cluster
         run_training_loop(manifest_str)
        
+        #DEBUG:  remove when done
+        #from kubernetes import config
+        #config.load_kube_config()
+        
         logging.info("\nExtract HPO results:")
         run_train_job_phase(
             train_job_yaml_content=manifest_str,
@@ -98,7 +102,6 @@ if __name__ == "__main__":
             train_job_yaml_content=manifest_str,
             namespace=namespace,
             phase='train-best')
-        '''
         
         logging.info("\nExtract train results:")
         run_train_job_phase(

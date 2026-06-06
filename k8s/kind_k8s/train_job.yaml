@@ -81,16 +81,16 @@ spec:
       - name: TENSORSTORE_VERBOSE_LOGGING
         value: "1"
       #config map env vars because there is no envFrom
-      - name: UID 
+      - name: UID_DB
         valueFrom:
           configMapKeyRef:
             name: app-runner-env
-            key: UID
-      - name: GID 
+            key: UID)DB
+      - name: GID_DB
         valueFrom:
           configMapKeyRef:
             name: app-runner-env
-            key: GID
+            key: GID_DB
       - name: GOOGLE_CLOUD_PROJECT
         valueFrom:
           configMapKeyRef:

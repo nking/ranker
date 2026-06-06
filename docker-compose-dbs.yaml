@@ -6,7 +6,7 @@ services:
       - .env_db
       - .env
       #.env should have UID and GID in it for docker to find them, else pass them in on command line
-    user: "${UID}:${GID}"
+    user: "${UID_DB}:${GID_DB}"
     ports:
       # binding to docker0 network to try to allow xmanager access.
       # can find the ipaddress using: ip addr show docker0 | grep inet
@@ -48,7 +48,7 @@ services:
     env_file:
       - .env_db
       - .env
-    #user: "${UID}:${GID}"  don't use uir and gid with postgres..
+    #user: "${UID}:${GID}"  don't use uid and gid with postgres..
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -88,7 +88,7 @@ services:
       - .env
     environment:
       - VIZIER_DATABASE_URL=sqlite:////app/data/vizier.db
-    user: "${UID}:${GID}"
+    user: "${UID_DB}:${GID_DB}"
     ports:
       #HOST:CONTAINER
       - "172.17.0.1:8000:8080"

@@ -16,7 +16,7 @@ services:
         condition: service_healthy
     env_file:
       - .env
-    user: "${UID}:${GID}"
+    user: "${UID_DB}:${GID_DB}"
     volumes:
       #avoidn rebuilding when src code changes:
       - ./src:/app/src

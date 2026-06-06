@@ -61,7 +61,7 @@ spec:
                 - app-runner
             topologyKey: "kubernetes.io/hostname"
 
-      # Replaces user: "${UID}:${GID}"
+      # Replaces user: "${UID_DB}:${GID_DB}"
       # Uncomment and replace with your actual Linux UID/GID (e.g., 1000)
       securityContext:
         runAsUser: 1000

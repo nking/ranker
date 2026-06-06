@@ -336,6 +336,7 @@ then get logs:
 kubectl logs <CONTROLLER_POD_NAME> -n <CONTROLLER_NAMESPACE> --tail=200
 kubectl logs kubeflow-trainer-controller-manager-788ff8cfd9-z5bhj -n kubeflow-system --tail=200
 
+kubectl get events -n ranker-ns --sort-by='.metadata.creationTimestamp'
 
 kubectl delete trainjob graphranker-export-train-results-job -n ranker-ns
 

@@ -28,8 +28,8 @@ data:
   # Placeholders for the variables .env file
   POSTGRES_USER: "your-db-user"
   POSTGRES_PASSWORD: "your-db-password"
-  UID: "1000"
-  GID: "1000"
+  UID_DB: "1000"
+  GID_DB: "1000"
   GOOGLE_CLOUD_PROJECT: "local-kfp-dev"
   GCSFS_ENDPOINT_URL: "http://gcs-service:4443"
   TENSORSTORE_GCS_HTTP_URL: "http://gcs-service:4443"

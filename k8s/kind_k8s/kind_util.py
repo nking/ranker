@@ -125,14 +125,21 @@ def setup_cluster(kind_path:str, kubectl_path:str, PROJECT_ROOT:str, KUBEFLOW_VE
     logging.info("🌐 Checking internet connection...")
     run_cmd(["ping", "-c", "1", "-W", "3", "google.com"])
 
-    logging.info("🚀 Creating Kind cluster...")
-    # Using subprocess to pipe envsubst into kind
-    cmd = f"envsubst '$PROJECT_ROOT' < kind-cluster.yaml | {kind_path} create cluster --config -"
-    result = subprocess.run(cmd, shell=True, check=True, capture_output=True, env={**os.environ, "PROJECT_ROOT": PROJECT_ROOT})
-    if result.returncode != 0:
-        logging.exception(f"❌ Command failed: {' '.join(cmd)}.  result: {result.stderr}")
-        sys.exit(1)
-        
+    try:
+        logging.info("🚀 Creating Kind cluster...")
+        # Using subprocess to pipe envsubst into kind
+        cmd = f"envsubst '$PROJECT_ROOT' < kind-cluster.yaml | {kind_path} create cluster --config -"
+        result = subprocess.run(cmd, shell=True, check=True, capture_output=True,
+            text=True, env={**os.environ, "PROJECT_ROOT": PROJECT_ROOT})
+        if result.returncode != 0:
+            logging.exception(f"❌ Command failed: {' '.join(cmd)}.  result: {result.stderr}")
+            sys.exit(1)
+    except subprocess.CalledProcessError as e:
+        print(f"\n❌ KIND COMMAND FAILED!")
+        print(f"STDOUT: {e.stdout}")
+        print(f"STDERR: {e.stderr}\n")
+        raise e
+    
     logging.info("⏳ Waiting for nodes...")
     run_cmd([kubectl_path, "wait", "--for=condition=Ready", "nodes", "--all", "--timeout=120s"])
     

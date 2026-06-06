@@ -36,6 +36,8 @@ from movie_lens_ranker.util import read_embeddings, get_env_resources, \
     stringify_mlflow_params, get_canonical_mlflow_run_name, \
     calc_number_jax_graph_components, get_model_mesh
 
+from jax.experimental import multihost_utils
+
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -84,7 +86,7 @@ def convert_to_global(arr, mesh, sync:bool=True):
     else:
         arr_to_broadcast = arr
     
-    arr_to_broadcast = jax.experimental.multihost_utils.broadcast_one_to_all(
+    arr_to_broadcast = multihost_utils.broadcast_one_to_all(
         arr_to_broadcast)
     
     if isinstance(arr_to_broadcast, (np.ndarray, np.generic)):
@@ -281,7 +283,7 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
         #shard the data to local devices:
         #padded_super_graph = jax.device_put(padded_super_graph_0, data_sharding)
         padded_super_graph = jax.tree_util.tree_map(
-            lambda x: jax.experimental.multihost_utils.host_local_array_to_global_array(
+            lambda x: multihost_utils.host_local_array_to_global_array(
                 x, model_mesh, global_data_pspec),
             padded_super_graph_0
         )
@@ -449,11 +451,12 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         
         padded_super_graph_0, n_samples = pad_graph_tuple_batch(graphs_tuple_batch, jax_graph_comp_dict)
         
-        #padded_super_graph = jax.device_put(padded_super_graph_0, data_sharding) #can handle pytrees
-        # Map the promotion function over the entire GraphsTuple PyTree
+        #grain SPMD has already partitioned the data across jax process ids, but if there is more than
+        # 1 host, we further partition the data across the hosts so that the hosts aren't doing identical work.
+        # Map the function over the entire GraphsTuple PyTree
         padded_super_graph = jax.tree_util.tree_map(
-            lambda x: jax.experimental.multihost_utils.host_local_array_to_global_array(
-                x, model_mesh,global_data_pspec),
+            lambda x: multihost_utils.host_local_array_to_global_array(
+                x, model_mesh, global_data_pspec),
             padded_super_graph_0
         )
         
@@ -1235,13 +1238,11 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
     # iter(x) makes a new iterator state
     global_avg_val_metrics_current, n_val_samples_current = _epoch_validation(model, iter(loader_current), top_k, jax_graph_comp_dict)
     
-    jax.experimental.multihost_utils.sync_global_devices(
-        "sync_barrier_for_model_validation")
+    multihost_utils.sync_global_devices( "sync_barrier_for_model_validation")
     
     global_avg_val_metrics_restored, n_val_samples_restored = _epoch_validation(restored_model, iter(loader_restored), top_k, jax_graph_comp_dict)
     
-    jax.experimental.multihost_utils.sync_global_devices(
-        "sync_barrier_for_restored_model_validation")
+    multihost_utils.sync_global_devices( "sync_barrier_for_restored_model_validation")
     
     logging.info(f'n_val_samples_current={n_val_samples_current}, n_val_samples_restored = {n_val_samples_restored}')
     
