@@ -953,6 +953,9 @@ def test_fn(config: dict):
         global_test_metrics, n_val_samples = _epoch_validation(model, iter(test_dataloader), config['top_k'], jax_graph_comp_dict)
     
         out_dict = {f"test_{key}_{config['top_k']}" : value for key, value in global_test_metrics.items()}
+        #to be consitent w/ train, change the loss label:
+        out_dict['test_loss'] = out_dict[f"test_loss_{config['top_k']}"]
+        del out_dict[f"test_loss_{config['top_k']}"]
     
         if worker_rank == 0:
             if mlflow_run is not None:

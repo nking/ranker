@@ -526,21 +526,23 @@ def run_export_results(config: Dict[str, Any]):
     project_id = config['project_id']
     
     if phase == "export-hpo-results":
-        run_name = "tune"
+        pass
     elif phase == "export-train-results":
-        run_name = "train"
+        srch = 'train_%'
     elif phase == "export-test-results":
-        run_name = 'test'
+        srch = 'test_%'
     else:
         raise ValueError(f"unrecognized phase for run_export_results: {phase}")
     
     mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
-    vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
     
-    logging.info(f'looking for study_name {STUDY_NAME} at endpoint {config["vizier_endpoint"]} with run name={run_name}')
-    #resource_name = f"owners/{project_id}/studies/{STUDY_NAME}"
-
-    if run_name == "tune":
+    metrics_dict = {}
+    
+    if phase == "export-hpo-results":
+        vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
+        logging.info(f'looking for study_name {STUDY_NAME} at endpoint {config["vizier_endpoint"]} for phase={phase}')
+        # resource_name = f"owners/{project_id}/studies/{STUDY_NAME}"
+        
         study = vz_clients.Study.from_owner_and_id(owner=project_id, study_id=STUDY_NAME)
         
         optimal_trials = study.optimal_trials()
@@ -558,44 +560,44 @@ def run_export_results(config: Dict[str, Any]):
         
         # run_uuid is this:
         mlflow_run_id = best_trial_data.metadata.get('mlflow_run_id')
-    else:
-        experiment = mlflow.get_experiment_by_name(config['mlflow_experiment_name'])
-        if experiment is None:
-            raise LookupError(f"Experiment {config['mlflow_experiment_name']} not found.")
-        runs = mlflow.search_runs(
-            experiment_ids=[experiment.experiment_id],
-            filter_string=f"attributes.run_name = '{run_name}'",
-            output_format="list"
-        )
-        if runs is None or len(runs) == 0:
-            raise LookupError(f"No runs found for experiment_name={config['mlflow_experiment_name']} and run name={run_name}")
-        mlflow_run_id = runs[0].info.run_id
-   
-    # mlflow table called runs has columns:
-    # run_uuid | name | source_type | source_name | entry_point_name | user_id | status | start_time | end_time | source_version | lifecycle_stage | artifact_uri | experiment_id | deleted_time
-    
-    mlflow_run = mlflow.get_run(mlflow_run_id)
-    
-    if run_name == "tune":
+        mlflow_run = mlflow.get_run(mlflow_run_id)
         hparams = destringify_mlflow_params(mlflow_run.data.params)
         hparams_json = json.dumps(hparams, indent=4, sort_keys=True)
         try:
             with fsspec.open(config['output_hyperparams_uri'], mode="w") as f:
                 f.write(hparams_json)
         except Exception as e:
-            logging.exception(f'ERROR while trying to write to {config["output_hyperparams_uri"]}: {e}.  Check for permission errors')
+            logging.exception(
+                f'ERROR while trying to write to {config["output_hyperparams_uri"]}: {e}.  Check for permission errors')
             raise e
-    
-    #get the metrics:
-    mlflow_client = MlflowClient(tracking_uri=config['mlflow_tracking_uri'])
-    metrics_dict = {}
-    for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
-        for key_t in (f"train_{key}", f"val_{key}"):
-            metrics_dict[key_t] = {'x': [], 'y': []}
-            m_dict = mlflow_client.get_metric_history(mlflow_run_id, key=key_t)
-            for m in m_dict:
-                metrics_dict[key_t]['x'].append(int(m.step))
-                metrics_dict[key_t]['y'].append(float(m.value))
+    else:
+        experiment = mlflow.get_experiment_by_name(config['mlflow_experiment_name'])
+        if experiment is None:
+            raise LookupError(f"Experiment {config['mlflow_experiment_name']} not found.")
+        #default ordering is descending start_time, run_id
+        runs = mlflow.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            filter_string=f"attributes.run_name LIKE '{srch}'",
+            output_format="list"
+        )
+        if runs is None or len(runs) == 0:
+            raise LookupError(f"No runs found for experiment_name={config['mlflow_experiment_name']} and run ={srch}")
+        mlflow_run = runs[0]
+        mlflow_run_id = mlflow_run.info.run_id
+        if phase == "export-test-results":
+            #there is only metrics associated with the run data for test phases
+            metrics_dict = mlflow_run.data.metrics
+   
+    if phase != "export-test-results":
+        #get the metrics:
+        mlflow_client = MlflowClient(tracking_uri=config['mlflow_tracking_uri'])
+        for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
+            for key_t in (f"train_{key}", f"val_{key}"):
+                metrics_dict[key_t] = {'x': [], 'y': []}
+                m_dict = mlflow_client.get_metric_history(mlflow_run_id, key=key_t)
+                for m in m_dict:
+                    metrics_dict[key_t]['x'].append(int(m.step))
+                    metrics_dict[key_t]['y'].append(float(m.value))
     
     metrics_json = json.dumps(metrics_dict, indent=4, sort_keys=True)
     try:

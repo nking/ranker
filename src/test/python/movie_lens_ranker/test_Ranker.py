@@ -3,6 +3,7 @@ import logging
 #to test for multiple devices before using on GPUs or TPUs:
 #os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=4'
 import jax
+
 def safe_jax_init():
     try:
         # Force local-only initialization for unit tests
@@ -215,12 +216,6 @@ class TestRanker(unittest.TestCase):
         print(f'process_count={jax.process_count()}')
         print(f'process_index={jax.process_index()}')
     
-    def get_or_create_mlflow_experiment(self, experiment_name: str):
-        if experiment := mlflow.get_experiment_by_name(experiment_name):
-            return experiment.experiment_id
-        else:
-            return mlflow.create_experiment(experiment_name)
-        
     def test_run_tune_train_test(self):
         """
         this uses the docker container fake-gcs-server
@@ -288,7 +283,6 @@ class TestRanker(unittest.TestCase):
             'top_k' : 20,
             'vizier_endpoint': vizier_endpoint,
             'mlflow_tracking_uri': mlflow_uri,
-            'mlflow_experiment_id': self.get_or_create_mlflow_experiment(STUDY_NAME),
             'mlflow_experiment_name': STUDY_NAME,
         }
         set_flags_from_dict(config)
@@ -320,245 +314,12 @@ class TestRanker(unittest.TestCase):
         except Exception as ex:
             pass
         
-        print(f'BEGIN TUNING')
+        self._run_and_assert_hpo(config)
         
-        # run tune HPO
-        app_runner(None)
+        restore_dict, train_run = self.run_train_and_restore_chkpoint_and_assert(config)
         
-        vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
-        study = vz_clients.Study.from_owner_and_id(owner=config['project_id'],
-            study_id=config['study_name'])
-        self.assertIsNotNone(study)
-        optimal_trials = study.optimal_trials()
-        self.assertIsNotNone(optimal_trials)
+        self.run_test_and_assert(config, restore_dict)
         
-        best_trial = None
-        for tr in optimal_trials:
-            best_trial = tr
-            break
-        self.assertIsNotNone(best_trial)
-        best_trial_data = best_trial.materialize()
-        #best_params contains only the params being tuned, not all params needed for train_fn
-        best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
-        print("Available metrics:",
-            list(best_trial_data.final_measurement.metrics.keys()), flush=True)
-        bfm = best_trial_data.final_measurement
-        bfm = bfm.metrics.get(f'ndcg_{config["top_k"]}')
-        best_value = bfm.value
-        
-        print(f"Loaded Best Objective: {best_value}")
-        print(f"Loaded Best Parameters: {best_params}")
-        self.assertTrue(best_value > 0)
-        
-        mlflow_run_id = best_trial_data.metadata.get('mlflow_run_id')
-        self.assertIsNotNone(mlflow_run_id)
-        
-        best_params2 = get_best_parameters_for_training(config)
-        
-        #phase was tune, so no need to check for checkpoint paths
-        
-        mlflow_run = mlflow.get_run(mlflow_run_id)
-        config = destringify_mlflow_params(mlflow_run.data.params)
-        self.assertIsNotNone(config)
-        self.assertTrue(isinstance(config['batch_size'], int))
-        
-        ## assert the values are the same
-        for k, v in best_params.items():
-            if isinstance(v, float):
-                self.assertAlmostEqual(v, config[k], delta=0.01*v)
-                self.assertAlmostEqual(v, best_params2[k], delta=0.01 * v)
-            else:
-                self.assertEqual(v, config[k])
-                
-        # use the method and assert results
-        #output_hp_path = os.path.join(get_bin_dir(), "output_hp.json")
-        #output_metrics_path = os.path.join(get_bin_dir(), "output_metrics.json")
-        output_hp_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/tune/hparams.json"
-        output_metrics_path =  f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/tune/metrics.json"
-        config['output_hyperparams_uri'] = output_hp_path
-        config['output_metrics_uri'] = output_metrics_path
-        config['phase'] = 'export-hpo-results'
-        run_export_results(config = config)
-        with fsspec.open(output_hp_path, mode='r') as f:
-            content = f.read()
-            output_hp_dict = json.loads(content)
-        with fsspec.open(output_metrics_path, mode='r') as f:
-            content = f.read()
-            output_metrics_dict = json.loads(content)
-        self.assertIsNotNone(output_hp_dict)
-        self.assertIsNotNone(output_metrics_dict)
-        for k, v in best_params.items():
-            if isinstance(v, float):
-                self.assertAlmostEqual(v, output_hp_dict[k], delta=0.01*v)
-            else:
-                self.assertEqual(v, output_hp_dict[k])
-        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
-            key1 = f'train_{key}'
-            key2 = f'val_{key}'
-            self.assertTrue(key1 in output_metrics_dict)
-            self.assertTrue(key2 in output_metrics_dict)
-            
-        #remove files to test phase with app_runner
-        fs, path = fsspec.core.url_to_fs(config['output_hyperparams_uri'])
-        fs.rm(path)  # or fs.remove(path)
-        fs, path = fsspec.core.url_to_fs(config['output_metrics_uri'])
-        fs.rm(path)  # or fs.remove(path)
-        #test use from app_runner and phase
-        config['phase'] = 'export-hpo-results'
-        set_flags_from_dict(config)
-        app_runner(None)
-        with fsspec.open(output_hp_path, mode='r') as f:
-            content = f.read()
-            output_hp_dict = json.loads(content)
-        with fsspec.open(output_metrics_path, mode='r') as f:
-            content = f.read()
-            output_metrics_dict = json.loads(content)
-        self.assertIsNotNone(output_hp_dict)
-        self.assertIsNotNone(output_metrics_dict)
-        for k, v in best_params.items():
-            if isinstance(v, float):
-                self.assertAlmostEqual(v, output_hp_dict[k], delta=0.01*v)
-            else:
-                self.assertEqual(v, output_hp_dict[k])
-        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
-            key1 = f'train_{key}'
-            key2 = f'val_{key}'
-            self.assertTrue(key1 in output_metrics_dict)
-            self.assertTrue(key2 in output_metrics_dict)
-            
-        #### ====================================================== ####
-        print(f'BEGIN TRAINING')
-        
-        config['phase'] = 'train-best'
-        train_id = 1234567
-        config['train_id'] = train_id
-        config['validate_checkpoint_restores'] = True
-        
-        for k, v in config.items():
-            if k.find('<=') > -1:
-                print(f"problem key: {k}={v}", flush=True)
-        
-        set_flags_from_dict(config)
-        # more debugging:
-        for name, flag in flags.FLAGS._flags().items():
-            try:
-                flag.value #logger_levels
-            except Exception as ex:
-                pass
-
-        #run train using best found in HPO
-        app_runner(None)
-        
-        #results will be stored for study_name and run_name='train'
-        run_name = f"train_{train_id}"
-        runs = mlflow.search_runs(
-            experiment_ids=[config['mlflow_experiment_id']],
-            filter_string=f"attributes.run_name = '{run_name}'",
-            output_format="list"
-        )
-        
-        mlflow_client = MlflowClient(tracking_uri=config['mlflow_tracking_uri'])
-        
-        self.assertIsNotNone(runs)
-        self.assertEqual(len(runs), 1)
-        best_run = runs[0]
-        run_id = best_run.info.run_id
-        metrics_dict = {}
-        for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
-            for key_t in (f"train_{key}", f"val_{key}"):
-                metrics_dict[key_t] = {'x': [], 'y': []}
-                m_dict = mlflow_client.get_metric_history(run_id, key=key_t)
-                for m in m_dict:
-                    metrics_dict[key_t]['x'].append(int(m.step))
-                    metrics_dict[key_t]['y'].append(float(m.value))
-        self.assertTrue(len(metrics_dict), 8)
-        
-        #phase is train, so assert checkpoint paths are in mlflow
-        # we have to fetch the checkpoint path from the mflow params or tags
-        
-        best_checkpoint_uri_tag = best_run.data.tags.get("best_checkpoint_uri")
-        print(f'best_checkpoint_uri_tag={best_checkpoint_uri_tag}')
-        self.assertTrue(best_checkpoint_uri_tag.find('train_') > -1)
-        best_checkpoint_uri = get_best_checkpoint_uri_for_testing(config)
-        self.assertEqual(best_checkpoint_uri_tag, best_checkpoint_uri)
-        
-        #the train method stores checkpoints so assert checkpoints and restore and assert can resume training if not complete ==============================
-        restore_dict = restore_items_from_checkpoint(checkpoint_uri=best_checkpoint_uri_tag)
-        
-        expected_keys = {'model', 'optimizer', 'train_dataloader', 'train_dataloader_iter',
-            'val_dataloader', 'rngs', 'global_step', 'config'}
-        for key in expected_keys:
-            self.assertTrue(key in restore_dict)
-            
-        #check that export-train-results works:
-        output_metrics_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/train/metrics.json"
-        config['output_metrics_uri'] = output_metrics_path
-        config['phase'] = 'export-train-results'
-        run_export_results(config=config)
-        
-        #assert that bucket files exist and have expected content
-        with fsspec.open(output_metrics_path, mode='r') as f:
-            output_metrics_dict = json.loads(f.read())
-        self.assertIsNotNone(output_metrics_dict)
-        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
-            key1 = f'train_{key}'
-            key2 = f'val_{key}'
-            self.assertTrue(key1 in output_metrics_dict)
-            self.assertTrue(key2 in output_metrics_dict)
-            
-        ## =============== add test uris to config and run tests.  also tests that restore works================
-        restore_dict['config']['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
-        restore_dict['config']['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
-        
-        #test_metrics = test_fn(config=restore_dict['config'])
-        #print(f'TEST METRICS: {test_metrics}', flush=True)
-        
-        #=== operate test from entrypoint
-        print(f'BEGIN TESTING')
-        config['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
-        config['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
-        #config['test_checkpoint_uri'] = best_checkpoint_uri_tag  #for use when phase is 'test-given'
-        #config['best_checkpoint_uri'] = best_checkpoint_uri_tag #the method now looks this up in mlflow records
-        config['phase'] = 'test-best'
-        test_id = 234567
-        config['test_id'] = test_id
-        set_flags_from_dict(config)
-        app_runner(None)
-    
-        run_name = f'test_{config.get('test_id', 0)}'
-        runs = mlflow.search_runs(
-            experiment_ids=[config['mlflow_experiment_id']],
-            filter_string=f"attributes.run_name = '{run_name}'",
-            output_format="list"
-        )
-        self.assertIsNotNone(runs)
-        self.assertEqual(len(runs), 1)
-        run_id = runs[0].info.run_id
-        metrics_dict = {}
-        for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
-            for key_t in (f"train_{key}", f"val_{key}"):
-                metrics_dict[key_t] = {'x': [], 'y': []}
-                m_dict = mlflow_client.get_metric_history(run_id, key=key_t)
-                for m in m_dict:
-                    metrics_dict[key_t]['x'].append(int(m.step))
-                    metrics_dict[key_t]['y'].append(float(m.value))
-        self.assertTrue(len(metrics_dict), 8)
-        
-        # check that export-test-results works:
-        output_metrics_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/test/metrics.json"
-        config['output_metrics_uri'] = output_metrics_path
-        config['phase'] = 'export-train-results'
-        run_export_results(config=config)
-        
-        # assert that bucket files exist and have expected content
-        with fsspec.open(output_metrics_path, mode='r') as f:
-            output_metrics_dict = json.loads(f.read())
-        self.assertIsNotNone(output_metrics_dict)
-        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
-            key1 = f'train_{key}'
-            key2 = f'val_{key}'
-            self.assertTrue(key1 in output_metrics_dict)
-            self.assertTrue(key2 in output_metrics_dict)
         
         ##====== load train_ for use in stats =======
         TRAIN_BATCH_SIZE = restore_dict['train_dataloader']._sampler.batch_size
@@ -568,8 +329,8 @@ class TestRanker(unittest.TestCase):
         STEPS_PER_EPOCH_LOCAL = STEPS_PER_EPOCH_GLOBAL // NUM_TRAIN_SHARDS
         
         ## ================ get the 2nd to last latest checkpoint and assert can continue training from it. ====
-        best_checkpoint_uri = best_run.data.tags.get("best_checkpoint_uri")
-        latest_checkpoint_uri = best_run.data.tags.get("latest_checkpoint_uri")
+        best_checkpoint_uri = train_run.data.tags.get("best_checkpoint_uri")
+        latest_checkpoint_uri = train_run.data.tags.get("latest_checkpoint_uri")
         earlier_restore_dict = restore_items_from_checkpoint(latest_checkpoint_uri, get_earliest=True)
         print(f'global_step next to last={earlier_restore_dict["global_step"]}')
         self.assertTrue(earlier_restore_dict['global_step'] > 0)
@@ -628,8 +389,9 @@ class TestRanker(unittest.TestCase):
           join cte2 on metrics.run_uuid==cte2.run_uuid
           order by key,timestamp;
         '''
+        experiment = mlflow.get_experiment_by_name(name=config['mlflow_experiment_name'])
         runs = mlflow.search_runs(
-            experiment_ids=[config['mlflow_experiment_id']],
+            experiment_ids=[experiment.experiment_id],
             filter_string="attributes.run_name LIKE 'train_%'",
             output_format="list"
         )
@@ -650,6 +412,200 @@ class TestRanker(unittest.TestCase):
         self.assertTrue(len(pngs) > 0)
         for png_file in pngs:
             self.assertTrue(os.path.exists(png_file))
+            
+        self._assert_export_methods(config)
     
+    def _assert_export_methods(self, config:Dict[str, Any]):
+        
+        # use the method and assert results
+        # output_hp_path = os.path.join(get_bin_dir(), "output_hp.json")
+        # output_metrics_path = os.path.join(get_bin_dir(), "output_metrics.json")
+        output_hp_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/tune/hparams.json"
+        output_metrics_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/tune/metrics.json"
+        config['output_hyperparams_uri'] = output_hp_path
+        config['output_metrics_uri'] = output_metrics_path
+        config['phase'] = 'export-hpo-results'
+        
+        #run_export_results(config=config)
+        set_flags_from_dict(config)
+        app_runner(None)
+        
+        logging.info(f"assert {config['phase']} results")
+        with fsspec.open(output_hp_path, mode='r') as f:
+            content = f.read()
+            output_hp_dict = json.loads(content)
+        with fsspec.open(output_metrics_path, mode='r') as f:
+            content = f.read()
+            output_metrics_dict = json.loads(content)
+        self.assertIsNotNone(output_hp_dict)
+        self.assertIsNotNone(output_metrics_dict)
+        
+        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
+            key1 = f'train_{key}'
+            key2 = f'val_{key}'
+            self.assertTrue(key1 in output_metrics_dict)
+            self.assertTrue(key2 in output_metrics_dict)
+        
+        # ===================================================
+        output_metrics_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/train/metrics.json"
+        config['output_metrics_uri'] = output_metrics_path
+        config['phase'] = 'export-train-results'
+        
+        #run_export_results(config=config)
+        set_flags_from_dict(config)
+        app_runner(None)
+        
+        logging.info(f"assert {config['phase']} results")
+        with fsspec.open(output_metrics_path, mode='r') as f:
+            content = f.read()
+            output_metrics_dict = json.loads(content)
+        self.assertIsNotNone(output_metrics_dict)
+        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
+            key1 = f'train_{key}'
+            key2 = f'val_{key}'
+            self.assertTrue(key1 in output_metrics_dict)
+            self.assertTrue(key2 in output_metrics_dict)
+        
+        # ===================================================
+        output_metrics_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/test/metrics.json"
+        config['output_metrics_uri'] = output_metrics_path
+        config['phase'] = 'export-test-results'
+        
+        #run_export_results(config=config)
+        set_flags_from_dict(config)
+        app_runner(None)
+        
+        logging.info(f"assert {config['phase']} results")
+        with fsspec.open(output_metrics_path, mode='r') as f:
+            content = f.read()
+            output_metrics_dict = json.loads(content)
+        self.assertIsNotNone(output_metrics_dict)
+        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
+            key1 = f'test_{key}'
+            self.assertTrue(key1 in output_metrics_dict)
+    
+    def _run_and_assert_hpo(self, config):
+        print(f'BEGIN TUNING')
+        
+        # run tune HPO
+        app_runner(None)
+        
+        vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
+        study = vz_clients.Study.from_owner_and_id(owner=config['project_id'], study_id=config['study_name'])
+        self.assertIsNotNone(study)
+        optimal_trials = study.optimal_trials()
+        self.assertIsNotNone(optimal_trials)
+        
+        best_trial = None
+        for tr in optimal_trials:
+            best_trial = tr
+            break
+        self.assertIsNotNone(best_trial)
+        best_trial_data = best_trial.materialize()
+        # best_params contains only the params being tuned, not all params needed for train_fn
+        best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
+        print("Available metrics:",
+            list(best_trial_data.final_measurement.metrics.keys()), flush=True)
+        bfm = best_trial_data.final_measurement
+        bfm = bfm.metrics.get(f'ndcg_{config["top_k"]}')
+        best_value = bfm.value
+        
+        print(f"Loaded Best Objective: {best_value}")
+        print(f"Loaded Best Parameters: {best_params}")
+        self.assertTrue(best_value > 0)
+        
+        mlflow_run_id = best_trial_data.metadata.get('mlflow_run_id')
+        self.assertIsNotNone(mlflow_run_id)
+        
+        best_params2 = get_best_parameters_for_training(config)
+        
+        # phase was tune, so no need to check for checkpoint paths
+        
+        mlflow_run = mlflow.get_run(mlflow_run_id)
+        config = destringify_mlflow_params(mlflow_run.data.params)
+        self.assertIsNotNone(config)
+        self.assertTrue(isinstance(config['batch_size'], int))
+        
+        ## assert the values are the same
+        for k, v in best_params.items():
+            if isinstance(v, float):
+                self.assertAlmostEqual(v, config[k], delta=0.01 * v)
+                self.assertAlmostEqual(v, best_params2[k], delta=0.01 * v)
+            else:
+                self.assertEqual(v, config[k])
+    
+    def run_train_and_restore_chkpoint_and_assert(self, config):
+        #### ====================================================== ####
+        print(f'BEGIN TRAINING')
+        
+        config['phase'] = 'train-best'
+        config['train_id'] = 1234567
+        config['validate_checkpoint_restores'] = True
+        
+        set_flags_from_dict(config)
+       
+        # run train using best found in HPO
+        app_runner(None)
+        
+        #results are asserted in _assert_export_methods
+        
+        mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
+        experiment = mlflow.get_experiment_by_name(name=config['mlflow_experiment_name'])
+        runs = mlflow.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            filter_string="attributes.run_name LIKE 'train_%'",
+            output_format="list"
+        )
+        
+        run_name = get_canonical_mlflow_run_name(config)
+        runs = mlflow.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            filter_string=f"attributes.run_name = '{run_name}'",
+            output_format="list"
+        )
+        self.assertIsNotNone(runs)
+        self.assertTrue(len(runs) == 1)
+        
+        # phase is train, so assert checkpoint paths are in mlflow
+        # we have to fetch the checkpoint path from the mflow params or tags
+        
+        best_checkpoint_uri_tag = runs[0].data.tags.get("best_checkpoint_uri")
+        print(f'best_checkpoint_uri_tag={best_checkpoint_uri_tag}')
+        self.assertTrue(best_checkpoint_uri_tag.find('train_') > -1)
+        best_checkpoint_uri = get_best_checkpoint_uri_for_testing(config)
+        self.assertEqual(best_checkpoint_uri_tag, best_checkpoint_uri)
+        
+        # the train method stores checkpoints so assert checkpoints and restore and assert can resume training if not complete ==============================
+        restore_dict = restore_items_from_checkpoint(checkpoint_uri=best_checkpoint_uri_tag)
+        
+        expected_keys = {'model', 'optimizer', 'train_dataloader',
+            'train_dataloader_iter',
+            'val_dataloader', 'rngs', 'global_step', 'config'}
+        for key in expected_keys:
+            self.assertTrue(key in restore_dict)
+        
+        return restore_dict, runs[0]
+    
+    def run_test_and_assert(self, config, restore_dict):
+        #=== operate test from entrypoint
+        print(f'BEGIN TESTING')
+        
+        ## =============== add test uris to config and run tests.  also tests that restore works================
+        restore_dict['config']['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
+        restore_dict['config']['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
+        
+        config['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
+        config['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
+        #config['test_checkpoint_uri'] = best_checkpoint_uri_tag  #for use when phase is 'test-given'
+        #config['best_checkpoint_uri'] = best_checkpoint_uri_tag #the method now looks this up in mlflow records
+        config['phase'] = 'test-best'
+        test_id = 234567
+        config['test_id'] = test_id
+        set_flags_from_dict(config)
+        app_runner(None)
+        
+        #results are asserted in _assert_export_methods
+    
+
 if __name__ == '__main__':
     unittest.main()
