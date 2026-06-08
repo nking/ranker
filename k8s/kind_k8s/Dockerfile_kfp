@@ -14,3 +14,5 @@ COPY run_app_trainer_kfp.py .
 # Create a non-root user (optional but recommended for security)
 RUN useradd -m appuser && chown -R appuser /app
 USER appuser
+
+ENV PYTHONUNBUFFERED=1

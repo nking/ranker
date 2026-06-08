@@ -69,7 +69,7 @@ def main(_):
         @parameter_controller.controller(
             executor=xm_local.Local(
                 docker_options=xm_local.DockerOptions(
-                    # for local runs
+                    # parameter controller can control docker through socket:
                     volumes={'/var/run/docker.sock': '/var/run/docker.sock'}
                 ),
             ),

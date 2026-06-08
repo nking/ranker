@@ -317,6 +317,8 @@ def run_pipeline_local(train_job_yaml_uri:str = "./train_job.yaml", trial_ids_st
 def wait_for_port(port:int, host:str='127.0.0.1', timeout=10):
     start = time.time()
     while time.time() - start < timeout:
+        #AF_INET is IPV4 address family.  alternatively there is socket.AF_UNIX for unix domain socket
+        # SOCK_STREAM uses TCP protocol, so has connection ack, reliability and order.
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if s.connect_ex((host, port)) == 0: return True
         time.sleep(0.5)
