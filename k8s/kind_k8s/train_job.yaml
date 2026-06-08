@@ -177,6 +177,8 @@ spec:
                           runAsUser: 1000
                           runAsGroup: 1000
                           fsGroup: 1000
+                        serviceAccoutName: default
+                        #imagePullSecrets
                         containers:
                           - name: node
                             #imagePullPolicy: Never #<-- not recognized.  so use default behavior that an image:latest has default pull policy Always but an image tagged with anythin else other than latest has default policy IfNotPresent, so will make an image with tag :local for this
@@ -188,4 +190,9 @@ spec:
                             hostPath:
                               path: /app/src
                               type: Directory
+                          #image
+                          #persistentVolumeClaim
+                          #ephemeral
+                          #downwardAPI
+                          #configMap
 

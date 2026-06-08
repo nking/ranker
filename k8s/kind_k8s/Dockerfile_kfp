@@ -1,0 +1,16 @@
+FROM python:3.12-slim
+
+# Set the working directory
+WORKDIR /app
+
+# Ensure Python looks in /app for imports
+ENV PYTHONPATH=/app
+
+RUN pip install kubernetes==30.1.0 pyyaml==6.0.3 fsspec==2026.2.0 gcsfs==2026.2.0
+
+COPY util_k8s_train.py .
+COPY run_app_trainer_kfp.py .
+
+# Create a non-root user (optional but recommended for security)
+RUN useradd -m appuser && chown -R appuser /app
+USER appuser

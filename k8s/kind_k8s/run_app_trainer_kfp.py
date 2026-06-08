@@ -1,5 +1,6 @@
 import os
 import argparse
+import socket
 import subprocess
 import time
 from typing import Tuple
@@ -8,7 +9,8 @@ import yaml
 import fsspec
 
 from util_kfpv2 import setup_kfpv2_backend
-from util_kind import setup_cluster, delete_cluster, find_executable_path
+from util_kind import setup_cluster, delete_cluster, find_executable_path, \
+    prepare_container_image
 #pip install kfp==2.16.1
 from kfp import dsl, compiler, client as kfp_client
 import logging
@@ -127,10 +129,7 @@ def generate_trial_ids(trial_ids_str:str = None, num_trials: int = None) -> str:
     from json import dumps
     return dumps(list(range(num_trials)))
 
-@dsl.component(
-    base_image="python:3.12-slim",
-    packages_to_install=["kubernetes==30.1.0", "pyyaml==6.0.3", "fsspec==2026.2.0", "gcsfs==2026.2.0"]
-)
+@dsl.component(base_image="run_phase:local")
 def run_train_job(
         train_job_yaml_content: str,
         namespace: str = "ranker-ns",
@@ -151,6 +150,24 @@ def run_train_job(
     from kubernetes import config
     import logging
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    
+    import os
+    import sys
+    logging.info(f"DEBUG: Current working directory: {os.getcwd()}")
+    logging.info(f"DEBUG: Python sys.path: {sys.path}")
+    logging.info(f"DEBUG: Files in CWD: {os.listdir(os.getcwd())}")
+    try:
+        # Try to import it manually to catch the specific underlying error
+        import importlib
+        util = importlib.import_module("util_k8s_train")
+        from util_k8s_train import run_train_job_phase
+    except ImportError as e:
+        # THIS will reveal the truth
+        logging.error(f"❌ Actual ImportError: {e}")
+        # Print the traceback so you can see exactly which line is failing
+        import traceback
+        traceback.print_exc()
+        raise e
     
     try:
         config.load_incluster_config()
@@ -297,6 +314,14 @@ def run_pipeline_local(train_job_yaml_uri:str = "./train_job.yaml", trial_ids_st
     print("Pipeline execution complete!")
     print(f"Final status: {gr_pipeline.state}")
 
+def wait_for_port(port:int, host:str='127.0.0.1', timeout=10):
+    start = time.time()
+    while time.time() - start < timeout:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex((host, port)) == 0: return True
+        time.sleep(0.5)
+    return False
+
 def run_pipeline_on_kfpv2(output_pipeline_yaml_uri: str = 'graphranker_pipeline.yaml',
     train_job_yaml_uri:str = "./train_job.yaml", trial_ids_str = None, num_trials:int=20):
     """
@@ -308,13 +333,17 @@ def run_pipeline_on_kfpv2(output_pipeline_yaml_uri: str = 'graphranker_pipeline.
     :param output_pipeline_yaml_uri: where to write the compiled pipeline yaml to
     :param train_job_yaml_uri: uri for input train_job.yaml file
     """
+    #TODO: revisit namespace use and make sure its consistent
     tunnel = None
     try:
-        namespace, train_job_yaml_content = compile_pipeline_yaml(output_pipeline_yaml_uri,
-            train_job_yaml_uri, trial_ids_str=trial_ids_str, num_trials=num_trials)
-
+        namespace, train_job_yaml_content = compile_pipeline_yaml(
+            output_pipeline_yaml_uri,
+            train_job_yaml_uri, trial_ids_str=trial_ids_str,
+            num_trials=num_trials)
+        
         kind_path = find_executable_path("kind")
         kubectl_path = find_executable_path("kubectl")
+        docker_path = find_executable_path("docker")
         
         # DEBUG: uncomment when done debugging
         '''
@@ -323,7 +352,11 @@ def run_pipeline_on_kfpv2(output_pipeline_yaml_uri: str = 'graphranker_pipeline.
             KUBEFLOW_VERSION=KUBEFLOW_VERSION, NAMESPACE=NAMESPACE)
         '''
         
-        setup_rbac(namespace)
+        prepare_container_image(kind_path=kind_path, docker_path=docker_path,
+            docker_file_path="./Dockerfile_kfp", image_name= "run_phase:local",
+            cluster_name = "graphranker-tune-train-test-cluster")
+        
+        setup_rbac_yaml(rbac_yaml_uri="./rbac.yaml", namespace=namespace)
         
         # DEBUG: uncomment when done debugging
         '''
@@ -337,7 +370,9 @@ def run_pipeline_on_kfpv2(output_pipeline_yaml_uri: str = 'graphranker_pipeline.
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
-        time.sleep(3)
+        
+        if wait_for_port(8080):
+            logging.info("Tunnel is active!")
         
         # Send the compiled asset to the Kind KFP engine
         logging.info("📤 Submitting pipeline run to local backend...")

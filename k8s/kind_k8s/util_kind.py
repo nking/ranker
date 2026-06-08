@@ -10,8 +10,89 @@ from kubernetes.client.rest import ApiException
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+import subprocess
+import logging
+
+def image_exists(docker_path:str, image_name: str) -> bool:
+    """Checks if a docker image exists locally without parsing output.
+    :param docker_path: path to docker binary
+    :param image_name: name of image to build.  e.g. run_phase:local
+    """
+    cmd = [docker_path, "image", "inspect", image_name]
+    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return result.returncode == 0
+
+def prepare_container_image(kind_path : str, docker_path : str, docker_file_path : str,
+        image_name : str, cluster_name : str = "graphranker-tune-train-test-cluster"):
+    """
+    Prepares a container image if doesn't exist and loads it into kind
+    :param kind_path: path for kind binary
+    :param docker_path: path to docker binary
+    :param image_name: name of image to build.  e.g. run_phase:local
+    :param cluster_name: name of k8s cluster
+    """
+    build_image = not image_exists(docker_path, image_name)
+    
+    if build_image:
+        logging.info(f"🏗️ Image '{image_name}' not found. Building...")
+        try:
+            subprocess.run([docker_path, "build", "-f", docker_file_path, "-t", image_name, "."], check=True)
+            logging.info(f"✅ Build successful.")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"❌ Docker build failed: {e}")
+            raise
+    
+    if is_image_loaded_in_kind(kind_path, docker_path, image_name, cluster_name):
+        logging.info("🚀 Image is already in Kind! Skipping load.")
+    else:
+        logging.info(f"🚚 Loading image into cluster '{cluster_name}'...")
+        try:
+            run_cmd(cmd=[kind_path, "load", "docker-image", image_name, "--name",
+                cluster_name], check=True)
+            logging.info(f"✅ Image loaded successfully.")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"❌ Kind load failed: {e}")
+            raise
+  
+def is_image_loaded_in_kind(kind_path : str, docker_path : str, image_name: str, cluster_name: str) -> bool:
+    """
+    Checks if a specific image exists inside the Kind cluster nodes.
+    """
+    try:
+        # Get the list of nodes in the Kind cluster
+        nodes_output = subprocess.check_output(
+            [kind_path, "get", "nodes", "--name", cluster_name],
+            text=True
+        )
+        nodes = nodes_output.strip().splitlines()
+        if not nodes:
+            return False
+        
+        #['graphranker-tune-train-test-cluster-control-plane', 'graphranker-tune-train-test-cluster-worker2', 'graphranker-tune-train-test-cluster-worker']
+        
+        # Check the first node (Kind clusters typically pull/load to all nodes)
+        target_node = nodes[0]
+        
+        # Use docker exec to check the node's internal image store
+        # We use 'docker image inspect' inside the node's environment
+        check_cmd = [docker_path, "exec", target_node, "docker", "image", "inspect", image_name]
+        
+        result = subprocess.run(
+            check_cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        
+        return result.returncode == 0
+        
+    except (subprocess.CalledProcessError, IndexError, FileNotFoundError):
+        # Either Kind isn't installed, the cluster isn't running, or command failed
+        return False
+    
 def find_executable_path(binary_name:str):
-    """Run a shell command and print output."""
+    """Run a shell command and print output.
+    :param binary_name: name of binary path to resolve
+    """
     path = shutil.which(binary_name)
     if path:
         return path

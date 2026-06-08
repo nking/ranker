@@ -399,4 +399,36 @@ kubectl get pods -n kubeflow
 
 find the pod in error and get logs:
     kubectl logs graphranker-sequential-hpo-train-test-xm8w4-system-container-impl-2554816360 -n kubeflow -c main
+====================================
+
+kubectl get serviceaccount pipeline-runner -n kubeflow
+
+kubectl get serviceaccount -A -n kubeflow
+
+kubectl get serviceaccount -A -n ranker-ns
+
+======
+
+kubectl explain trainjob.spec.trainer
+
+==========================================================
+
+Test permissions:
+
+kubectl apply -f rbac.yaml
+
+kubectl auth can-i create trainjobs.trainer.kubeflow.org --as=system:serviceaccount:kubeflow:pipeline-runner -n ranker-ns
+yes
+
+NOTE: the above 2 can be run within an empty cluster in which
+no trainjobs nor db pods have been created next.
+
+The namespaces kubeflow and ranker-ns must already exist though.
+
+The CRD: The Kubeflow Training Operator (the blueprint for trainjobs.trainer.kubeflow.org) 
+must be already installed in the cluster. 
+If the cluster doesn't know what a trainjob is, it might throw a warning.
+
+============================================================
+
 
