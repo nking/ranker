@@ -171,29 +171,38 @@ if [ "$run_code" = "true" ]; then
 
     echo "deploying databases"
     kubectl create namespace ranker-ns --dry-run=client -o yaml | kubectl apply -f -
+
     kubectl apply -f $PROJECT_ROOT/deploy/k8s/secrets.yaml -n ranker-ns
+    echo "⏳ Waiting for secret 'graphranker-db-credentials' to be available..."
+    until kubectl get secret graphranker-db-credentials -n ranker-ns &>/dev/null; do
+        echo -n "."
+        sleep 1
+    done
+    echo -e "\n✅ Secret is verified and ready!"
+
     envsubst '$PROJECT_ROOT' < $PROJECT_ROOT/deploy/k8s/dbs.yaml | kubectl apply -f -
+    sleep 3
 
     #echo "waiting for readiness of databases"
     #kubectl rollout status deployment/local-db-store -n ranker-ns --timeout=60s || exit 1
     #kubectl rollout status deployment/gcs-emulator -n ranker-ns --timeout=60s || exit 1
     #kubectl rollout status deployment/vizier-server -n ranker-ns --timeout=60s || exit 1
-    echo "waiting for readiness of databases (timeout is 5m)"
+    echo "waiting for readiness of databases (timeout is 6m)"
     # If any of these fail, pause so you can debug instead of instantly exiting and deleting the cluster
-    if ! kubectl rollout status deployment/local-db-store -n ranker-ns --timeout=300s; then
+    if ! kubectl rollout status deployment/local-db-store -n ranker-ns --timeout=360s; then
         echo "❌ ERROR: local-db-store failed to roll out."
         echo "🛑 SETUP DEBUG PAUSE: Run 'kubectl get pods -n ranker-ns' in another terminal to inspect."
         read -p "Press [Enter] to allow the script to exit and clean up..."
         exit 1
     fi
 
-    if ! kubectl rollout status deployment/gcs-emulator -n ranker-ns --timeout=300s; then
+    if ! kubectl rollout status deployment/gcs-emulator -n ranker-ns --timeout=360s; then
         echo "❌ ERROR: gcs-emulator failed to roll out."
         read -p "Press [Enter] to allow the script to exit and clean up..."
         exit 1
     fi
 
-    if ! kubectl rollout status deployment/vizier-server -n ranker-ns --timeout=300s; then
+    if ! kubectl rollout status deployment/vizier-server -n ranker-ns --timeout=360s; then
         echo "❌ ERROR: vizier-server failed to roll out."
         read -p "Press [Enter] to allow the script to exit and clean up..."
         exit 1

@@ -75,6 +75,41 @@ some details about the model
               model would benefit from 8 times faster training with accelerators
 --------------------------------------------------
 
+project directory hierarchy:
+
+├── src/                            
+│   ├──main/  
+│   │   ├── python/movie_lens_ranker  # 🧠 Core JAX/AI Application Code
+│   ├──test/
+│   │   ├── python/movie_lens_ranker  # 🧠 Tests for Main Branch
+│   │   ├── resoures/                 # data for tests
+│
+├── deploy/                         # 🏗️  Yaml Files (No executable code)
+│   ├── compose/                    # Local Docker Compose configurations
+│   │   ├── docker-compose.yaml     # Combines app + dbs
+│   │   └── docker-compose-dbs.yaml # Just the 3 database containers
+│   └── k8s/                        # Native Kubernetes definitions
+│       ├── rbac.yaml               # Role & RoleBindings
+│       ├── databases/              # Manifests for your local DBs (replacing compose)
+│       └── trainjob.yaml           # Kubeflow Trainer v2 YAML template
+│
+├── orchestration/                  # 🚀 Python Advanced Launchers & Runners
+│   ├── k8s/
+│   |   └── util_*.py               # Python utility scripts for kind, k8s, and KFP calls
+│   |   └── run_app.sh              # Bash script to use kubectl to run cluster, dbs, and app-runner
+│   |   └── run_app_trainer.sh      # Bash script to use kubectl to run cluster, dbs, and Trainer v2
+│   |   └── run_app_trainer.py      # Python script to use kubectl, kind, k8s to run cluster, dbs, and Trainer v2
+│   │   └── run_app_trainer_kfp.py  # Python script to build/run KFP pipeline
+│   ├── xmanager/
+│   │   └── launcher.py             # (1b) XManager script (xm_local + docker socket)
+│
+├── scripts/                        # 🛠️  Operational Bash/Utility Scripts
+├── Dockerfile_*                    # Image Dockerfiles
+├── requirements*.txt               # Python application dependencies
+└── README.md
+
+
+--------------------------------------------------
 Instructions:
   set up a virtual environment using conda or virtualenv
   with python version 3.12 
