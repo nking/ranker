@@ -210,7 +210,7 @@ def setup_cluster(kind_path:str, kubectl_path:str, PROJECT_ROOT:str, KUBEFLOW_VE
     try:
         logging.info("🚀 Creating Kind cluster...")
         # Using subprocess to pipe envsubst into kind
-        cmd = f"envsubst '$PROJECT_ROOT' < kind-cluster.yaml | {kind_path} create cluster --config -"
+        cmd = f"envsubst '$PROJECT_ROOT' < $PROJECT_ROOT/deploy/k8s/kind-cluster.yaml | {kind_path} create cluster --config -"
         result = subprocess.run(cmd, shell=True, check=True, capture_output=True,
             text=True, env={**os.environ, "PROJECT_ROOT": PROJECT_ROOT})
         if result.returncode != 0:
@@ -268,8 +268,8 @@ def setup_cluster(kind_path:str, kubectl_path:str, PROJECT_ROOT:str, KUBEFLOW_VE
         pass # Already exists
         
     api_client = client.ApiClient()
-    apply_templated_yaml(api_client, "secrets.yaml", {})
-    apply_templated_yaml(api_client, "dbs.yaml", {"${PROJECT_ROOT}": PROJECT_ROOT})
+    apply_templated_yaml(api_client, f"{PROJECT_ROOT}/deploy/k8s/secrets.yaml", {})
+    apply_templated_yaml(api_client, f"{PROJECT_ROOT}/deploy/k8s/dbs.yaml", {"${PROJECT_ROOT}": PROJECT_ROOT})
 
     wait_for_deployment(apps_v1, "local-db-store", NAMESPACE)
     wait_for_deployment(apps_v1, "gcs-emulator", NAMESPACE)

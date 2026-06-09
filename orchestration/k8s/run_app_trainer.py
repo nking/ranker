@@ -23,9 +23,20 @@ TRAINJOB_GROUP = "trainer.kubeflow.org" # Verify this matches your CRD
 TRAINJOB_VERSION = "v1alpha1"           # Verify this matches your CRD
 TRAINJOB_PLURAL = "trainjobs"
 NAMESPACE = "ranker-ns"
-PROJECT_ROOT = os.path.abspath("../../")
 
-# ====================================================================
+def get_project_dir() -> str:
+    cwd = os.getcwd()
+    head = cwd
+    proj_dir = ""
+    while head and head != os.sep:
+        head, tail = os.path.split(head)
+        if tail:  # Add only if not an empty string (e.g., from root or multiple separators)
+            if tail == "ranker":
+                proj_dir = os.path.join(head, tail)
+                break
+    return proj_dir
+# ===================
+# =================================================
 # MAIN LIFECYCLE
 # ====================================================================
 
@@ -68,6 +79,7 @@ def assert_logs():
 if __name__ == "__main__":
     kind_path = find_executable_path("kind")
     kubectl_path = find_executable_path("kubectl")
+    PROJECT_ROOT = get_project_dir()
     finished = False
     try:
         
