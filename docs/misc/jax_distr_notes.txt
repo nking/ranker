@@ -10,14 +10,43 @@ in jax distr:
   to communicate over the network.  
 - Global Devices: The collection of all devices available across the 
   entire distributed cluster (all processes and all hosts).  
+- backend:
+  the specific hardware for which jax compiles code to run on.
+  JAX baxkends: CPU, GPU, TPU
+- physical device:
+  - silicon hardware attached to the server
+- Compute Unit (CU)
+  - on a CPU these are the physical cores
+  - on a GPU these are streaming multiprocessors (SM)
+- Logical Device
+  - the software abstraction to distribute computation
+  - jax.devices() lists the logical devices
+  - jax usually has 1 logical device per accelerator.
+    e.g. 8 phyiscal GPUs is 8 logical devices
+  - pmap and sharding targets logical devices
+- Local Device
+  - a logical device that is attached to a host (node) which
+    is running a process.
+- Global Device:
+  - any logical device in the cluster.
+  - to contact the memory of another global device, jax
+    coordinates it over the network, via XLA.
+  - jax.devices() lists all global devices
+ 
 
-in dev environment, to simulate SPMD with multiple accellerator
-chips per process:
-    setting number of process to 2 using:  JAX_NUM_PROCESSES
-       (which is 2 processes per host)
-    setting number of local devices per process to 3 using:  xla_force_host_platform_device_count
+for a CPU backend:
+   the env flag xla_force_host_platform_device_count=someNumber is used to
+   mock that that someNumber of logical devices exist on the CPU
+   when the machine actually doens't have someNumber of accelerators.
+   - if used, it must be present before importing jax.
 
-results in train_fn seeing:
+jax.distributed.initialize(
+    num_processes = 2 # 2 processes per host
+    ...)
+xla_force_host_platform_device_count
+    setting number of local devices per process 
+
+results in train_fn when xla_force_host_platform_device_count=3 and jax.process_count() is 2:
  1 [parameter_controller] [job_0_worker_1] 
   2    jax_process_index=1; 
   3    jax.local_devices=[CpuDevice(id=2048), CpuDevice(id=2049), CpuDevice(id=2050)]; 
@@ -28,7 +57,7 @@ results in train_fn seeing:
   8    jax.local_devices=[CpuDevice(id=0), CpuDevice(id=1), CpuDevice(id=2)]; 
   9    jax.devices=[CpuDevice(id=0), CpuDevice(id=1), CpuDevice(id=2), CpuDevice(id=2048), CpuDevice(id=2049), CpuDevice(id=2050)]
 
-In addition, the xmanager launcher_pipeline.py simulates multi-host so that
+the xmanager launcher_pipeline.py simulates multi-host so that
 the multi-host, multi-process aspects of the code can be tested.
 
 -------------------------------------------------------------
@@ -59,12 +88,8 @@ kaggle examples first:
 =============================
 
 
-# NOTE that the xla_force_host_platform_device_count
-        # sets the number of virtual/logical local devices for the CPU backend
-        # (which XLA internally refers to as the host platform).  this sets jax_local_device_count to that number.
-        # by default, jax.local_device_count() is 1.
-        # so it's a good idea to test the code for GPU ability by setting the xla host platform device flag.
-        # for example: with jax num processes = 2 we have:
+        # for example: with jax num processes = 2 
+        # and 2 local devices per process:
         #  worker process 0: creates 2 local virtual CPU devices.
         #  worker process 1: creates 2 local virtual CPU devices.
         # though producetion code in cloud is usally configured to 1 GPU per container so set the xla flag above to 1.
