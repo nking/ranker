@@ -177,7 +177,7 @@ spec:
                           runAsUser: 1000
                           runAsGroup: 1000
                           fsGroup: 1000
-                        serviceAccoutName: default
+                        serviceAccountName: default
                         #imagePullSecrets
                         containers:
                           - name: node

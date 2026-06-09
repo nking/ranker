@@ -2,9 +2,12 @@
 
 # this script runs the container image ranker-app:local using a StatefulSet
 #    and kubectl
+# USAGE:
+#   cd orchestration/k8s
+#   ./run_app.sh
 
 echo "Checking internet connection, needed to pull docker images..."
-if ! ping -c 1 -W 3 google.com &> /dev/null; then
+if ! ping -c 1 -W 3 time.is &> /dev/null; then
   echo "❌ WARNING: No internet connection or DNS failure detected."
   echo "Exiting to prevent partial/broken cluster deployment."
   exit 1
@@ -146,7 +149,7 @@ rm -f chunk_logs_app_0.txt chunk_logs_app_1.txt
 if [ "$run_code" = "true" ]; then
 
     echo "creating cluster"
-    envsubst '$PROJECT_ROOT' < kind-cluster.yaml | kind create cluster --config -
+    envsubst '$PROJECT_ROOT' < $PROJECT_ROOT/deploy/k8s/kind-cluster.yaml | kind create cluster --config -
     echo "waiting for nodes"
     kubectl wait --for=condition=Ready nodes --all --timeout=120s
 
@@ -156,8 +159,8 @@ if [ "$run_code" = "true" ]; then
 
     echo "deploying databases"
     kubectl create namespace ranker-ns --dry-run=client -o yaml | kubectl apply -f -
-    kubectl apply -f secrets.yaml -n ranker-ns
-    envsubst '$PROJECT_ROOT' < dbs.yaml | kubectl apply -f -
+    kubectl apply -f $PROJECT_ROOT/deploy/k8s/secrets.yaml -n ranker-ns
+    envsubst '$PROJECT_ROOT' < $PROJECT_ROOT/deploy/k8s/dbs.yaml | kubectl apply -f -
 
     #echo "waiting for readiness of databases"
     #kubectl rollout status deployment/local-db-store -n ranker-ns --timeout=60s || exit 1
@@ -165,20 +168,20 @@ if [ "$run_code" = "true" ]; then
     #kubectl rollout status deployment/vizier-server -n ranker-ns --timeout=60s || exit 1
     echo "waiting for readiness of databases (timeout is 3m)"
     # If any of these fail, pause so you can debug instead of instantly exiting and deleting the cluster
-    if ! kubectl rollout status deployment/local-db-store -n ranker-ns --timeout=180s; then
+    if ! kubectl rollout status deployment/local-db-store -n ranker-ns --timeout=240s; then
         echo "❌ ERROR: local-db-store failed to roll out."
         echo "🛑 SETUP DEBUG PAUSE: Run 'kubectl get pods -n ranker-ns' in another terminal to inspect."
         read -p "Press [Enter] to allow the script to exit and clean up..."
         exit 1
     fi
 
-    if ! kubectl rollout status deployment/gcs-emulator -n ranker-ns --timeout=180s; then
+    if ! kubectl rollout status deployment/gcs-emulator -n ranker-ns --timeout=240s; then
         echo "❌ ERROR: gcs-emulator failed to roll out."
         read -p "Press [Enter] to allow the script to exit and clean up..."
         exit 1
     fi
 
-    if ! kubectl rollout status deployment/vizier-server -n ranker-ns --timeout=180s; then
+    if ! kubectl rollout status deployment/vizier-server -n ranker-ns --timeout=240s; then
         echo "❌ ERROR: vizier-server failed to roll out."
         read -p "Press [Enter] to allow the script to exit and clean up..."
         exit 1
@@ -207,7 +210,7 @@ fi
 
         if [ "$run_code" = "true" ]; then
 
-            envsubst '$TRIAL_IDS' < app-runner.yaml | kubectl apply -f -
+            envsubst '$TRIAL_IDS' < $PROJECT_ROOT/deploy/k8s/app-runner.yaml | kubectl apply -f -
 
             echo "Waiting for all ML workers to roll out..."
             # blocks until the statefulset meets its entire replica availability goal
@@ -229,7 +232,7 @@ fi
             ## ----------------------------
 
             echo "Chunk finished!"
-            kubectl delete -f app-runner.yaml --ignore-not-found
+            kubectl delete -f $PROJECT_ROOT/deploy/k8s/app-runner.yaml --ignore-not-found
 
         fi
     done

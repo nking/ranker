@@ -79,7 +79,7 @@ if __name__ == "__main__":
         setup_cluster(kind_path=kind_path, kubectl_path=kubectl_path, PROJECT_ROOT=PROJECT_ROOT,
             KUBEFLOW_VERSION=KUBEFLOW_VERSION, NAMESPACE=NAMESPACE)
         
-        infile = f"{PROJECT_ROOT}/k8s/kind_k8s/train_job.yaml"
+        infile = f"{PROJECT_ROOT}/deploy/k8s/train_job.yaml"
         with open(infile, "r") as f:
             manifest_str = f.read()
         manifest = yaml.safe_load(manifest_str)

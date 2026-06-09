@@ -259,7 +259,7 @@ def cleanup_cluster_resources(kind_path: str):
     delete_cluster(kind_path)
 
 def compile_pipeline_yaml(output_pipeline_yaml_uri: str = 'graphranker_pipeline.yaml',
-    train_job_yaml_uri:str = "./train_job.yaml", trial_ids_str:str=None, num_trials:int=20) -> Tuple[str, str]:
+    train_job_yaml_uri:str = None, trial_ids_str:str=None, num_trials:int=20) -> Tuple[str, str]:
     """
     compile the pipeline to yaml and return the namespace.  the train_job.yaml contains the namespace to use for the Trainer v2 job.
     the HPO trials are identified using trial_ids_str or enumerated by num_trials.
@@ -269,6 +269,9 @@ def compile_pipeline_yaml(output_pipeline_yaml_uri: str = 'graphranker_pipeline.
     :param output_pipeline_yaml_uri: name of the pipeline yaml file to write to
     :return: the namespace parsed from the train_job.yaml file train_job_yaml_uri and the content of the train job yaml file as a string
     """
+    if train_job_yaml_uri is None:
+        raise ValueError("train_job_yaml_uri cannot be None")
+    
     logging.info( f"🛠️ Ingesting train job template and compiling pipeline to {output_pipeline_yaml_uri}...")
     TRAIN_JOB_YAML_PATH = train_job_yaml_uri
     
@@ -291,7 +294,11 @@ def compile_pipeline_yaml(output_pipeline_yaml_uri: str = 'graphranker_pipeline.
     logging.info(f'wrote pipeline to uri={output_pipeline_yaml_uri}')
     return namespace, train_job_yaml_content
     
-def run_pipeline_local(train_job_yaml_uri:str = "./train_job.yaml", trial_ids_str = None, num_trials:int=20):
+def run_pipeline_local(train_job_yaml_uri:str = None, trial_ids_str = None, num_trials:int=20):
+
+    if train_job_yaml_uri is None:
+        raise ValueError("train_job_yaml_uri cannot be None")
+        
     import kfp.local
     
     # You can use DockerRunner() to run components in their containers,
@@ -447,7 +454,7 @@ if __name__ == '__main__':
         '--input_train_job_yaml_uri',
         help="uri for train_job.yaml",
         type=str,
-        default="./train_job.yaml"
+        default="../../deploy/k8s/train_job.yaml"
     )
     args = parser.parse_known_args()
     args_dict = vars(args[0])

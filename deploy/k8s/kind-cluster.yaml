@@ -1,7 +1,7 @@
 # USAGE:
 #    export PROJECT_ROOT=$(pwd)/../../; envsubst '$PROJECT_ROOT' < kind-cluster.yaml | kind create cluster --config -
 
-# definiation: https://pkg.go.dev/sigs.k8s.io/kind/pkg/apis/config/v1alpha4#Cluster
+# definition: https://pkg.go.dev/sigs.k8s.io/kind/pkg/apis/config/v1alpha4#Cluster
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: graphranker-tune-train-test-cluster
@@ -29,7 +29,13 @@ nodes:
     readOnly: true
   - hostPath: ${PROJECT_ROOT}/tmp_mounts/fake-gcs-server
     containerPath: /mnt/gcs-data
-    readOnly: false 
+    readOnly: false
+  - hostPath: ${PROJECT_ROOT}/tmp_mounts/postgres_data
+    containerPath: /mnt/postgres_data
+    readOnly: false
+  - hostPath: ${PROJECT_ROOT}/tmp_mounts/sqlite-data
+    containerPath: /mnt/sqlite-data
+    readOnly: false
 
 # 2 hosts:
 - role: worker
@@ -40,6 +46,12 @@ nodes:
   - hostPath: ${PROJECT_ROOT}/tmp_mounts/fake-gcs-server
     containerPath: /mnt/gcs-data
     readOnly: false
+  - hostPath: ${PROJECT_ROOT}/tmp_mounts/postgres_data
+    containerPath: /mnt/postgres_data
+    readOnly: false
+  - hostPath: ${PROJECT_ROOT}/tmp_mounts/sqlite-data
+    containerPath: /mnt/sqlite-data
+    readOnly: false
 - role: worker
   extraMounts:
   - hostPath: ${PROJECT_ROOT}/src
@@ -47,6 +59,12 @@ nodes:
     readOnly: true
   - hostPath: ${PROJECT_ROOT}/tmp_mounts/fake-gcs-server
     containerPath: /mnt/gcs-data
+    readOnly: false
+  - hostPath: ${PROJECT_ROOT}/tmp_mounts/postgres_data
+    containerPath: /mnt/postgres_data
+    readOnly: false
+  - hostPath: ${PROJECT_ROOT}/tmp_mounts/sqlite-data
+    containerPath: /mnt/sqlite-data
     readOnly: false
 networking:
   apiServerAddress: "127.0.0.1"

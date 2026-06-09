@@ -45,7 +45,6 @@ data:
   GOOGLE_APPLICATION_CREDENTIALS: ""
   TENSORSTORE_GCS_REQUEST_CONCURRENCY: "32"
 ---
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -180,7 +179,9 @@ spec:
           readOnly: true
       volumes:
       - name: pg-data
-        emptyDir: {}
+        hostPath:
+          path: /mnt/postgres_data
+          type: Directory
       - name: pg-init
         configMap:
           name: pg-init-script
@@ -234,8 +235,8 @@ spec:
       volumes:
       - name: vizier-data
         hostPath:
-          path: ${PROJECT_ROOT}/tmp_mounts/sqlite-data
-          type: DirectoryOrCreate
+          path: /mnt/sqlite-data
+          type: Directory
 ---
 apiVersion: v1
 kind: Service

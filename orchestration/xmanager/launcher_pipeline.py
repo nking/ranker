@@ -3,8 +3,9 @@
 #    in a terminal, cd to project base directory, 
 #    activate the xmanager venv, 
 #    bring up the db services with: docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d
-#    then invoke xmanager launch:
-#         xmanager launch xmngr_controller/launcher_pipeline.py -- --xm_db_yaml_config_path=db_config.yaml
+#    then cd to orchestration/xmanager
+#        and invoke xmanager launch:
+#         xmanager launch launcher_pipeline.py -- --xm_db_yaml_config_path=db_config.yaml
 #
 # which has the following copyright:
 #
@@ -39,8 +40,8 @@ launcher for simulating a multi-host, multi-process environment for running the
 GraphRanker pipeline tune, train, and test
 
 start db services with:
-    .docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d
-
+xmanager launch xmngr_controller/launcher_2_cores_tune.py -- \
+--xm_db_yaml_config_path=db_config.yaml
 xmanager launch xmngr_controller/launcher_pipeline.py -- --xm_db_yaml_config_path=db_config.yaml
 
 --------------------------------
@@ -168,7 +169,7 @@ def main(_):
         
         docker_bridge_gateway = "172.17.0.1"
         env_config = {
-            **dotenv_values(".env_unittests"),
+            **dotenv_values("../../.env_unittests"),
             # relative to based dir where xmanager invoked
             'PYTHONUNBUFFERED': '1',
             # 'JAX_COORDINATOR_ADDRESS': f'{docker_bridge_gateway}:8888',
@@ -212,7 +213,7 @@ def main(_):
             # docker tag ranker-app:local localhost/ranker-app:local
             xm.Packageable(
                 executable_spec=xm.Dockerfile(
-                    path=os.path.abspath('.'),
+                    path=os.path.abspath('../../'),
                     dockerfile='Dockerfile_offline',
                 ),
                 executor_spec=xm_local.Local.Spec()

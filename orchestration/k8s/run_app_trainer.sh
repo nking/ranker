@@ -4,6 +4,7 @@
 #    as a jax-distributed Trainer using kubectl
 # USAGE:
 #    use in a venv that has vizier installed
+#    cd orchestraion/k8s
 #    ./run_app_trainer.sh
 
 echo "Checking internet connection, needed to pull docker images..."
@@ -120,7 +121,7 @@ rm -f chunk_trainer_master_logs.txt chunk_trainer_worker-0_logs.txt
 if [ "$run_code" = "true" ]; then
 
     echo "creating cluster"
-    envsubst '$PROJECT_ROOT' < kind-cluster.yaml | kind create cluster --config -
+    envsubst '$PROJECT_ROOT' < $PROJECT_ROOT/deploy/k8s/kind-cluster.yaml | kind create cluster --config -
     echo "waiting for nodes"
     kubectl wait --for=condition=Ready nodes --all --timeout=120s
 
@@ -155,9 +156,12 @@ if [ "$run_code" = "true" ]; then
 
     echo "Installing Kubeflow Training Runtimes..."
     kubectl apply --server-side -k "https://github.com/kubeflow/trainer.git/manifests/overlays/runtimes?ref=${VERSION}"
+    #kubectl kustomize "https://github.com/kubeflow/trainer.git/manifests/overlays/runtimes?ref=${VERSION}" \
+    #  | yq 'select(.kind == "ClusterTrainingRuntime" and .metadata.name == "jax-distributed")' \
+    #  | kubectl apply --server-side -f -
 
     echo "Waiting for Kubeflow components to start..."
-    kubectl wait --for=condition=Available deployment/kubeflow-trainer-controller-manager -n kubeflow-system --timeout=120s
+    kubectl wait --for=condition=Available deployment/kubeflow-trainer-controller-manager -n kubeflow-system --timeout=240s
     # ====================================================================
 
     echo "Sideloading local docker image into Kind..."
@@ -167,29 +171,29 @@ if [ "$run_code" = "true" ]; then
 
     echo "deploying databases"
     kubectl create namespace ranker-ns --dry-run=client -o yaml | kubectl apply -f -
-    kubectl apply -f secrets.yaml -n ranker-ns
-    envsubst '$PROJECT_ROOT' < dbs.yaml | kubectl apply -f -
+    kubectl apply -f $PROJECT_ROOT/deploy/k8s/secrets.yaml -n ranker-ns
+    envsubst '$PROJECT_ROOT' < $PROJECT_ROOT/deploy/k8s/dbs.yaml | kubectl apply -f -
 
     #echo "waiting for readiness of databases"
     #kubectl rollout status deployment/local-db-store -n ranker-ns --timeout=60s || exit 1
     #kubectl rollout status deployment/gcs-emulator -n ranker-ns --timeout=60s || exit 1
     #kubectl rollout status deployment/vizier-server -n ranker-ns --timeout=60s || exit 1
-    echo "waiting for readiness of databases (timeout is 3m)"
+    echo "waiting for readiness of databases (timeout is 5m)"
     # If any of these fail, pause so you can debug instead of instantly exiting and deleting the cluster
-    if ! kubectl rollout status deployment/local-db-store -n ranker-ns --timeout=180s; then
+    if ! kubectl rollout status deployment/local-db-store -n ranker-ns --timeout=300s; then
         echo "❌ ERROR: local-db-store failed to roll out."
         echo "🛑 SETUP DEBUG PAUSE: Run 'kubectl get pods -n ranker-ns' in another terminal to inspect."
         read -p "Press [Enter] to allow the script to exit and clean up..."
         exit 1
     fi
 
-    if ! kubectl rollout status deployment/gcs-emulator -n ranker-ns --timeout=180s; then
+    if ! kubectl rollout status deployment/gcs-emulator -n ranker-ns --timeout=300s; then
         echo "❌ ERROR: gcs-emulator failed to roll out."
         read -p "Press [Enter] to allow the script to exit and clean up..."
         exit 1
     fi
 
-    if ! kubectl rollout status deployment/vizier-server -n ranker-ns --timeout=180s; then
+    if ! kubectl rollout status deployment/vizier-server -n ranker-ns --timeout=300s; then
         echo "❌ ERROR: vizier-server failed to roll out."
         read -p "Press [Enter] to allow the script to exit and clean up..."
         exit 1
@@ -219,7 +223,7 @@ fi
         if [ "$run_code" = "true" ]; then
 
             # Apply the Kubeflow manifest
-            envsubst '$TRIAL_IDS' < train_job.yaml | kubectl apply -f -
+            envsubst '$TRIAL_IDS' < $PROJECT_ROOT/deploy/k8s/train_job.yaml | kubectl apply -f -
 
             echo "🚀 Training Job submitted to Kubeflow! Waiting for completion..."
 
@@ -250,7 +254,7 @@ fi
             kubectl logs $WORKER_POD -n ranker-ns --tail=-1 >> chunk_trainer_worker-0_logs.txt 2>&1
 
             echo "Chunk finished!"
-            kubectl delete -f train_job.yaml --ignore-not-found
+            kubectl delete -f $PROJECT_ROOT/deploy/k8s/train_job.yaml --ignore-not-found
 
         fi
     done

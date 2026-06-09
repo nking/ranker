@@ -191,7 +191,7 @@ Running k8s/kind script:
   and that the main app image is tagged. by default ranker should be tagged latest
   ut if not:
   docker build -t ranker-app:local -f Dockerfile_cpu .
-- cd to k8s/kind_k8s
+- cd to deploy/k8s
 - ./run_app.sh
 
 -----------------------------------------------------------------------
