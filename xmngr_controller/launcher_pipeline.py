@@ -2,7 +2,7 @@
 # USAGE:
 #    in a terminal, cd to project base directory, 
 #    activate the xmanager venv, 
-#    bring up the db services with: docker compose -f docker-compose-dbs.yaml up -d
+#    bring up the db services with: docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d
 #    then invoke xmanager launch:
 #         xmanager launch xmngr_controller/launcher_pipeline.py -- --xm_db_yaml_config_path=db_config.yaml
 #
@@ -39,9 +39,7 @@ launcher for simulating a multi-host, multi-process environment for running the
 GraphRanker pipeline tune, train, and test
 
 start db services with:
-    ./run_compose_dbs.sh
-or:
-    docker compose -f docker-compose-dbs.yaml up -d
+    .docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d
 
 xmanager launch xmngr_controller/launcher_pipeline.py -- --xm_db_yaml_config_path=db_config.yaml
 

@@ -1,5 +1,6 @@
 include:
-   - path: ./docker-compose-dbs.yaml
+   - path: ./deploy/compose/docker-compose-dbs.yaml
+     project_directory: .
 services:
   app:
     build:

@@ -100,7 +100,7 @@ spec:
         - |
           echo 'Cleaning old checkpoints...';
           rm -rf /storage/fake-gcs-server/checkpoint-bucket/*;
-          # Fixed from ${PROJECT_ROOT}/fake-gcs-server to the internal container path
+          # Fixed from ${PROJECT_ROOT}/tmp_mounts/fake-gcs-server to the internal container path
           exec /bin/fake-gcs-server -scheme http -backend filesystem -data /storage -public-host gcs-service:4443 -external-url http://gcs-service:4443
         ports:
         - containerPort: 4443
@@ -234,7 +234,7 @@ spec:
       volumes:
       - name: vizier-data
         hostPath:
-          path: ${PROJECT_ROOT}/sqlite-data
+          path: ${PROJECT_ROOT}/tmp_mounts/sqlite-data
           type: DirectoryOrCreate
 ---
 apiVersion: v1

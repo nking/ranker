@@ -1,0 +1,16 @@
+the unix domain sockets are special files used by 2 processes
+to pipe data to each other, avoiding network packet wrapping.
+
+For local development:
+    in xmanager:
+        @parameter_controller.controller(
+            executor=xm_local.Local(
+                docker_options=xm_local.DockerOptions(
+                    # parameter controller can control docker through socket:
+                    volumes={'/var/run/docker.sock': '/var/run/docker.sock'}
+                ),
+            ),
+            controller_args={},
+            controller_env_vars=env_config,
+            package_path='.',
+        )

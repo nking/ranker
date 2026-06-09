@@ -64,7 +64,7 @@ Conditions:
 Volumes:
   pg-data:
     Type:          HostPath (bare host directory volume)
-    Path:          /home/nichole/projects/github/ranker/bin/postgres_data
+    Path:          /home/nichole/projects/github/ranker/tmp_mounts/postgres_data
     HostPathType:  DirectoryOrCreate
   pg-init:
     Type:          HostPath (bare host directory volume)

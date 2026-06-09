@@ -14,10 +14,7 @@ from xmanager.contrib import parameter_controller
 """
 launcher for simulating 2 jax processes running the trials.
 1) cd to raker project base directory
-2) start db services with:
-    ./run_compose_dbs.sh
-or:
-    docker compose -f docker-compose-dbs.yaml up -d
+2) docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d
 3) activate conda virtual environment having xmanager
 4) xmanager launch xmngr_controller/launcher_2_cores_tune.py -- \
 --xm_db_yaml_config_path=db_config.yaml

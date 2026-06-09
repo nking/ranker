@@ -27,7 +27,7 @@ nodes:
   - hostPath: ${PROJECT_ROOT}/src
     containerPath: /app/src
     readOnly: true
-  - hostPath: ${PROJECT_ROOT}/fake-gcs-server
+  - hostPath: ${PROJECT_ROOT}/tmp_mounts/fake-gcs-server
     containerPath: /mnt/gcs-data
     readOnly: false 
 
@@ -37,7 +37,7 @@ nodes:
   - hostPath: ${PROJECT_ROOT}/src
     containerPath: /app/src
     readOnly: true
-  - hostPath: ${PROJECT_ROOT}/fake-gcs-server
+  - hostPath: ${PROJECT_ROOT}/tmp_mounts/fake-gcs-server
     containerPath: /mnt/gcs-data
     readOnly: false
 - role: worker
@@ -45,7 +45,7 @@ nodes:
   - hostPath: ${PROJECT_ROOT}/src
     containerPath: /app/src
     readOnly: true
-  - hostPath: ${PROJECT_ROOT}/fake-gcs-server
+  - hostPath: ${PROJECT_ROOT}/tmp_mounts/fake-gcs-server
     containerPath: /mnt/gcs-data
     readOnly: false
 networking:

@@ -6,6 +6,7 @@ __pycache__/
 k8s/kind_k8s/*logs*txt
 k8s/kind_k8s/hpo_results.txt
 
+tmp_mounts/
 fake-gcs-server/
 .env
 .env_db

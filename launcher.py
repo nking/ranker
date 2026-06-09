@@ -10,9 +10,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 """
 start db services with:
-    ./run_compose_dbs.sh
-or:
-    docker compose -f docker-compose-dbs.yaml up -d
+    .docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d
 """
 
 #TODO: switch to coding for a GCS Secret Manager instead of embedding

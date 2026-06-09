@@ -114,20 +114,20 @@ For all means of running the code, these are the first steps
 (3) install docker or equivalent and start it
     see https://download.docker.com and instructions
 (4) prepare input data from step (1) for reading by local blob storage:
-    cd scripts
+    cd tmp_mounts
     sh < prep_for_tests.sh
 (5) there are a couple of ways to start the services depending on what
     the goal is:
     (a) to run test_Ranker.py test_run_train_with_optuna
         you can start the db services alone:
-           docker compose -f docker-compose-dbs.yaml up -d --build
+           docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d --build
         then run the tests
         then when done:
            docker compose down
     (b) to build the container images for the dbs and the GraphRanker app:
-            docker compose -f docker-compose.yaml build app
+            docker compose --project-directory . -f deploy/compose/docker-compose.yaml build app
         or 
-            docker compose -f docker-compose.yaml build --no-cache app
+            docker compose --project-directory . -f deploy/compose/docker-compose.yaml build --no-cache app
         then to run a trial train with a small sample over 2 epochs: 
             sh < check_can_run.sh
 
@@ -147,7 +147,7 @@ Running Unit Tests:
 - make sure the data are built and container images are built, following
   instructions above
 - run the db containers:
-     docker compose -f docker-compose-dbs.yaml up -d
+     docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d
 
 Local testing:
   pycharm:
@@ -169,7 +169,7 @@ Running xmanager launcher:
   instructions above
 - cd to project base directory (this directory)
 - bring up the db services with: 
-      docker compose -f docker-compose-dbs.yaml up -d
+      docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d
 - then invoke xmanager launch:
       xmanager launch xmngr_controller/launcher_pipeline.py -- --xm_db_yaml_config_path=db_config.yaml
 

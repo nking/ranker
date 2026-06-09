@@ -2,6 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -L https://github.com/tianon/gosu/releases/download/1.14/gosu-$(dpkg --print-architecture) > /usr/local/bin/gosu \
+    && chmod +x /usr/local/bin/gosu
+
 COPY ./requirements_vizier.txt ./
 
 RUN pip install --no-cache-dir "google-vizier[jax]==0.1.24" psycopg2-binary==2.9.12 sqlalchemy==2.0.49 -c requirements_vizier.txt
@@ -9,9 +15,15 @@ RUN pip install --no-cache-dir equinox==0.13.2
 
 #keep this below the installs so re-building starts from here if only the run script has changed
 COPY run_vizier_server.py .
-RUN mkdir -p ./data && touch ./data/vizier.db && chown -R 1000:1000 ./data
 
-#USER 1000
+RUN echo '#!/bin/bash \n\n\
+mkdir -p /app/data && touch /app/data/vizier.db \n\n\
+chown -R ${UID_DB}:${GID_DB} /app/data \n\n\
+exec gosu ${UID_DB}:${GID_DB} "$@"' > /usr/local/bin/entrypoint.sh \
+&& chmod +x /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
 EXPOSE 8080
 
 CMD ["python3", "run_vizier_server.py"]

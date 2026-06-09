@@ -1,3 +1,6 @@
+#USAGE
+#  docker compose --project-directory . -f deploy/compose/docker-compose.yaml up -d
+#     the project_directory flag ensure the file paths are all relative to that directoory
 services:
   gcs:
     image: fsouza/fake-gcs-server:1.54.0
@@ -13,7 +16,7 @@ services:
       #- "127.0.0.1:4443:4443"
       - "172.17.0.1:4443:4443"
     volumes:
-      - ./fake-gcs-server:/storage
+      - ./tmp_mounts/fake-gcs-server:/storage
     # We use -external-url to ensure TensorStore/Orbax get the right redirect address
     command: >
       -scheme http 
@@ -63,10 +66,10 @@ services:
       -c work_mem=4MB
     volumes:
       #host:container
-      - ./bin/postgres_data:/var/lib/postgresql/data
+      - ./tmp_mounts/postgres_data:/var/lib/postgresql/data
       # Mount the init script into the special entrypoint directory present in postgres:12-alpine builds
       # and severalother dbs
-      - ./init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+      - ./scripts/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d mlflow_db" ]
       interval: 5s
@@ -89,11 +92,11 @@ services:
       - .env
     environment:
       - VIZIER_DATABASE_URL=sqlite:////app/data/vizier.db
-    user: "${UID_DB}:${GID_DB}"
+    #user: "${UID_DB}:${GID_DB}"
     ports:
       #HOST:CONTAINER
       - "172.17.0.1:8000:8080"
     restart: unless-stopped
     volumes:
       #map to a volume to perist data
-      - ./sqlite-data:/app/data
+      - ./tmp_mounts/sqlite-data:/app/data

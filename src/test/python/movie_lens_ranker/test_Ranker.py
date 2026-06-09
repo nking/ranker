@@ -64,7 +64,7 @@ the postgres uris use postgresql://[user[:password]@][netloc][:port][/dbname][?p
 where netlo is 172.17.0.1
 
 to start the fake gcs server and the postgres db:
-    docker compose -f docker-compose-dbs.yaml up -d
+    docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d
 """
 
 def wait_for_postgres_vizier_mlflow_dbs(retries=5, delay=2):
@@ -225,7 +225,7 @@ class TestRanker(unittest.TestCase):
         it also uses a vizier service
         
         to start the fake gcs server and the postgres db and vizier server:
-            docker compose -f docker-compose-dbs.yaml up -d
+            docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d
         """
         
         # check that docker fake gcs server is running
