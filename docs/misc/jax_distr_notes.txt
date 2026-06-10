@@ -2,22 +2,27 @@ in jax distr:
 - a Host is a CPU (Node/Machine) that can manage
   several local devices (accelerators such as TPU or GPU chips)
 - a Process is a jax program running on a host.
-  in the SPMD grain model, each process id gets 1/(num_processes)
-  of the data.
-  jax.devices = the total of each host's jax_processes.
-- Local Devices: These are the specific accelerators (e.g., GPU 0 and GPU 1) 
+  in the SPMD grain model (using grain.sharding.ShardByJaxProcess()),
+  each process id gets 1/(num_processes) of the data
+- Local Devices: These are the specific accelerators (e.g., GPU 0 and GPU 1)
   that a single JAX process can directly control without needing 
   to communicate over the network.  
 - Global Devices: The collection of all devices available across the 
   entire distributed cluster (all processes and all hosts).  
 - backend:
   the specific hardware for which jax compiles code to run on.
-  JAX baxkends: CPU, GPU, TPU
+  JAX backends: CPU, GPU, TPU
 - physical device:
   - silicon hardware attached to the server
 - Compute Unit (CU)
-  - on a CPU these are the physical cores
+  - on a CPU these are physical cores
   - on a GPU these are streaming multiprocessors (SM)
+  - on a TPU core
+    - there is 1 or more Matrix Multiply Units (MXUs) for fast dense matrix multiplications
+    - there is 1 Vector Processing Unit (VPU) for vector ops that don't fit in MXU, like activations,
+      pooling, and normalization
+    - there is 1 Scalar Unit for the control flow, memory addressing, and basic scalar
+      arithmetic necessary to keep the MXU and VPU fed with data.
 - Logical Device
   - the software abstraction to distribute computation
   - jax.devices() lists the logical devices
@@ -32,12 +37,11 @@ in jax distr:
   - to contact the memory of another global device, jax
     coordinates it over the network, via XLA.
   - jax.devices() lists all global devices
- 
 
 for a CPU backend:
    the env flag xla_force_host_platform_device_count=someNumber is used to
-   mock that that someNumber of logical devices exist on the CPU
-   when the machine actually doens't have someNumber of accelerators.
+   mock that someNumber of logical devices exist on the CPU
+   when the machine actually doesn't have someNumber of accelerators.
    - if used, it must be present before importing jax.
 
 jax.distributed.initialize(
@@ -85,25 +89,47 @@ kaggle examples first:
          sharded_inputs = jax.device_put(batch, data_sharding)
          state, loss = train_step(state, sharded_inputs)
 
-=============================
+===================================
+Example using Google Grain SPMD w/ grain.sharding.ShardByJaxProcess():
+
+jax process count = 2
+3 local devices per process
+
+                  [ Total Global Dataset (Batch Size: 96) ]
+                                          │
+                ┌─────────────────────────┴──────────────────┐
+        Host 0 (Grain slice 1/2)                  Host 1 (Grain slice 1/2)
+         [ NumPy Array (48) ]                       [ NumPy Array (48) ]
+                 │                                          │
+         jax.device_put(..., P('data'))             jax.device_put(..., P('data'))
+         ┌───────┴───────┐───────┐                  ┌───────┴───────┐───────┐
+   Local Dev 0     Local Dev 1  Local Dev 2     Local Dev 0     Local Dev 1  Local Dev 2
+    Shard (16)      Shard (16)   Shard (16)      Shard (16)      Shard (16)   Shard(16)
 
 
-        # for example: with jax num processes = 2 
-        # and 2 local devices per process:
-        #  worker process 0: creates 2 local virtual CPU devices.
-        #  worker process 1: creates 2 local virtual CPU devices.
-        # though producetion code in cloud is usally configured to 1 GPU per container so set the xla flag above to 1.
+-------------
+in _train_fn:
+    axis_names = ('processes', 'local_devices')
+    device_grid = jax._src.mesh_utils.create_device_mesh((jax.process_count(), jax.local_device_count()))
+    mesh = jax.sharding.Mesh(device_grid, axis_names=axis_names)
+    # grain already sharded data across processes, now further shard across local devices
+    # so communication is across local interconnect and not global network
+    padded_super_graph = jax.tree_util.tree_map(
+        lambda x: multihost_utils.host_local_array_to_global_array(
+            x, mesh, P(axis_names)),
+        padded_super_graph_0
+    )
 
-                  [ Total Global Dataset (Batch Size: 64) ]
-                                   │
-                ┌──────────────────┴──────────────────┐
-        Host 0 (Grain slice 1/2)              Host 1 (Grain slice 1/2)
-         [ NumPy Array (32) ]                  [ NumPy Array (32) ]
-                 │                                     │
-         jax.device_put(..., P('data'))        jax.device_put(..., P('data'))
-         ┌───────┴───────┐                     ┌───────┴───────┐
-   Local Dev 0     Local Dev 1           Local Dev 0     Local Dev 1
-    Shard (16)      Shard (16)            Shard (16)      Shard (16)
+    #the code can be improved to a 1D mapping instead of 2D.
+    # and internally, though jax has global mapping information,
+    # it will only shard the data to local devices.
+    padded_super_graph = jax.tree_util.tree_map(
+        lambda x: multihost_utils.host_local_array_to_global_array(
+            x, Mesh(jax.devices(), axis_names=('data',)), P('data')), 
+        padded_super_graph_0
+    )
+
+    ------
 
         `
 ==========
