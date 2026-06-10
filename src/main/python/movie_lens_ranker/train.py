@@ -452,7 +452,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         
         #grain SPMD has already partitioned the data across jax process ids, but if there is more than
         # 1 host, we further partition the data across the hosts so that the hosts aren't doing identical work.
-        # Map the function over the entire GraphsTuple PyTree
+        # Map the function over the entire GraphsTuple PyTree.
+        # Note that this is a shard across local interconnect, not a shard over global network.
         padded_super_graph = jax.tree_util.tree_map(
             lambda x: multihost_utils.host_local_array_to_global_array(
                 x, model_mesh, global_data_pspec),

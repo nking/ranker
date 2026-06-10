@@ -13,6 +13,18 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 import subprocess
 import logging
 
+def get_project_dir() -> str:
+    cwd = os.getcwd()
+    head = cwd
+    proj_dir = ""
+    while head and head != os.sep:
+        head, tail = os.path.split(head)
+        if tail:  # Add only if not an empty string (e.g., from root or multiple separators)
+            if tail == "ranker":
+                proj_dir = os.path.join(head, tail)
+                break
+    return proj_dir
+
 def image_exists(docker_path:str, image_name: str) -> bool:
     """Checks if a docker image exists locally without parsing output.
     :param docker_path: path to docker binary

@@ -10,27 +10,14 @@ import fsspec
 
 from util_kfpv2 import setup_kfpv2_backend
 from util_kind import setup_cluster, delete_cluster, find_executable_path, \
-    prepare_container_image
+    prepare_container_image, get_project_dir
 #pip install kfp==2.16.1
 from kfp import dsl, compiler, client as kfp_client
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-def get_project_dir() -> str:
-    cwd = os.getcwd()
-    head = cwd
-    proj_dir = ""
-    while head and head != os.sep:
-        head, tail = os.path.split(head)
-        if tail:  # Add only if not an empty string (e.g., from root or multiple separators)
-            if tail == "ranker":
-                proj_dir = os.path.join(head, tail)
-                break
-    return proj_dir
-
 KUBEFLOW_VERSION = "v2.2.0"
 NAMESPACE = "ranker-ns"
-PROJECT_ROOT = get_project_dir()
 
 def setup_rbac(namespace: str = "ranker-ns"):
     """Grants KFP permissions to manage TrainJob custom resources."""
@@ -331,7 +318,7 @@ def wait_for_port(port:int, host:str='127.0.0.1', timeout=10):
         time.sleep(0.5)
     return False
 
-def run_pipeline_on_kfpv2(output_pipeline_yaml_uri: str = 'graphranker_pipeline.yaml',
+def run_pipeline_on_kfpv2(PROJECT_ROOT:str, output_pipeline_yaml_uri: str = 'graphranker_pipeline.yaml',
     train_job_yaml_uri:str = "./train_job.yaml", trial_ids_str = None, num_trials:int=20):
     """
     run the pipeline defined by tasks that are using the train_job yaml.
@@ -354,23 +341,22 @@ def run_pipeline_on_kfpv2(output_pipeline_yaml_uri: str = 'graphranker_pipeline.
         kubectl_path = find_executable_path("kubectl")
         docker_path = find_executable_path("docker")
         
-        # DEBUG: uncomment when done debugging
+        #could parse this out of kind-cluster.yaml or pass in as argument
+        CLUSTER_NAME = "graphranker-tune-train-test-cluster"
+        
+        #DEBUG: uncomment when down
         '''
         setup_cluster(kind_path=kind_path, kubectl_path=kubectl_path,
             PROJECT_ROOT=PROJECT_ROOT,
             KUBEFLOW_VERSION=KUBEFLOW_VERSION, NAMESPACE=NAMESPACE)
         '''
-        
         prepare_container_image(kind_path=kind_path, docker_path=docker_path,
-            docker_file_path="./Dockerfile_kfp", image_name= "run_phase:local",
-            cluster_name = "graphranker-tune-train-test-cluster")
+            docker_file_path=f"{PROJECT_ROOT}/orchestration/k8s/Dockerfile_kfp", image_name= "run_phase:local",
+            cluster_name = CLUSTER_NAME)
+    
+        setup_rbac_yaml(rbac_yaml_uri=f"{PROJECT_ROOT}/deploy/k8s/rbac.yaml", namespace=namespace)
         
-        setup_rbac_yaml(rbac_yaml_uri="./rbac.yaml", namespace=namespace)
-        
-        # DEBUG: uncomment when done debugging
-        '''
-        setup_kfpv2_backend(kubectl_path)
-        '''
+        setup_kfpv2_backend(kubectl_path, kind_path=kind_path, docker_path=docker_path, PROJECT_ROOT=PROJECT_ROOT, CLUSTER_NAME=CLUSTER_NAME)
         
         logging.info("create port-forward tunnel")
         tunnel = subprocess.Popen(
@@ -420,15 +406,16 @@ def run_pipeline_on_kfpv2(output_pipeline_yaml_uri: str = 'graphranker_pipeline.
     finally:
         if tunnel:
             tunnel.terminate()
-            
-        logging.info(f'deleting cluster')
-        #DEBUG: uncomment when done debugging
+        #DEBUG uncomment when done
+        #logging.info(f'deleting cluster')
         #cleanup_cluster_resources(kind_path)
         
 # ====================================================================
 # EXECUTION ENTRY POINT
 # ====================================================================
 if __name__ == '__main__':
+    PROJECT_ROOT = get_project_dir()
+    logging.info(f"PROJECT_ROOT={PROJECT_ROOT}")
     
     parser = argparse.ArgumentParser(description="GraphRanker Pipeline Runner")
     parser.add_argument(
@@ -454,13 +441,16 @@ if __name__ == '__main__':
         '--input_train_job_yaml_uri',
         help="uri for train_job.yaml",
         type=str,
-        default="../../deploy/k8s/train_job.yaml"
+        default=f"{PROJECT_ROOT}/deploy/k8s/train_job.yaml"
     )
     args = parser.parse_known_args()
     args_dict = vars(args[0])
     
-    run_pipeline_on_kfpv2(output_pipeline_yaml_uri=args_dict['output_pipeline_yaml_uri'],
+    run_pipeline_on_kfpv2(
+        PROJECT_ROOT=PROJECT_ROOT,
+        output_pipeline_yaml_uri=args_dict['output_pipeline_yaml_uri'],
         train_job_yaml_uri=args_dict['input_train_job_yaml_uri'],
         trial_ids_str=args_dict['trial_ids_str'],
-        num_trials=args_dict['num_trials'])
+        num_trials=args_dict['num_trials'],
+    )
     

@@ -2,7 +2,7 @@ import os
 from json import dumps
 import yaml
 from util_k8s_train import run_train_job_phase
-from util_kind import setup_cluster, delete_cluster, find_executable_path
+from util_kind import setup_cluster, delete_cluster, find_executable_path, get_project_dir
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -24,17 +24,6 @@ TRAINJOB_VERSION = "v1alpha1"           # Verify this matches your CRD
 TRAINJOB_PLURAL = "trainjobs"
 NAMESPACE = "ranker-ns"
 
-def get_project_dir() -> str:
-    cwd = os.getcwd()
-    head = cwd
-    proj_dir = ""
-    while head and head != os.sep:
-        head, tail = os.path.split(head)
-        if tail:  # Add only if not an empty string (e.g., from root or multiple separators)
-            if tail == "ranker":
-                proj_dir = os.path.join(head, tail)
-                break
-    return proj_dir
 # ===================
 # =================================================
 # MAIN LIFECYCLE

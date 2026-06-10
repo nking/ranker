@@ -9,6 +9,9 @@ tmp_mounts/
 .env
 .env_db
 
+orchestration/k8s/vendor/
+orchestration/k8s/kustomize
+
 # C extensions
 *.so
 

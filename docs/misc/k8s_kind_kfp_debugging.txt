@@ -1,5 +1,8 @@
 see notes in indiv scripts too
 =============================================
+for kfp2 loading timeouts, see comments at top
+of orchestration/k8s/util_kfpv2.py
+=============================================
 pod deployment timed out before finishing:
 
 list pods to get names:
