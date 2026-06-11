@@ -75,7 +75,7 @@ class TestDataLoading(unittest.TestCase):
         self.assertEqual(3883, len(emb))
         self.assertTrue(isinstance(emb, jnp.ndarray))
         
-        embeddings = read_embeddings(
+        embeddings, num_users = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)
@@ -232,7 +232,7 @@ class TestDataLoading(unittest.TestCase):
     
     def test_build_history_lookup(self):
         
-        embeddings = read_embeddings(
+        embeddings, num_users = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri, batch_size=1024)
         
@@ -255,7 +255,7 @@ class TestDataLoading(unittest.TestCase):
     def test_read_array_records2(self):
         batch_size = 1024
         
-        embeddings = read_embeddings(
+        embeddings, num_users = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)

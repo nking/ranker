@@ -344,12 +344,10 @@ def run_pipeline_on_kfpv2(PROJECT_ROOT:str, output_pipeline_yaml_uri: str = 'gra
         #could parse this out of kind-cluster.yaml or pass in as argument
         CLUSTER_NAME = "graphranker-tune-train-test-cluster"
         
-        #DEBUG: uncomment when down
-        '''
         setup_cluster(kind_path=kind_path, kubectl_path=kubectl_path,
             PROJECT_ROOT=PROJECT_ROOT,
             KUBEFLOW_VERSION=KUBEFLOW_VERSION, NAMESPACE=NAMESPACE)
-        '''
+        
         prepare_container_image(kind_path=kind_path, docker_path=docker_path,
             docker_file_path=f"{PROJECT_ROOT}/orchestration/k8s/Dockerfile_kfp", image_name= "run_phase:local",
             cluster_name = CLUSTER_NAME)
@@ -406,9 +404,8 @@ def run_pipeline_on_kfpv2(PROJECT_ROOT:str, output_pipeline_yaml_uri: str = 'gra
     finally:
         if tunnel:
             tunnel.terminate()
-        #DEBUG uncomment when done
-        #logging.info(f'deleting cluster')
-        #cleanup_cluster_resources(kind_path)
+        logging.info(f'deleting cluster')
+        cleanup_cluster_resources(kind_path)
         
 # ====================================================================
 # EXECUTION ENTRY POINT

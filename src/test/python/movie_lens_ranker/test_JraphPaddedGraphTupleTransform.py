@@ -48,7 +48,7 @@ class TestJraphPaddedGraphTupleTransform(unittest.TestCase):
             os.path.join(test_res_dir,
                 "recommended_movies_timestamps.array_record"))
         
-        self.embeddings = read_embeddings(
+        self.embeddings, num_users = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)

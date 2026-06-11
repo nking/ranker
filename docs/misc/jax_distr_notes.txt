@@ -108,15 +108,38 @@ jax process count = 2
 
 
 -------------
-in _train_fn:
-    axis_names = ('processes', 'local_devices')
-    device_grid = jax._src.mesh_utils.create_device_mesh((jax.process_count(), jax.local_device_count()))
-    mesh = jax.sharding.Mesh(device_grid, axis_names=axis_names)
-    # grain already sharded data across processes, now further shard across local devices
-    # so communication is across local interconnect and not global network
+
+example from flax documentation:
+
+if not jax._src.xla_bridge.backends_are_initialized():
+  jax.config.update('jax_num_cpu_devices', 8);  
+print(f'You have 8 “fake” JAX devices now: {jax.devices()}')
+
+auto_mesh = jax.make_mesh((2, 4), ('data', 'model'));
+nnx.Param(jnp.ones((4,4)), out_sharding=(None, 'model'), eager_sharding=True, mesh=auto_mesh).   
+
+replicates across 'data' axis and paritions into 4 pieces alony
+'model' axis such that each of the 8 devices sees a 4X1 column of 1's
+
+
+
+-------------
+flax multi-process checkpointing:
+   see links in https://flax.readthedocs.io/en/stable/guides/checkpointing.html
+-------------------------------
+
+a summary of some of the train.py code details:
+
+axis_names = ('processes', 'local_devices')
+device_grid = jax.experimental.mesh_utils.create_device_mesh((jax.process_count(), jax.local_device_count()))
+model_mesh = jax.sharding.Mesh(device_grid, axis_names=axis_names)
+
+in _train_fn loop over grain dataloader:
+    # grain already sharded data across processes, now further shard across local devices is needed.
+    # communication is across local interconnect and not global network
     padded_super_graph = jax.tree_util.tree_map(
         lambda x: multihost_utils.host_local_array_to_global_array(
-            x, mesh, P(axis_names)),
+            x, model_mesh, P(axis_names)),
         padded_super_graph_0
     )
 
@@ -125,12 +148,56 @@ in _train_fn:
     # it will only shard the data to local devices.
     padded_super_graph = jax.tree_util.tree_map(
         lambda x: multihost_utils.host_local_array_to_global_array(
-            x, Mesh(jax.devices(), axis_names=('data',)), P('data')), 
+            x, jax.sharding.Mesh(jax.devices(), axis_names=('data',)), P('data')),
         padded_super_graph_0
     )
 
     ------
+    the model and optimizer are constructed with a mesh:
 
+    nnx.use_eager_sharding(True)
+    with jax.set_mesh(model_mesh):
+
+        #same model is constructed deterministically because of use of rngs.
+        model = GraphRanker(...rngs=rngs)
+
+        #run the same dummy data through the model to get all models initialized similarly
+        model(get_dummy_super_graph())
+
+        optimizer = nnx.Optimizer(model, optax.adamw(...))
+
+        def to_named_sharding(spec):
+            # If the layer had no sharding annotation, spec will be None.
+            # We replace it with P() to ensure it is fully replicated across the mesh.
+            if spec is None:
+                spec = P()
+            return jax.sharding.NamedSharding(model_mesh, spec)
+
+        model_state = nnx.state(model)  # The model's state, a pure pytree.
+        pspecs = nnx.get_partition_spec(model_state)  # Strip out the annotations from state.
+
+        sharding_tree = jax.tree.map(to_named_sharding, pspecs)
+        sharded_model_state = jax.device_put(model_state, sharding_tree)
+        nnx.update(model, sharded_model_state)  # The model is sharded now!
+
+        opt_state = nnx.state(optimizer)
+        pspecs = nnx.get_partition_spec(opt_state)
+        sharding_tree = jax.tree.map(to_named_sharding, pspecs)
+        sharded_opt_state = jax.device_put(opt_state, sharding_tree)
+        nnx.update(optimizer, sharded_opt_state)
+
+    ------
+
+in def _train_step, the sharded padded_super_graph is received
+    along with model and optimizer, and is an @nnx.jit method.
+
+    loss, grads = nnx.value_and_grad(loss_fn)(model, padded_graph)
+    optimizer.update(model, grads)
+
+    does this update occur for the model across all devices, such that
+    all models are in sync?
+
+note that the model and optimizaer
         `
 ==========
 why multi-host sharding synchronization is needed:

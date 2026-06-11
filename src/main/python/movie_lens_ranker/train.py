@@ -323,6 +323,8 @@ def pad_graph_tuple_batch(graph_tuple_batch: jraph.GraphsTuple, jax_graph_comp_d
         
     n_samples = len(batch)
     
+    logging.info(f"pad_graph_tuple_batch: n_samples={n_samples}")
+    
     batch = jraph.batch(batch)
     
     padded_super_graph_0 = jraph.pad_with_graphs(
@@ -439,6 +441,9 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     
     n_local_devices = jax.local_device_count()
     
+    data_mesh = jax.sharding.Mesh(jax.devices(), axis_names=('data',))
+    data_partition = jax.sharding.PartitionSpec(('data'))
+    
     sharded_batch_size = config_dict['batch_size'] // n_local_devices
     jax_graph_comp_dict = calc_number_jax_graph_components(config_dict['batch_size'],
         config_dict['max_history'], config_dict['num_candidates'])
@@ -453,7 +458,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         #grain SPMD has already partitioned the data across jax process ids, but if there is more than
         # 1 host, we further partition the data across the hosts so that the hosts aren't doing identical work.
         # Map the function over the entire GraphsTuple PyTree.
-        # Note that this is a shard across local interconnect, not a shard over global network.
+        # Note that this is a shard across local interconnect, not a shard over global network even
+        # though the mesh includes "global info"
         padded_super_graph = jax.tree_util.tree_map(
             lambda x: multihost_utils.host_local_array_to_global_array(
                 x, model_mesh, global_data_pspec),
@@ -603,15 +609,17 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         seed=config.get('seed', 0),)
     
     # NOTE: these are prepended with a row of zeros so that user_ids and movie_ids are direct indexes to the embeddings
-    embeddings = read_embeddings(
+    embeddings, num_users = read_embeddings(
         user_embeddings_uri=config['user_embeddings_uri'],
         movie_embeddings_uri=config['movie_embeddings_uri'],
         batch_size=1024)
+    num_movies = len(embeddings) - 1 - num_users
     
-    nnx.use_eager_sharding(True)
+    nnx.use_eager_sharding(False)
     model_mesh = get_model_mesh()
     with jax.set_mesh(model_mesh):
         
+        #each model gets the same rngs so will have the same initialization even though in a different process
         model = GraphRanker(user_movie_embeds=embeddings,
             num_candidates=config['num_candidates'],
             hidden_features=config['hidden_dim'],
@@ -620,7 +628,19 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
             heads=config['num_heads'],
             edge_embed_dim=config['edge_embed_dim'],
             dropout_rate=config['dropout_rate'], rngs=rngs)
-            
+        
+        #initialize the layers with same fake data
+        user_id_range = (1, num_users)
+        movie_id_range = (num_users + 1, num_users + num_movies)
+        fake_data = create_dummy_super_padded_graph(batch_size=config['batch_size'],
+            max_history=config['max_history'],
+            num_candidates=config['num_candidates'],
+            user_id_range=user_id_range,
+            movie_id_range=movie_id_range)
+        model.eval()
+        model(fake_data)
+        model.train()
+        
         optimizer = nnx.Optimizer(model,
             optax.adamw(config['learning_rate'],
                 weight_decay=config['weight_decay']), wrt=nnx.Param)
@@ -636,14 +656,12 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         pspecs = nnx.get_partition_spec(model_state)  # Strip out the annotations from state.
         sharding_tree = jax.tree.map(to_named_sharding, pspecs)
         sharded_model_state = jax.device_put(model_state, sharding_tree)
-        #sharded_model_state = jax.lax.with_sharding_constraint(model_state, pspecs)
         nnx.update(model, sharded_model_state)  # The model is sharded now!
         
         opt_state = nnx.state(optimizer)
         pspecs = nnx.get_partition_spec(opt_state)
         sharding_tree = jax.tree.map(to_named_sharding, pspecs)
         sharded_opt_state = jax.device_put(opt_state, sharding_tree)
-        #sharded_opt_state = jax.lax.with_sharding_constraint(opt_state, pspecs)
         nnx.update(optimizer, sharded_opt_state)
         
     return {"rngs": rngs, "model": model, "optimizer": optimizer,
@@ -1325,3 +1343,66 @@ def check_model_state_equality(model_a, model_b, rtol=1e-5, atol=1e-8) -> bool:
     
     logging.info("worker_rank={jax.process_index()}: ✅ Success! Both model states are mathematically identical.")
     return True
+
+def create_dummy_super_padded_graph(batch_size: int,
+    max_history: int, num_candidates: int, user_id_range:Tuple[int, int], movie_id_range:Tuple[int, int]):
+    
+    fake_graph_list = []
+    for i in range(batch_size):
+        
+        n_real_history = 4 + i
+        
+        node_ids = np.concatenate([
+            np.array([user_id_range[0] + i], dtype=int),
+            np.array(np.arange(movie_id_range[0] + i, movie_id_range[0] + i + n_real_history + num_candidates), dtype=int),
+        ], dtype=int)
+        
+        labels = np.zeros((num_candidates), dtype=np.float32)
+        labels[0] = 1.0  # Positive is at index 0
+        node_labels = np.concatenate([
+            np.array([0.0]),  # User (Type 0)
+            np.zeros(n_real_history),  # History (Type 1)
+            labels,  # numpy array
+            # Candidates (Type 2) - should be size n_candidates
+        ], dtype=float)
+        
+        node_types = np.array([0] + [1] * n_real_history + [2] * num_candidates)
+        node_is_candidate = np.array([False] + [False] * n_real_history + [True] * num_candidates)
+        
+        edge_shape = (n_real_history + num_candidates,)
+        senders = np.full(shape=edge_shape, fill_value=-1)
+        receivers = np.full(shape=edge_shape, fill_value=-1)
+        edge_features = np.full(shape=edge_shape, fill_value=-1)
+        
+        # History -> User (Inward)
+        # Senders: [1, 2, ... H], Receiver: [0, 0, ... 0]
+        senders[:n_real_history] = np.arange(1, n_real_history + 1)
+        receivers[:n_real_history] = np.zeros((n_real_history,))
+        edge_features[:n_real_history] = [4]*(n_real_history//2) + [5]*(n_real_history//2) + [4]*(n_real_history%2)
+        
+        fake_graph_list.append(jraph.GraphsTuple(
+            # nodes arrays are length 1 + num_candidates
+            nodes={
+                "ids": node_ids,
+                "label": node_labels,
+                "type": node_types,
+                "candidate_mask": node_is_candidate
+            },
+            # edges, senders, receivers are length  n_real_history + self.num_candidates
+            edges={"rating": edge_features},
+            senders=senders,
+            receivers=receivers,
+            n_node=np.array([1 + n_real_history + num_candidates]),
+            n_edge=np.array([len(senders)]),
+            globals=None)
+        )
+    
+    jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
+        max_history, num_candidates)
+    
+    padded_super_graph, n_samples = pad_graph_tuple_batch(fake_graph_list,
+        jax_graph_comp_dict)
+    
+    return padded_super_graph
+    
+    

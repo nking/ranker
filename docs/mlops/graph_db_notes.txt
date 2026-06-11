@@ -9,7 +9,7 @@ format the input needed for the tf SavedModel
 model.
 
 considering using DGraph graph database for local
-evelopement and a C++ RPC client.
+development and a C++ RPC client.
 
 eliminate standard database joins and complex run-time lookups.
 

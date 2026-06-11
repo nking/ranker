@@ -9,6 +9,7 @@ import numpy as np
 from absl import flags
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+from jax.experimental import mesh_utils
 
 # In JAX 0.8+, shard_map is typically in the main namespace
 
@@ -84,7 +85,7 @@ def get_canonical_mlflow_run_name(config: Dict[str, Any]) -> str:
     return run_name
     
 def get_model_mesh():
-    device_grid = jax._src.mesh_utils.create_device_mesh((jax.process_count(), jax.local_device_count()))
+    device_grid = mesh_utils.create_device_mesh((jax.process_count(), jax.local_device_count()))
     model_mesh = jax.sharding.Mesh(device_grid, axis_names=('processes', 'local_devices'))
     #data_sharding = jax.sharding.NamedSharding(model_mesh, P('local_data'))
     return model_mesh
@@ -319,14 +320,15 @@ def read_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_siz
     :param user_embeddings_uri:
     :param movie_embeddings_uri:
     :param batch_size:
-    :return: a tuple of dictionary of original user_id to new user_id, a dictionary of original movie id to new movie id, and the
-    concatenated embeddings.
+    :return: a tuple of:
+        concatenated row of zeros, user embeddings, movie embeddings,
+        num_users
     """
     user_emb = _read_embeddings(user_embeddings_uri, batch_size=batch_size)
     movie_emb = _read_embeddings(movie_embeddings_uri, batch_size=batch_size)
     zero_row = jnp.zeros((1, user_emb.shape[1]))
     emb = jnp.concatenate([zero_row, user_emb, movie_emb])
-    return emb
+    return emb, len(user_emb)
 
     
 def _read_embeddings(embeddings_uri:str, batch_size:int=1024) ->  jnp.ndarray:

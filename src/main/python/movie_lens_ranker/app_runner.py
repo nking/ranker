@@ -70,6 +70,7 @@ import mlflow
 from absl import flags
 from vizier.service import pyvizier as vz
 from vizier.service import clients as vz_clients
+from jax.experimental import mesh_utils
 
 from movie_lens_ranker.train import train_fn, test_fn
 from movie_lens_ranker.util import define_flags, get_recognized_keys, \
@@ -92,14 +93,14 @@ fsspec.config.conf['gcs'] = {
     'endpoint_url': os.getenv('STORAGE_EMULATOR_HOST')
 }
 
-#devices = jax._src.mesh_utils.create_device_mesh((jax.device_count(),))
+#devices = mesh_utils.create_device_mesh((jax.device_count(),))
 ##devices = np.array(jax.devices())
 #mesh2 = jax.sharding.Mesh(devices, axis_names=('processes',))
 
 # Create a 2D grid of devices: (num_processes, devices_per_process)
 # If you have 4 workers with 1 GPU each, this is (4, 1)
 # If you have 2 workers with 8 GPUs each, this is (2, 8)
-device_grid = jax._src.mesh_utils.create_device_mesh((jax.process_count(), jax.local_device_count()))
+device_grid = mesh_utils.create_device_mesh((jax.process_count(), jax.local_device_count()))
 mesh2 = jax.sharding.Mesh(device_grid, axis_names=('processes', 'local_devices'))
 
 def wait_for_gcs(fake_gcs_uri, timeout=30):

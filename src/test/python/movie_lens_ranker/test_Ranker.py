@@ -19,7 +19,7 @@ safe_jax_init()
 
 import fsspec
 import gcsfs
-from mlflow import MlflowClient
+from mlflow import MlflowClient, config
 from vizier.service import clients as vz_clients
 import numpy as np
 from dotenv import dotenv_values
@@ -606,6 +606,88 @@ class TestRanker(unittest.TestCase):
         
         #results are asserted in _assert_export_methods
     
-
+    def test_feed_fake_data(self):
+        
+        STUDY_NAME = "GraphRanker_tuning_unittest3"
+        
+        num_epochs = 4 #keep this to > 2 and < 10 for the restore tests at end of this method
+        batch_size = 16
+        seed = 234
+        
+        # tensorstore keeps trying to authenticate with google so for tests we'll use the abs path to checkpoint dir
+        checkpoint_dir = 'gs://checkpoint-bucket'
+        latest_checkpoint_uri = f'{checkpoint_dir}/latest'
+        best_checkpoint_uri = f'{checkpoint_dir}/best'
+        
+        #mflow_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}_mlflow.db")
+        #mflow_uri = f"sqlite:///{mflow_db_path}?mode=memory&cache=shared"
+        ##    postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]
+        vizier_endpoint = f'{base_url}:8000'
+        mlflow_uri = f"postgresql://{os.environ['POSTGRES_USER']}:{os.environ['POSTGRES_PASSWORD']}@{base_url}:5432/mlflow_db"
+        
+        config = {
+            'movies_uri': self.transform_to_gs_uri(self.movies_uri),
+            'recommendations_uri': self.transform_to_gs_uri(self.recommendations_uri),
+            'recommendations_ts_uri' : self.transform_to_gs_uri(self.recommendations_ts_uri),
+            'ratings_train_uri' : self.transform_to_gs_uri(self.ratings_train_uri),
+            'ratings_val_uri' :self.transform_to_gs_uri(self.ratings_val_uri),
+            'train_negatives_uri': self.transform_to_gs_uri(self.train_negatives_uri),
+            'val_negatives_uri': self.transform_to_gs_uri(self.val_negatives_uri),
+            'latest_checkpoint_uri':latest_checkpoint_uri,
+            'best_checkpoint_uri': best_checkpoint_uri,
+            'movie_embeddings_uri' : self.transform_to_gs_uri(self.movie_embeddings_uri),
+            'user_embeddings_uri': self.transform_to_gs_uri(self.user_embeddings_uri),
+            'num_epochs' : num_epochs,
+            'batch_size':batch_size, 'seed':seed,
+            'study_name' : STUDY_NAME,
+            'project_id' : 'tune-unittest-02',
+            "trial_ids" : json.dumps([0, 1]),
+            'phase' : 'tune',
+            'top_k' : 20,
+            'vizier_endpoint': vizier_endpoint,
+            'mlflow_tracking_uri': mlflow_uri,
+            'mlflow_experiment_name': STUDY_NAME,
+        }
+        
+        embeddings, num_users = read_embeddings(
+            user_embeddings_uri=config['user_embeddings_uri'],
+            movie_embeddings_uri=config['movie_embeddings_uri'],
+            batch_size=1024)
+        
+        num_movies = len(embeddings) - 1 - num_users
+        
+        max_history = 10
+        num_candidates = 20
+        user_id_range = (1, num_users)
+        movie_id_range = (num_users + 1, num_users + num_movies)
+        
+        fake_data = create_dummy_super_padded_graph(batch_size = batch_size, max_history = max_history,
+            num_candidates = num_candidates, user_id_range = user_id_range, movie_id_range = movie_id_range)
+        
+        rngs = nnx.Rngs(config.get('seed', 0))
+        
+        #these are assigned by HPO
+        config['num_candidates'] = 2*config["top_k"]
+        config['hidden_dim'] = 64
+        config['num_layers'] = 2
+        config['out_dim'] = 32
+        config['num_heads'] = 4
+        config['edge_embed_dim'] = 8
+        config['dropout_rate'] = 0.05
+        
+        model = GraphRanker(user_movie_embeds=embeddings,
+            num_candidates=config['num_candidates'],
+            hidden_features=config['hidden_dim'],
+            num_layers=config['num_layers'],
+            out_features=config['out_dim'],
+            heads=config['num_heads'],
+            edge_embed_dim=config['edge_embed_dim'],
+            dropout_rate=config['dropout_rate'], rngs=rngs)
+        
+        model.eval()
+        all_scores = model(fake_data)
+        
+        self.assertIsNotNone(all_scores)
+        
 if __name__ == '__main__':
     unittest.main()

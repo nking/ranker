@@ -72,7 +72,7 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
             
             #NOTE: if have pre-processed ratings to be scaled to 0 to 1,
             # then here in the n_candidates loop, edge_features.append(-1) instead of 1 to 5
-            # currently, the datasets are ratings from 1
+            # currently, the datasets are ratings from 1 to 5
             
             node_ids = np.concatenate([
                 np.array([batch["user_id"][i]], dtype=int),

@@ -31,7 +31,7 @@ class TestRanker(unittest.TestCase):
         self.movie_ids_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")
         
-        self.embeddings = read_embeddings(
+        self.embeddings, num_users = read_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)
