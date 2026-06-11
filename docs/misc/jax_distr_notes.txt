@@ -116,11 +116,13 @@ if not jax._src.xla_bridge.backends_are_initialized():
 print(f'You have 8 “fake” JAX devices now: {jax.devices()}')
 
 auto_mesh = jax.make_mesh((2, 4), ('data', 'model'));
-nnx.Param(jnp.ones((4,4)), out_sharding=(None, 'model'), eager_sharding=True, mesh=auto_mesh).   
+param = nnx.Param(jnp.ones((4, 4)), out_sharding=(None, 'model'), eager_sharding=True, mesh=auto_mesh).   
 
-replicates across 'data' axis and paritions into 4 pieces alony
-'model' axis such that each of the 8 devices sees a 4X1 column of 1's
+replicates across 'data' axis and partitions into 4 pieces along
+'model' axis (which is columns) such that each of the 8 devices sees a 4X1 column of 1's
 
+see:
+param.get_value().addressable_shards
 
 
 -------------
@@ -131,7 +133,8 @@ flax multi-process checkpointing:
 a summary of some of the train.py code details:
 
 axis_names = ('processes', 'local_devices')
-device_grid = jax.experimental.mesh_utils.create_device_mesh((jax.process_count(), jax.local_device_count()))
+device_grid = jax.experimental.mesh_utils.create_device_mesh(
+    (jax.process_count(), jax.local_device_count()))
 model_mesh = jax.sharding.Mesh(device_grid, axis_names=axis_names)
 
 in _train_fn loop over grain dataloader:
@@ -155,7 +158,7 @@ in _train_fn loop over grain dataloader:
     ------
     the model and optimizer are constructed with a mesh:
 
-    nnx.use_eager_sharding(True)
+    nnx.use_eager_sharding(False)
     with jax.set_mesh(model_mesh):
 
         #same model is constructed deterministically because of use of rngs.
@@ -186,21 +189,56 @@ in _train_fn loop over grain dataloader:
         sharded_opt_state = jax.device_put(opt_state, sharding_tree)
         nnx.update(optimizer, sharded_opt_state)
 
+    then the gradients and losses are
+       loss, grads = nnx.value_and_grad(loss_fn)(model, padded_graph)
+       optimizer.update(model, grads)
+
+    The nnx.value_and_grad method is executed inside a @nnx.jit which is a 
+    jax.jit context.  JAX analyzes the model's mesh layout:
+       - in the forward pass 
+         input data (padded_graph) is sharded across the data dimension. 
+         Each process calculates the loss for its local shard of data.
+       - in the backward pass:
+         each device calculates a local gradient based on its partition of data that it sees.
+       - All Reduce:
+         The devices use the physical network interconnects to communicate, 
+         sum up all individual gradients, and divide by the total number of devices.
+     At the end the loss and gradients are the same across all devices,
+     hence the each process's model is updated by same values and the
+     models remain snchronized.
+         
     ------
 
-in def _train_step, the sharded padded_super_graph is received
-    along with model and optimizer, and is an @nnx.jit method.
+ at the end of each epoch within the training loop:
+     each process partitions its data across devices with same padded_super_graph
+     pattern as above.
 
-    loss, grads = nnx.value_and_grad(loss_fn)(model, padded_graph)
-    optimizer.update(model, grads)
+     then each device calculates its own average metrics.
+     and the global metrics are calculated using:
 
-    does this update occur for the model across all devices, such that
-    all models are in sync?
+     # val_metrics['ndcg'] is now an array of shape (Num_Batches,)
+     local_avg_val_metrics = jax.tree.map(jnp.mean, val_metrics)
+     #average over all devices. the jax.lax internal to aggregate_metric acts as a barrier
+     global_avg_metrics = jax.tree.map(aggregate_metric, local_avg_val_metrics)
+     for key in global_avg_metrics:
+         global_avg_metrics_batches[key].append(global_avg_metrics[key].item())
 
-note that the model and optimizaer
+     where aggregate_metric is:
+     # in_specs=P() tells JAX the input is a scalar
+     # out_specs=P() (empty) implies the output is a single global (replicated) value
+     #  and is sharded across the 'data' axis
+     @jax.jit
+     @partial(shard_map, mesh=mesh, in_specs=P(), out_specs=P())
+     def aggregate_metric(scalar_metric):
+         return jax.lax.pmean(scalar_metric, axis_name='data')
+
+     where mesh is a 1D mesh in this case:
+     devices = np.array(jax.devices())
+     mesh = jax.sharding.Mesh(devices, axis_names=('data',))
+
         `
 ==========
-why multi-host sharding synchronization is needed:
+Use Cases for multi-host sharding synchronization:
 - a TPU Pod or a distributed GKE setup need multi-host sharding synchronization
 before oprations such as checkpoint saves or restores because each worker
 may have made different progress through their respective lazily instantiated
