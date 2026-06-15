@@ -10,15 +10,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 class UserHistory (object):
     def __init__(self, ratings_uri_list: Union[str, List[str]], fixed_size:int = 2048):
         self.pad_value = -1
+        self.ts_pad_value = 32503680000 #year 3000
         #each user's the movie_ids, ratings and timestamps is already sorted by timestamp
         self.user_ids, self.movie_ids, self.ratings, self.timestamps = self._load_history(ratings_uri_list, fixed_size)
         self.fixed_size = fixed_size
-        
         
     def _load_history(self, ratings_uri_list: Union[str, List[str]],
             fixed_size:int = 2048) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         
         #buildnumpy vectors, making padded lists of length fixed_history_length for movies, ratings, and timestamps
+        # lookup is tuple of dictionary of { user_id: {ts, movie_id, rating} } in which ts, movie_id
+        #     and rating values are numpy arrays sorted by timestamp
         lookup, max_history = build_history_lookup(ratings_uri_list)
         self.max_history = max_history
         logging.info(f'max_history found = {max_history}.  fixed_size={fixed_size}')
@@ -29,7 +31,7 @@ class UserHistory (object):
         user_ids = []
         movie_ids = np.full((n_users, fixed_size), self.pad_value)
         ratings = np.full((n_users, fixed_size), self.pad_value)
-        timestamps = np.full((n_users, fixed_size), self.pad_value)
+        timestamps = np.full((n_users, fixed_size), self.ts_pad_value)
         
         for i, user_id in enumerate(lookup.keys()):
             user_ids.append(user_id)
@@ -38,6 +40,8 @@ class UserHistory (object):
             
             length = min(len(user_ts), fixed_size)
             
+            #place the values at beginnings of arrays.
+            # any empty values at ends of arrays will be self.pad_value for move_id and self.ts_pad_value for timestamps
             timestamps[i][:length] = user_ts[:length]
             movie_ids[i][:length] = user_movies[:length]
             ratings[i][:length] = user_ratings[:length]
@@ -56,12 +60,13 @@ class UserHistory (object):
     
     def get_movieids_before_timestamp(self, user_id: np.ndarray, timestamp: Union[int, np.ndarray], max_hist:int) -> np.ndarray:
         """
-        given array of user_ids, return max_hist of movies < timestamp, padded by pad_value when not enough history
+        given array of user_ids, return max_hist of movies < timestamp, padded by pad_value when not enough history.
         :param user_id: input array of shape (None,), e.g. np.array([2,4])
         :param timestamp: timestamp: timestamp representing current time or an array of timestamps representing current time for that user.
         movies with timestamps < the current timestamp are returned.
         :param max_hist: number of user rated movies to return
-        :return: user rated movies < timestamp, limited to max_hist number of movies.  shape of return is ( len(user_id), max_hist)
+        :return: user rated movies < timestamp, limited to max_hist number of movies.  shape of return is ( len(user_id), max_hist).
+            empty values are at end of array and have value self.pad_value
         """
         #transform user_ids into user_idxs.  can use searchsorted because already sorted by user_ids
         user_idx = np.searchsorted(self.user_ids, user_id)
@@ -96,7 +101,7 @@ class UserHistory (object):
            up to max_hist in length.
         :param max_hist: number of user rated movies to return
         :return: user rated movies < timestamp, limited to max_hist number of movies, ratings for those movies, and timestamps
-        shape of each of the returned np.ndarrays is ( len(user_id), max_hist)
+        shape of each of the returned np.ndarrays is ( len(user_id), max_hist).  empty values are at end of array and have value self.pad_value
         """
         # transform user_ids into user_idxs
         user_idx = np.searchsorted(self.user_ids, user_id)

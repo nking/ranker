@@ -4,21 +4,32 @@ import numpy as np
 from array_record.python import array_record_module
 
 from helper import *
-from movie_lens_ranker.data_loading import *
 
-from movie_lens_ranker.util import _read_embeddings, build_history_lookup
-
+from movie_lens_ranker.util import build_history_lookup
+from movie_lens_ranker.UserHistory import UserHistory
 
 class TestUserHistory_vec(unittest.TestCase):
     def setUp(self):
-        pass
+        
+        ratings_uri_dict = get_train_val_test_liked_uris(use_small=True)
+        
+        self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]
+        self.ratings_val_liked_uri = ratings_uri_dict["val_liked"]
+        self.ratings_test_liked_uri = ratings_uri_dict["test_liked"]
+        
+        self.ratings_train_3_uri = ratings_uri_dict["train_3"]
+        self.ratings_val_3_uri = ratings_uri_dict["val_3"]
+        self.ratings_test_3_uri = ratings_uri_dict["test_3"]
+        
+        self.ratings_train_disliked_uri = ratings_uri_dict["train_disliked"]
+        self.ratings_val_disliked_uri = ratings_uri_dict["val_disliked"]
+        self.ratings_test_disliked_uri = ratings_uri_dict["test_disliked"]
     
     def test_user_history(self):
         
-        ratings_train_uri, ratings_val_uri, ratings_test_uri \
-            = get_train_val_test_liked_uris(use_small=True)
-        
-        ratings_uri_list = [ratings_train_uri, ratings_val_uri]
+        #the full history:
+        ratings_uri_list = [self.ratings_train_liked_uri, self.ratings_train_3_uri,
+            self.ratings_train_disliked_uri]
         
         '''
         some expected examples:
