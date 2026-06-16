@@ -311,12 +311,12 @@ class TestRanker(unittest.TestCase):
             reset_hpo_results_bucket(config['project_id'], config['study_name'])
         except Exception as ex:
             pass
-        
+      
         self._run_and_assert_hpo(config)
         
         restore_dict, train_run = self.run_train_and_restore_chkpoint_and_assert(config)
         
-        self.run_test_and_assert(config, restore_dict)
+        self._run_test_and_assert(config, restore_dict)
         
         
         ##====== load train_ for use in stats =======
@@ -584,16 +584,12 @@ class TestRanker(unittest.TestCase):
         
         return restore_dict, runs[0]
     
-    def run_test_and_assert(self, config, restore_dict):
+    def _run_test_and_assert(self, config, restore_dict):
         #=== operate test from entrypoint
         print(f'BEGIN TESTING')
         
         ## =============== add test uris to config and run tests.  also tests that restore works================
-        restore_dict['config']['ratings_test_liked_uri'] = self.transform_to_gs_uri(self.ratings_test_liked_uri)
-        restore_dict['config']['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
         
-        config['ratings_test_liked_uri'] = self.transform_to_gs_uri(self.ratings_test_liked_uri)
-        config['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
         #config['test_checkpoint_uri'] = best_checkpoint_uri_tag  #for use when phase is 'test-given'
         #config['best_checkpoint_uri'] = best_checkpoint_uri_tag #the method now looks this up in mlflow records
         config['phase'] = 'test-best'
@@ -627,10 +623,19 @@ class TestRanker(unittest.TestCase):
             'movies_uri': self.transform_to_gs_uri(self.movies_uri),
             'recommendations_uri': self.transform_to_gs_uri(self.recommendations_uri),
             'recommendations_ts_uri' : self.transform_to_gs_uri(self.recommendations_ts_uri),
+            
             'ratings_train_liked_uri' : self.transform_to_gs_uri(self.ratings_train_liked_uri),
+            'ratings_train_3_uri': self.transform_to_gs_uri(self.ratings_train_3_uri),
+            'ratings_train_disliked_uri': self.transform_to_gs_uri(self.ratings_train_disliked_uri),
+            
             'ratings_val_liked_uri' :self.transform_to_gs_uri(self.ratings_val_liked_uri),
-            'train_negatives_uri': self.transform_to_gs_uri(self.train_negatives_uri),
-            'val_negatives_uri': self.transform_to_gs_uri(self.val_negatives_uri),
+            'ratings_val_3_uri': self.transform_to_gs_uri(self.ratings_val_3_uri),
+            'ratings_val_disliked_uri' :self.transform_to_gs_uri(self.ratings_val_disliked_uri),
+            
+            'ratings_test_liked_uri': self.transform_to_gs_uri( self.ratings_test_liked_uri),
+            'ratings_test_3_uri': self.transform_to_gs_uri(self.ratings_test_3_uri),
+            'ratings_test_disliked_uri': self.transform_to_gs_uri(self.ratings_test_disliked_uri),
+            
             'latest_checkpoint_uri':latest_checkpoint_uri,
             'best_checkpoint_uri': best_checkpoint_uri,
             'movie_embeddings_uri' : self.transform_to_gs_uri(self.movie_embeddings_uri),
@@ -659,13 +664,16 @@ class TestRanker(unittest.TestCase):
         user_id_range = (1, num_users)
         movie_id_range = (num_users + 1, num_users + num_movies)
         
-        fake_data = create_dummy_super_padded_graph(batch_size = batch_size, max_history = max_history,
-            num_candidates = num_candidates, user_id_range = user_id_range, movie_id_range = movie_id_range)
+        fake_data = create_dummy_super_padded_graph(batch_size = 1,
+            max_history = max_history,
+            num_candidates = num_candidates,
+            user_id_range = user_id_range, movie_id_range = movie_id_range)
         
         rngs = nnx.Rngs(config.get('seed', 0))
         
         #these are assigned by HPO
         config['num_candidates'] = 2*config["top_k"]
+        config['max_history'] = max_history
         config['hidden_dim'] = 64
         config['num_layers'] = 2
         config['out_dim'] = 32

@@ -264,7 +264,7 @@ def run_tune(config):
         'ratings_train_3_uri', 'ratings_train_disliked_uri',
         'ratings_val_liked_uri', 'ratings_val_3_uri',
         'ratings_val_disliked_uri',
-        'max_history', 'num_epochs', 'batch_size', 'seed'}
+        'seed'}
     for key in req_keys:
         if key not in config:
             raise LookupError(f'missing key {key} in config')
@@ -374,7 +374,7 @@ def run_train(config):
         'ratings_train_3_uri', 'ratings_train_disliked_uri',
         'ratings_val_liked_uri', 'ratings_val_3_uri',
         'ratings_val_disliked_uri',
-        'max_history', 'num_epochs', 'batch_size', 'seed'}
+        'seed'}
     for key in req_keys:
         if key not in config:
             raise LookupError(f'missing key {key} in config')
