@@ -4,6 +4,8 @@ import jraph
 import grain.python as pgrain
 import numpy as np
 
+from movie_lens_ranker.util_numba import build_graph_arrays
+
 class SparseLocalSubgraphTransform(pgrain.MapTransform):
     
     def __init__(self):
@@ -40,82 +42,35 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
         # NOTE: method returns a sparse GraphsTuple, ignoring the padded variables in record, because
         # the resulting datastructure is not seen by the GPU.
         results = []
-        for i in range(len(batch['user_id'])):
-            n_real_history = batch["history_length"][i]
-            n_candidates = len(batch["candidate_ids"][i])
-            total_nodes = 1 + n_real_history + n_candidates
+        batch_size = len(batch['user_id'])
+        
+        for i in range(batch_size):
+            u_id = batch["user_id"][i]
+            n_hist = batch["history_length"][i]
+            c_ids = batch["candidate_ids"][i]
+            h_rats = batch["history_ratings"][i]
+            h_m_ids = batch["history_movie_ids"][i]
+            lbls = batch["labels"][i]
             
-            # Define Senders and Receivers (Edges)
-            # Strategy: Star Graph. User connects TO History and Candidates.
-            # Edge: User (0) -> History (1..H)
-            # then
-            # Edge: User (0) -> Candidates (H+1..H+C)
-            #these are all length:  n_real_history + n_candidates
+            # Run the Numba kernel
+            (senders, receivers, edge_features, node_ids,
+                node_labels, node_types, candidate_mask,
+                total_nodes, total_edges) = build_graph_arrays(u_id, n_hist, c_ids, h_rats, h_m_ids, lbls)
             
-            edge_shape = (n_real_history + n_candidates,)
-            senders = np.full(shape=edge_shape, fill_value=-1)
-            receivers = np.full(shape=edge_shape, fill_value=-1)
-            edge_features = np.full(shape=edge_shape, fill_value=-1)
-            
-            # History -> User (Inward)
-            # Senders: [1, 2, ... H], Receiver: [0, 0, ... 0]
-            senders[:n_real_history] = np.arange(1, n_real_history + 1)
-            receivers[:n_real_history] = np.zeros((n_real_history,))
-            edge_features[:n_real_history] = batch["history_ratings"][i][:n_real_history]
-            
-            
-            # User -> Candidates (Outward)
-            # Sender: [0, 0, ... 0], Receivers: [H+1, ... H+C]
-            senders[n_real_history:n_real_history+n_candidates] = np.zeros((n_candidates,))
-            receivers[n_real_history:n_real_history+n_candidates] = np.arange(1+n_real_history, 1+n_real_history+n_candidates)
-            edge_features[n_real_history:n_real_history+n_candidates] = np.zeros((n_candidates,))
-            
-            #NOTE: if have pre-processed ratings to be scaled to 0 to 1,
-            # then here in the n_candidates loop, edge_features.append(-1) instead of 1 to 5
-            # currently, the datasets are ratings from 1 to 5
-            
-            node_ids = np.concatenate([
-                np.array([batch["user_id"][i]], dtype=int),
-                np.array(batch["history_movie_ids"][i][:n_real_history], dtype=int),
-                np.array(batch["candidate_ids"][i], dtype=int)
-            ], dtype=int)
-            
-            node_labels = np.concatenate([
-                np.array([0.0]),  # User (Type 0)
-                np.zeros(n_real_history),  # History (Type 1)
-                batch["labels"][i],#numpy array
-                # Candidates (Type 2) - should be size n_candidates
-            ], dtype=float)
-            
-            # Node attributes must match total_nodes
-            assert len(node_ids) == len(node_labels) == total_nodes
-            # Edge attributes must match the number of connections
-            assert len(senders) == len(receivers) == len(edge_features)
-            
-            # Create a mask for the nodes
-            # User (False), History (False), Candidates (True)
-            # This identifies which nodes are candidates in the local graph
-            node_is_candidate = np.array(
-                [False] + [False] * n_real_history + [True] * n_candidates)
-            
-            #using NUMPY arrays because we are still on the CPU in grain dataloader
-            
-            #  Construct the GraphsTuple
+            # Construct the GraphsTuple (Python side)
             results.append(jraph.GraphsTuple(
-                # odes arrays are length 1 + n_real_history + self.num_candidates
                 nodes={
                     "ids": node_ids,
                     "label": node_labels,
-                    "type": np.array(
-                        [0] + [1] * n_real_history + [2] * n_candidates),
-                    "candidate_mask": node_is_candidate
+                    "type": node_types,
+                    "candidate_mask": candidate_mask
                 },
-                # edges, senders, receivers are length  n_real_history + self.num_candidates
                 edges={"rating": edge_features},
                 senders=senders,
                 receivers=receivers,
                 n_node=np.array([total_nodes]),
-                n_edge=np.array([len(senders)]),
+                n_edge=np.array([total_edges]),
                 globals=None
             ))
+        
         return results

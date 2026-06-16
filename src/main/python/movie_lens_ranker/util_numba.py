@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import numpy as np
 import numba
 
@@ -292,3 +294,60 @@ def simultaneous_shuffle(candidates:np.ndarray, labels:np.ndarray, seed:int):
             row_label[k] = tmp_l
     
     return candidates, labels
+
+@numba.njit
+def build_graph_arrays(
+        user_id: int,
+        n_real_history: int,
+        candidate_ids: np.ndarray,
+        history_ratings: np.ndarray,
+        history_movie_ids: np.ndarray,
+        labels: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+np.ndarray, np.ndarray, np.ndarray, int, int]:
+    
+    n_candidates = len(candidate_ids)
+    total_nodes = 1 + n_real_history + n_candidates
+    total_edges = n_real_history + n_candidates
+    
+    # Pre-allocate output arrays to avoid concatenation overhead where possible
+    senders = np.empty(total_edges, dtype=np.int32)
+    receivers = np.empty(total_edges, dtype=np.int32)
+    edge_features = np.empty(total_edges, dtype=np.float64)
+    
+    # History -> User (Inward)
+    for i in range(n_real_history):
+        senders[i] = i + 1
+    receivers[:n_real_history] = 0
+    edge_features[:n_real_history] = history_ratings[:n_real_history]
+    
+    # User -> Candidates (Outward)
+    for i in range(n_candidates):
+        idx = n_real_history + i
+        receivers[idx] = 1 + n_real_history + i
+    edge_features[n_real_history:n_real_history + n_candidates] = 0.0
+    senders[n_real_history:n_real_history + n_candidates] = 0
+    
+    # Nodes (User + History + Candidates)
+    node_ids = np.empty(total_nodes, dtype=np.int64)
+    node_ids[0] = user_id
+    node_ids[1:1 + n_real_history] = history_movie_ids[:n_real_history]
+    node_ids[1 + n_real_history:] = candidate_ids
+    
+    # Labels
+    node_labels = np.empty(total_nodes, dtype=np.float64)
+    node_labels[0] = 0.0
+    node_labels[1:1 + n_real_history] = 0.0
+    node_labels[1 + n_real_history:] = labels
+    
+    # Types & Masks
+    node_types = np.empty(total_nodes, dtype=np.int32)
+    node_types[0] = 0
+    node_types[1:1 + n_real_history] = 1
+    node_types[1 + n_real_history:] = 2
+    
+    candidate_mask = np.zeros(total_nodes, dtype=np.bool_)
+    candidate_mask[1 + n_real_history:] = True
+    
+    return (senders, receivers, edge_features, node_ids,
+        node_labels, node_types, candidate_mask, total_nodes, total_edges)
