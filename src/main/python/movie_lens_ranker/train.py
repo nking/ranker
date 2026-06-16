@@ -748,6 +748,9 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     num_users = _dict['num_users']
     num_movies = _dict['num_movies']
     
+    config['num_users'] = num_users
+    config['num_movies'] = num_movies
+    
     mlflow_run = None
     best_val_ndcg_k = -1.0
     
@@ -955,7 +958,7 @@ def test_fn(config: dict):
     if config['phase'] not in {"test-best", "test-given"}:
         raise ValueError("'phase' must be 'test-best' or 'test-given'")
     
-    for key in ('seed', 'ratings_test_uri', 'train_negatives_uri'):
+    for key in ('seed', 'ratings_test_liked_uri'):
         if key not in config:
             raise ValueError(f"key {key} is missing from config")
     
@@ -978,6 +981,8 @@ def test_fn(config: dict):
     
     num_users = restore_dict['num_users']
     num_movies = restore_dict['num_movies']
+    config['num_users'] = num_users
+    config['num_movies'] = num_movies
     
     model = restore_dict['model']
     model.eval()
@@ -1007,10 +1012,25 @@ def test_fn(config: dict):
         
         #these uris are all in config too, excepting test_ratings
         test_dataloader = create_test_dataloader(
+            num_users = num_users,
             movies_uri = restore_dict['config']['movies_uri'],
             recommendations_uri = restore_dict['config']['recommendations_uri'],
             recommendations_ts_uri = restore_dict['config']['recommendations_ts_uri'],
-            ratings_uri = config['ratings_test_uri'],
+            
+            rattings_data_uri = config['ratings_test_liked_uri'],
+            ratings_history_uris=[
+                config['ratings_train_liked_uri'],
+                config['ratings_train_3_uri'],
+                config['ratings_train_disliked_uri'],
+                config['ratings_val_liked_uri'], config['ratings_val_3_uri'],
+                config['ratings_val_disliked_uri'],
+                config['ratings_test_liked_uri'],
+                config['ratings_test_3_uri'],
+                config['ratings_test_disliked_uri'],
+            ],
+            ratings_disliked_uris=[config['ratings_train_disliked_uri'],
+                config['ratings_val_disliked_uri'], config['ratings_test_disliked_uri']],
+            
             max_history = max_history,
             num_candidates = num_candidates,
             batch_size = batch_size,
@@ -1054,7 +1074,6 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
     
     #TODO: handle case when  config['phase'] is not same as restore dict phase
     
-    """
     config.update(**restore_dict['config'])
     
     req_keys = {'user_embeddings_uri', 'movie_embeddings_uri', 'movies_uri',
@@ -1067,7 +1086,7 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
     for key in req_keys:
         if key not in config:
             raise LookupError(f"config is missing {key}")
-    """
+    
     best_val_ndcg_k = -1.0
     mlflow_run = None
     run_name = get_canonical_mlflow_run_name(config)
