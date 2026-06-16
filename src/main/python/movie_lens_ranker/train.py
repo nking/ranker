@@ -565,6 +565,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                         
         if early_stop_triggered[0]:
             break
+            
+    logging.info(f'elapsed time in sec = {time.perf_counter() - start_time}.  num_epochs={epoch}')
 
     return best_ndcg
 
