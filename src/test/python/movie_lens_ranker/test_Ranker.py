@@ -47,7 +47,6 @@ from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
 from movie_lens_ranker.app_runner import main as app_runner, \
     extract_correct_vizier_param_types_dict, \
     get_best_checkpoint_uri_for_testing, get_best_parameters_for_training
-from movie_lens_ranker.app_runner import run_export_results
 
 import unittest
 import subprocess
@@ -159,18 +158,19 @@ class TestRanker(unittest.TestCase):
         for k, v in dotenv_values(env_file).items():
             os.environ[k] = v
             
-        # user recommendations with each user history subtracted already:
-        # (user id, (movie_ids))
-        self.recommendations_uri = os.path.join(get_project_dir(),
-            "src/test/resources/recommended_movies.array_record")
+        ratings_uri_dict = get_train_val_test_liked_uris(use_small=True)
         
-        #(user_id, movie_id, rating, timestamp)
-        self.ratings_train_uri, self.ratings_val_uri, self.ratings_test_uri \
-            = get_train_val_test_liked_uris(use_small=True)
+        self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]
+        self.ratings_val_liked_uri = ratings_uri_dict["val_liked"]
+        self.ratings_test_liked_uri = ratings_uri_dict["test_liked"]
         
-        # (user_id, movie_id, rating, timestamp)
-        self.ratings_train_disliked_uri, self.ratings_val_disliked_uri, self.ratings_test_disliked_uri \
-            = get_train_val_test_disliked_uris(use_small=True)
+        self.ratings_train_3_uri = ratings_uri_dict["train_3"]
+        self.ratings_val_3_uri = ratings_uri_dict["val_3"]
+        self.ratings_test_3_uri = ratings_uri_dict["test_3"]
+        
+        self.ratings_train_disliked_uri = ratings_uri_dict["train_disliked"]
+        self.ratings_val_disliked_uri = ratings_uri_dict["val_disliked"]
+        self.ratings_test_disliked_uri = ratings_uri_dict["test_disliked"]
         
         # (movie_id, float array of embed_dim as a tuple)
         self.movie_embeddings_uri = os.path.join(get_project_dir(),
@@ -191,19 +191,6 @@ class TestRanker(unittest.TestCase):
         # (movie_id, title, genres)
         self.movies_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")
-        
-        #these are the "elite" hard negatives (=intersection between train_disliked and recommended movies)
-        # + train disliked.
-        self.train_negatives_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/train_negatives.array_record")
-        self.val_negatives_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/val_negatives.array_record")
-        self.test_negatives_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/test_negatives.array_record")
-        self.train_val_negatives_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/train_val_negatives.array_record")
-        self.train_val_test_negatives_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/train_val_test_negatives.array_record")
     
     def transform_to_gs_uri(self, file_path:str):
         idx = file_path.find("/data/")
@@ -266,14 +253,25 @@ class TestRanker(unittest.TestCase):
             'movies_uri': self.transform_to_gs_uri(self.movies_uri),
             'recommendations_uri': self.transform_to_gs_uri(self.recommendations_uri),
             'recommendations_ts_uri' : self.transform_to_gs_uri(self.recommendations_ts_uri),
-            'ratings_train_uri' : self.transform_to_gs_uri(self.ratings_train_uri),
-            'ratings_val_uri' :self.transform_to_gs_uri(self.ratings_val_uri),
-            'train_negatives_uri': self.transform_to_gs_uri(self.train_negatives_uri),
-            'val_negatives_uri': self.transform_to_gs_uri(self.val_negatives_uri),
-            'latest_checkpoint_uri':latest_checkpoint_uri,
-            'best_checkpoint_uri': best_checkpoint_uri,
+        
+            'ratings_train_liked_uri' : self.transform_to_gs_uri(self.ratings_train_liked_uri),
+            'ratings_train_3_uri': self.transform_to_gs_uri(self.ratings_train_3_uri),
+            'ratings_train_disliked_uri': self.transform_to_gs_uri(self.ratings_train_disliked_uri),
+            
+            'ratings_val_liked_uri' :self.transform_to_gs_uri(self.ratings_val_liked_uri),
+            'ratings_val_3_uri': self.transform_to_gs_uri(self.ratings_val_3_uri),
+            'ratings_val_disliked_uri' :self.transform_to_gs_uri(self.ratings_val_disliked_uri),
+            
+            'ratings_test_liked_uri': self.transform_to_gs_uri( self.ratings_test_liked_uri),
+            'ratings_test_3_uri': self.transform_to_gs_uri(self.ratings_test_3_uri),
+            'ratings_test_disliked_uri': self.transform_to_gs_uri(self.ratings_test_disliked_uri),
+            
             'movie_embeddings_uri' : self.transform_to_gs_uri(self.movie_embeddings_uri),
             'user_embeddings_uri': self.transform_to_gs_uri(self.user_embeddings_uri),
+            
+            'latest_checkpoint_uri': latest_checkpoint_uri,
+            'best_checkpoint_uri': best_checkpoint_uri,
+            
             'num_epochs' : num_epochs,
             'batch_size':batch_size, 'seed':seed,
             'study_name' : STUDY_NAME,
@@ -591,10 +589,10 @@ class TestRanker(unittest.TestCase):
         print(f'BEGIN TESTING')
         
         ## =============== add test uris to config and run tests.  also tests that restore works================
-        restore_dict['config']['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
+        restore_dict['config']['ratings_test_liked_uri'] = self.transform_to_gs_uri(self.ratings_test_liked_uri)
         restore_dict['config']['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
         
-        config['ratings_test_uri'] = self.transform_to_gs_uri(self.ratings_test_uri)
+        config['ratings_test_liked_uri'] = self.transform_to_gs_uri(self.ratings_test_liked_uri)
         config['train_negatives_uri'] = self.transform_to_gs_uri(self.test_negatives_uri)
         #config['test_checkpoint_uri'] = best_checkpoint_uri_tag  #for use when phase is 'test-given'
         #config['best_checkpoint_uri'] = best_checkpoint_uri_tag #the method now looks this up in mlflow records
@@ -629,8 +627,8 @@ class TestRanker(unittest.TestCase):
             'movies_uri': self.transform_to_gs_uri(self.movies_uri),
             'recommendations_uri': self.transform_to_gs_uri(self.recommendations_uri),
             'recommendations_ts_uri' : self.transform_to_gs_uri(self.recommendations_ts_uri),
-            'ratings_train_uri' : self.transform_to_gs_uri(self.ratings_train_uri),
-            'ratings_val_uri' :self.transform_to_gs_uri(self.ratings_val_uri),
+            'ratings_train_liked_uri' : self.transform_to_gs_uri(self.ratings_train_liked_uri),
+            'ratings_val_liked_uri' :self.transform_to_gs_uri(self.ratings_val_liked_uri),
             'train_negatives_uri': self.transform_to_gs_uri(self.train_negatives_uri),
             'val_negatives_uri': self.transform_to_gs_uri(self.val_negatives_uri),
             'latest_checkpoint_uri':latest_checkpoint_uri,

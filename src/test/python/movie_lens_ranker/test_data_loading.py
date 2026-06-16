@@ -266,14 +266,6 @@ class TestDataLoading(unittest.TestCase):
         self.assertTrue(isinstance(all_movie_ids, list))
         self.assertTrue(isinstance(all_movie_ids[0], int))
         
-        negatives: Dict[int, Set[int]] = read_user_negatives(
-            self.negatives_uri, batch_size)
-        self.assertTrue(isinstance(negatives, dict))
-        min_user_id = min(negatives.keys())
-        entry = negatives.get(min_user_id)
-        self.assertTrue(isinstance(entry, set))
-        self.assertTrue(isinstance(next(iter(entry)), int))
-        
         recommendations: np.ndarray = read_recommendations(self.recommendations_uri, batch_size=batch_size)
         self.assertTrue(isinstance(recommendations, np.ndarray))
         min_user_id = 1

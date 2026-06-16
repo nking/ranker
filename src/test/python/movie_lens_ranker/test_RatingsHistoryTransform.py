@@ -11,8 +11,19 @@ from movie_lens_ranker.util import read_embeddings
 class TestRanker(unittest.TestCase):
     def setUp(self):
         
-        self.ratings_train_uri, self.ratings_val_uri, self.ratings_test_uri \
-            = get_train_val_test_liked_uris(use_small=True)
+        ratings_uri_dict = get_train_val_test_liked_uris(use_small=True)
+        
+        self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]
+        self.ratings_val_liked_uri = ratings_uri_dict["val_liked"]
+        self.ratings_test_liked_uri = ratings_uri_dict["test_liked"]
+        
+        self.ratings_train_3_uri = ratings_uri_dict["train_3"]
+        self.ratings_val_3_uri = ratings_uri_dict["val_3"]
+        self.ratings_test_3_uri = ratings_uri_dict["test_3"]
+        
+        self.ratings_train_disliked_uri = ratings_uri_dict["train_disliked"]
+        self.ratings_val_disliked_uri = ratings_uri_dict["val_disliked"]
+        self.ratings_test_disliked_uri = ratings_uri_dict["test_disliked"]
         
         # the approximate hard negatives are the samples drawn from unwatched movies
         # the negatives uri has for each user, the list of negatives prioritized by:
@@ -40,11 +51,14 @@ class TestRanker(unittest.TestCase):
         batch_size = 1024
         max_history = 2000 #a number large enough to test that padding works
         
-        ratings_uri_list = [self.ratings_train_uri, self.ratings_val_uri]
-        uh = UserHistory(ratings_uri_list=ratings_uri_list, fixed_size=2048)
+        watch_history = UserHistory(
+            ratings_uri_list=[self.ratings_train_liked_uri,
+                self.ratings_train_3_uri,
+                self.ratings_train_disliked_uri], fixed_size=2048)
         
-        transform = RatingsHistoryLookupTransform(history_lookup=uh, max_history=max_history)
-            
+        transform1 = RatingsHistoryLookupTransform(
+            history_lookup=watch_history, max_history=max_history)
+        
         '''
         some ratings in partition 1
         1875::1101::4::975768800
@@ -54,7 +68,7 @@ class TestRanker(unittest.TestCase):
         
         batch = [(1875,1101,4,975768800), (635, 2068, 4, 975768823), (635, 2357, 4, 975768823)]
         batch_size = len(batch)
-        result = transform.map(batch)
+        result = transform1.map(batch)
         self.assertIsNotNone(result)
         self.assertEqual(batch_size, len(result['history_length']))
         

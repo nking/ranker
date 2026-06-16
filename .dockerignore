@@ -2,6 +2,6 @@ __pycache__/
 .env
 .env_db
 src/drafts
-src/tests
+src/test
 src/main/resources
 src/main/python/movie_lens_ranker.egg-info

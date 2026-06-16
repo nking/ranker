@@ -258,6 +258,17 @@ def run_tune(config):
         logging.error("ERROR: expecting phase='tune'")
         return
     
+    req_keys = {'user_embeddings_uri', 'movie_embeddings_uri', 'movies_uri',
+        'recommendations_uri', 'recommendations_ts_uri',
+        'ratings_train_liked_uri',
+        'ratings_train_3_uri', 'ratings_train_disliked_uri',
+        'ratings_val_liked_uri', 'ratings_val_3_uri',
+        'ratings_val_disliked_uri',
+        'max_history', 'num_epochs', 'batch_size', 'seed'}
+    for key in req_keys:
+        if key not in config:
+            raise LookupError(f'missing key {key} in config')
+    
     worker_rank = jax.process_index()
     
     experiment_name = config.get('mlflow_experiment_name', config['study_name'])
@@ -356,6 +367,17 @@ def run_train(config):
     if "phase" not in config:
         logging.info("ERROR: expecting phase='train-best' or 'train-given'")
         return
+    
+    req_keys = {'user_embeddings_uri', 'movie_embeddings_uri', 'movies_uri',
+        'recommendations_uri', 'recommendations_ts_uri',
+        'ratings_train_liked_uri',
+        'ratings_train_3_uri', 'ratings_train_disliked_uri',
+        'ratings_val_liked_uri', 'ratings_val_3_uri',
+        'ratings_val_disliked_uri',
+        'max_history', 'num_epochs', 'batch_size', 'seed'}
+    for key in req_keys:
+        if key not in config:
+            raise LookupError(f'missing key {key} in config')
     
     worker_rank = jax.process_index()
     

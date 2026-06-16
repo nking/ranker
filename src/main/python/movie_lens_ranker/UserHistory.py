@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 class UserHistory (object):
     def __init__(self, ratings_uri_list: Union[str, List[str]], fixed_size:int = 2048):
         self.pad_value = -1
-        self.ts_pad_value = 32503680000 #year 3000
+        self.ts_pad_value = 2524608000 #year 2050
         #each user's the movie_ids, ratings and timestamps is already sorted by timestamp
         self.user_ids, self.movie_ids, self.ratings, self.timestamps = self._load_history(ratings_uri_list, fixed_size)
         self.fixed_size = fixed_size
@@ -66,7 +66,7 @@ class UserHistory (object):
         movies with timestamps < the current timestamp are returned.
         :param max_hist: number of user rated movies to return
         :return: user rated movies < timestamp, limited to max_hist number of movies.  shape of return is ( len(user_id), max_hist).
-            empty values are at end of array and have value self.pad_value
+            empty values are at end of array and have value self.pad_value=-1
         """
         #transform user_ids into user_idxs.  can use searchsorted because already sorted by user_ids
         user_idx = np.searchsorted(self.user_ids, user_id)
@@ -88,6 +88,7 @@ class UserHistory (object):
         ret_movie_ids = np.full((n_user_selected, max_hist), self.pad_value, dtype=sub_movie_ids.dtype)
         ret_movie_ids[row_coords, new_col_coords] = sub_movie_ids[final_mask]
         
+        #returns array of shape (len(user_id), max_history) with missing values = -1
         return ret_movie_ids
     
     def get_history_before_timestamp(self, user_id: np.ndarray,
@@ -101,7 +102,7 @@ class UserHistory (object):
            up to max_hist in length.
         :param max_hist: number of user rated movies to return
         :return: user rated movies < timestamp, limited to max_hist number of movies, ratings for those movies, and timestamps
-        shape of each of the returned np.ndarrays is ( len(user_id), max_hist).  empty values are at end of array and have value self.pad_value
+        shape of each of the returned np.ndarrays is ( len(user_id), max_hist).  empty values are at end of array and have value self.pad_value=-1
         """
         # transform user_ids into user_idxs
         user_idx = np.searchsorted(self.user_ids, user_id)

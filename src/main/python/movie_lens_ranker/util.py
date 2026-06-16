@@ -17,8 +17,9 @@ FLAGS = flags.FLAGS
 
 data_params_nontrainable_keys = {'movies_uri', 'recommendations_uri',
     'recommendations_ts_uri',
-    'ratings_train_uri', 'ratings_val_uri', 'ratings_test_uri',
-    'train_negatives_uri', 'val_negatives_uri', 'test_negatives_uri',
+    'ratings_train_3_uri', 'ratings_val_3_uri', 'ratings_test_3_uri',
+    'ratings_train_liked_uri', 'ratings_val_liked_uri', 'ratings_test_liked_uri',
+    'ratings_train_disliked_uri', 'ratings_val_disliked_uri', 'ratings_test_disliked_uri',
     'seed',
 }
 model_params_nontrainable_keys = {
@@ -162,24 +163,39 @@ def define_flags():
     flags.DEFINE_string("recommendations_ts_uri", default=None,
         help="uri for array_record containing the timestamps for recommendations_uri, each row being [user_id, [timestamps]]"
     )
-    flags.DEFINE_string("ratings_train_uri", default=None,
-        help="uri for array_record containing the ratings train dataset, each row being [user_id, movie_id, rating, timestamp]. for this project the dataset should contain only positives"
+    
+    flags.DEFINE_string("ratings_train_liked_uri", default=None,
+        help="uri for array_record containing the ratings train dataset having ratings > 3, each row being [user_id, movie_id, rating, timestamp]. for this project the dataset should contain only positives"
     )
-    flags.DEFINE_string("ratings_val_uri", default=None,
-        help="uri for array_record containing the ratings val dataset, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
+    flags.DEFINE_string("ratings_val_liked_uri", default=None,
+        help="uri for array_record containing the ratings val dataset having ratings > 3, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
     )
-    flags.DEFINE_string("ratings_test_uri", default=None,
-        help="uri for array_record containing the ratings test dataset, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
+    flags.DEFINE_string("ratings_test_liked_uri", default=None,
+        help="uri for array_record containing the ratings test dataset having ratings > 3, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
     )
-    flags.DEFINE_string("train_negatives_uri", default=None,
-        help="uri for array_record containing the ratings train dataset negatives, each row being [user_id, movie_id, rating, timestamp]"
+    
+    flags.DEFINE_string("ratings_train_disliked_uri", default=None,
+        help="uri for array_record containing the ratings train dataset having ratings < 3, each row being [user_id, movie_id, rating, timestamp]. for this project the dataset should contain only positives"
     )
-    flags.DEFINE_string("val_negatives_uri", default=None,
-        help="uri for array_record containing the ratings val dataset negatives, each row being [user_id, movie_id, rating, timestamp]"
+    flags.DEFINE_string("ratings_val_disliked_uri", default=None,
+        help="uri for array_record containing the ratings val dataset having ratings < 3, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
     )
-    flags.DEFINE_string("test_negatives_uri", default=None,
-        help="uri for array_record containing the ratings test dataset negatives, each row being [user_id, movie_id, rating, timestamp]"
+    flags.DEFINE_string("ratings_test_disliked_uri", default=None,
+        help="uri for array_record containing the ratings test dataset having ratings < 3, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
     )
+    
+    
+    flags.DEFINE_string("ratings_train_3_uri", default=None,
+        help="uri for array_record containing the ratings train dataset having ratings == 3, each row being [user_id, movie_id, rating, timestamp]. for this project the dataset should contain only positives"
+    )
+    flags.DEFINE_string("ratings_val_3_uri", default=None,
+        help="uri for array_record containing the ratings val dataset having ratings == 3, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
+    )
+    flags.DEFINE_string("ratings_test_3_uri", default=None,
+        help="uri for array_record containing the ratings test dataset having ratings == 3, each row being [user_id, movie_id, rating, timestamp].  for this project the dataset should contain only positives"
+    )
+    
+
     flags.DEFINE_integer("seed", default=0,
         help="seed used for pseudo random number generator"
     )
@@ -313,7 +329,7 @@ def destringify_mlflow_params(params:dict):
             config[k] = v
     return config
     
-def read_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
+def read_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_size:int=1024) -> Tuple[jnp.ndarray, int]:
     """
     read the user and movie embeddings and concatenate them: [row of zeros, user embeddings, movie embeddings].  the
     row of zeros is needed because user_ids start with 1.
@@ -361,38 +377,6 @@ def _read_embeddings(embeddings_uri:str, batch_size:int=1024) ->  jnp.ndarray:
         if reader is not None:
             reader.close()
     return jnp.array(embeddings)
-
-def read_user_negatives(negatives_uri:Union[str, List[str]], batch_size:int=1048) -> Dict[int, Set[int]]:
-    """
-    read the array_record at negatives_uri into a dictionary with key user_id and values
-    being the set of movies that the user was recommended, but did not like.
-    :param negatives_uri: the uri for the exact hard negatives array_record
-    :param batch_size: batch size to use in reading the array_record.
-    :return: a dictionary with key user_id and values
-    being the set of movies that the user was recommended, but did not like.
-    """
-    lookup: Dict[int, Set[int]] = {}
-    if isinstance(negatives_uri, str):
-        negatives_uri = [negatives_uri]
-    for negative_uri in negatives_uri:
-        reader = None
-        try:
-            reader = array_record_module.ArrayRecordReader(negative_uri)
-            n_records = reader.num_records()
-            for i in range(0, n_records, batch_size):
-                stop = min(i + batch_size, n_records)
-                batch_bytes = reader.read([x for x in range(i, stop)])
-                batch = [msgpack.unpackb(b, use_list=False) for b in batch_bytes]  # list of tuples user_id, movie_ids
-                for record in batch:
-                    if record[0] not in lookup:
-                        lookup[record[0]] = set()
-                    lookup[record[0]].update(record[1])
-        except Exception as e:
-            raise e
-        finally:
-            if reader is not None:
-                reader.close()
-    return lookup
 
 def _read_user_recommendations_array_record(user_uri:str, batch_size:int=1048) -> np.ndarray:
     """

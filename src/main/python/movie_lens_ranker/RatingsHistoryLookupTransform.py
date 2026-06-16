@@ -5,12 +5,12 @@ from array_record.python import array_record_module
 
 from movie_lens_ranker.UserHistory import UserHistory
 
-
 class RatingsHistoryLookupTransform(pgrain.MapTransform):
     def __init__(self, history_lookup: UserHistory, max_history: int = 20):
         """
         history_lookup: the results of method build_history_lookup
-        max_history: Fixed size for the history window (crucial for JAX).
+        max_history: Fixed size for the history window (crucial for JAX).  This can be made as large as
+        the longest history among all users to keep all ratings and pad to max_history.
         """
         self.history_lookup = history_lookup
         self.max_history = max_history
@@ -22,7 +22,7 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
         map the input train record dictionary to a dictionary containing it and padded history entries
         :param batch: a list, that is batch, of tuples containing the user_id, movie_id, rating, and timestamp
         :return: a dictionary containing numpy arrays
-             'user_id'.
+            'user_id'.
             'movie_id',
             'rating',
             'timestamp',
@@ -46,6 +46,7 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
         ratings = np.array(ratings, dtype=np.float32)
         timestamps = np.array(timestamps, dtype=np.int64)
         
+        #history_n=movies is shape(len(user_ids, self.max_history) with any empty values being
         history_movies, history_ratings = self.history_lookup.get_history_before_timestamp(
             user_ids, timestamps, self.max_history)
         

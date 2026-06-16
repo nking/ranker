@@ -25,20 +25,24 @@ GraphRanker as graph contextualized listwise ranker:
 The data needed by the model are a little complex so are
 listed in detail here.
 Data needed:
-- train, val, test splits of the ratings:
-  - 'liked' 
-  - 'disliked' 
-  - smaller sets of the above for use in development
-- Retriever recommended unwatched movies for each user
-- all movies
-- files and runtime creation of negatives:
-  - the natural hard negatives are the movies which the user rated 1 or 2
-    see 'disliked' above
-  - the "elite" hard negatives are the intersection of the natural hard 
-    negatives with the recommended unwatched movies
-  - the approximate hard negatives are the samples drawn from unwatched 
-    movies during runtime
-
+  - user and movie embeddings
+      - created as outputs of bi-encoder in rec sys/tfx pipelines project
+        - formats are array_record
+    - user recommendations: ANN search results of movie_ids of movie vectors
+          ranked by highest similarity to uer vector
+      - created as outputs of bi-encoder in rec sys/tfx pipelines project
+        - formats are array_record
+    - ratings
+      - created rec sys/tfx pipelines project
+        - formats are array_record
+    - movies catalog
+      - created rec sys/tfx pipelines project
+        - formats are array_record
+    - in production:
+       perform the ETL above using ApacheBeam/Spark (possibly via Dataflow)
+       with BigQuery and Google Cloud Storage as target destinations.
+       - track data lineage with Knowledge Catalog (formerly Dataplex Universal
+         and Data Catalog)
 To be implemented in this project:
 - the GraphRanker model
 - MLOps pipelines for all stages (details are below)

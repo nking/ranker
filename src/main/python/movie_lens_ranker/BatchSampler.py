@@ -19,8 +19,31 @@ class BatchSampler(grain.samplers.IndexSampler):
             f"shard_options={self._shard_options!r})"
         )
     
-    # override
     def __getitem__(self, index: int) -> grain.RecordMetadata:
+        # Because you initialized super() with self.num_batches_per_epoch,
+        # base_meta.record_key is ALREADY your deterministically shuffled block index.
+        base_meta = super().__getitem__(index)
+        shuffled_block_idx = base_meta.record_key
+        
+        # Calculate the item boundaries for this specific batch block
+        start = shuffled_block_idx * self.batch_size
+        stop = min(start + self.batch_size, self.total_records)
+        indices = np.arange(start, stop)
+        
+        if self._shuffle:
+            # We don't need to spawn. We just consume one state advancement
+            # of this unique Generator.
+            base_meta.rng.shuffle(indices)
+            
+            # 4. Return the record, passing the advanced RNG down the pipeline
+        return grain.RecordMetadata(
+            index=base_meta.index,
+            record_key=indices.tolist(),
+            rng=base_meta.rng  # <--- Safe, deterministic, and pipeline-ready
+        )
+    
+    # override
+    def __getitem_previous__(self, index: int) -> grain.RecordMetadata:
         epoch = index // self.num_batches_per_epoch
         batch_in_epoch = index % self.num_batches_per_epoch
         

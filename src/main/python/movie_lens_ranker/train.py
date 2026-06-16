@@ -595,24 +595,29 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     return best_ndcg
 
 def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[str, Any]:
+    """
+    build the model, optimizer, and dataloaders and return them in a dictionary that has keys {"rngs", "model", "optimizer", 'train_dataloader',
+    'val_dataloader', 'num_users', 'num_movies'}  where num_users and num_movies are the number of users and movies in the
+    entire user and movie catalog represented by the embeddings.
+    
+    :param config:
+    :param rngs:
+    :return: dictionary with keys {"rngs", "model", "optimizer", 'train_dataloader',
+    'val_dataloader', 'num_users', 'num_movies'}
+    """
     if rngs is None:
         raise ValueError('rngs cannot be None')
     
-    worker_rank = jax.process_index()
+    req_keys = {'user_embeddings_uri', 'movie_embeddings_uri', 'movies_uri',
+        'recommendations_uri', 'recommendations_ts_uri', 'ratings_train_liked_uri',
+        'ratings_train_3_uri', 'ratings_train_disliked_uri',
+        'ratings_val_liked_uri', 'ratings_val_3_uri', 'ratings_val_disliked_uri',
+        'max_history', 'num_epochs', 'batch_size', 'seed'}
+    for key in req_keys:
+        if key not in config:
+            raise ValueError(f'missing key {key} in config')
     
-    train_dataloader, val_dataloader = create_train_and_val_dataloaders(
-        movies_uri=config['movies_uri'],
-        recommendations_uri=config['recommendations_uri'],
-        recommendations_ts_uri=config['recommendations_ts_uri'],
-        train_ratings_uri=config['ratings_train_uri'],
-        val_ratings_uri=config['ratings_val_uri'],
-        train_negatives_uri=config['train_negatives_uri'],
-        val_negatives_uri=config['val_negatives_uri'],
-        max_history=config['max_history'],
-        num_candidates=config['num_candidates'],
-        num_epochs=config['num_epochs'],
-        batch_size=config['batch_size'],
-        seed=config.get('seed', 0),)
+    worker_rank = jax.process_index()
     
     # NOTE: these are prepended with a row of zeros so that user_ids and movie_ids are direct indexes to the embeddings
     embeddings, num_users = read_embeddings(
@@ -620,6 +625,28 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         movie_embeddings_uri=config['movie_embeddings_uri'],
         batch_size=1024)
     num_movies = len(embeddings) - 1 - num_users
+    
+    train_dataloader, val_dataloader = create_train_and_val_dataloaders(
+        num_users = num_users,
+        movies_uri=config['movies_uri'],
+        recommendations_uri=config['recommendations_uri'],
+        recommendations_ts_uri=config['recommendations_ts_uri'],
+        ratings_train_data_uri=config['ratings_train_liked_uri'],
+        ratings_train_history_uris=[config['ratings_train_liked_uri'], config['ratings_train_3_uri'],
+            config['ratings_train_disliked_uri']],
+        ratings_train_disliked_uris=[config['ratings_train_disliked_uri']],
+        ratings_val_data_uri=config['ratings_val_liked_uri'],
+        ratings_val_history_uris=[
+            config['ratings_train_liked_uri'], config['ratings_train_3_uri'],
+            config['ratings_train_disliked_uri'],
+            config['ratings_val_liked_uri'], config['ratings_val_3_uri'],
+            config['ratings_val_disliked_uri']],
+        ratings_val_disliked_uris=[config['ratings_train_disliked_uri'], config['ratings_val_disliked_uri']],
+        max_history=config['max_history'],
+        num_candidates=config['num_candidates'],
+        num_epochs=config['num_epochs'],
+        batch_size=config['batch_size'],
+        seed=config.get('seed', 0),)
     
     nnx.use_eager_sharding(False)
     model_mesh = get_model_mesh()
@@ -671,7 +698,8 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         nnx.update(optimizer, sharded_opt_state)
         
     return {"rngs": rngs, "model": model, "optimizer": optimizer,
-        'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader}
+        'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader,
+        'num_users': num_users, 'num_movies': num_movies}
 
 def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tuple[float, str]:
     """
@@ -687,6 +715,17 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     
     #fixed top_k for consistent stats with retrieval and reranker
     config['top_k'] = 20
+    
+    req_keys = {'user_embeddings_uri', 'movie_embeddings_uri', 'movies_uri',
+        'recommendations_uri', 'recommendations_ts_uri',
+        'ratings_train_liked_uri',
+        'ratings_train_3_uri', 'ratings_train_disliked_uri',
+        'ratings_val_liked_uri', 'ratings_val_3_uri',
+        'ratings_val_disliked_uri',
+        'max_history', 'num_epochs', 'batch_size', 'seed'}
+    for key in req_keys:
+        if key not in config:
+            raise LookupError(f"config is missing {key}")
     
     worker_rank = jax.process_index()
 
@@ -706,6 +745,8 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     optimizer = _dict['optimizer']
     train_dataloader = _dict['train_dataloader']
     val_dataloader = _dict['val_dataloader']
+    num_users = _dict['num_users']
+    num_movies = _dict['num_movies']
     
     mlflow_run = None
     best_val_ndcg_k = -1.0
@@ -825,7 +866,7 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     :param get_earliest: False by default and so returns latest of the 2 saved checkpoints, else if get_Earliest=True
     returns the earlier of the 2 checkpoints.  note that for "best" rather than "latest" checkpoints, only 1 is saved.
     :return: dictionary holding: 'model', 'optimizer', 'train_dataloader', 'train_dataloader_iter',
-            'val_dataloader', 'rngs', 'global_step', 'config'
+            'val_dataloader', 'rngs', 'global_step', 'num_users', 'num_movies', 'config'
     """
     n_keep = 2 if checkpoint_uri.find('latest') > -1 else 1
     
@@ -858,6 +899,8 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     optimizer = _dict['optimizer']
     train_dataloader = _dict['train_dataloader']
     val_dataloader = _dict['val_dataloader']
+    num_users = _dict['num_users']
+    num_movies = _dict['num_movies']
     
     #model_mesh = get_model_mesh()
     #graphdef_model, model_state = nnx.get_abstract_model(lambda: model, model_mesh)
@@ -899,6 +942,8 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
         'val_dataloader': val_dataloader,
         'rngs': rngs,
         'global_step': global_step,
+        'num_users': num_users,
+        'num_movies': num_movies,
         'config': config
     }
 
@@ -930,6 +975,9 @@ def test_fn(config: dict):
     else:
         #test-given, uese given checkpoint path to restore, test_checkpoint_uri
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['test_checkpoint_uri'])
+    
+    num_users = restore_dict['num_users']
+    num_movies = restore_dict['num_movies']
     
     model = restore_dict['model']
     model.eval()
@@ -963,7 +1011,6 @@ def test_fn(config: dict):
             recommendations_uri = restore_dict['config']['recommendations_uri'],
             recommendations_ts_uri = restore_dict['config']['recommendations_ts_uri'],
             ratings_uri = config['ratings_test_uri'],
-            negatives_uri = config['train_negatives_uri'],
             max_history = max_history,
             num_candidates = num_candidates,
             batch_size = batch_size,
@@ -1004,6 +1051,21 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
                 raise LookupError(f"config is missing {key}")
     
     restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['latest_checkpoint_uri'])
+    
+    #TODO: handle case when  config['phase'] is not same as restore dict phase
+    
+    config.update(**restore_dict['config'])
+    
+    req_keys = {'user_embeddings_uri', 'movie_embeddings_uri', 'movies_uri',
+        'recommendations_uri', 'recommendations_ts_uri',
+        'ratings_train_liked_uri',
+        'ratings_train_3_uri', 'ratings_train_disliked_uri',
+        'ratings_val_liked_uri', 'ratings_val_3_uri',
+        'ratings_val_disliked_uri',
+        'max_history', 'num_epochs', 'batch_size', 'seed'}
+    for key in req_keys:
+        if key not in config:
+            raise LookupError(f"config is missing {key}")
     
     best_val_ndcg_k = -1.0
     mlflow_run = None

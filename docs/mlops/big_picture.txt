@@ -20,18 +20,19 @@ Graph Transformer (GAT) as graph contextualized listwise ranker:
         in the list simultaneously.
     Ranking Loss with (Rax)
 
-The data I have:
+The input files:
+  - user ratings containing rows of user_id, movie_id, rating, timestamp
+    partitioned into train, val, and test datasets
   - user and movie embeddings made from the trained Two-Tower bi-encoder
-    run on all users and run on all movies
-  - the exact hard negatives if any, for each user.
-    these are the movies the user didn't like 
-    (train data with rating < 3) intersected with the retrieval 
-    recommended movies.
-  - the approximate hard negatives as the retrieval recommended
-    movies with all train data removed from them.
-    that they weren't chosen by the user above what they did watch
-    makes them potential negatives.
-  - the positive ratings for train, val, and test
+    run on all users and run on all movies.
+    each row is id [embedding list]
+  - recommended movies for each user
+    these are in 2 files with these 2 different row formats:
+       user_id, [movie_id list]  of types int32, list of int32
+    and
+       user_id, [timestamp list]  of types int32, list of int64
+  - movie catalog
+       each each row is a movie id
   - ...
 
 The model data inputs and creation of data:
@@ -49,11 +50,21 @@ The model data inputs and creation of data:
         these become the edges of the graph
       - candidates:
         - positive: the movie_id from train data.  get label 1.0
-        - hard negatives: pulled from the exact hard negatives dataset
-        - approx negatives:  if list isn't full, pull these
-          from user recommendations
-          They are the recommendations that the user did not interact with, 
-          that is, they are the recommendations - train dataset.
+        - negatives: 
+          created dynamically using recommendations, movie catalog
+          and users watch history for timestamps < target timestamp.
+          ideally composed of 
+            10-15% type 1
+            50-60% type 2
+            10-15% type 3
+            15-10% type 4
+          where the types are:
+            1: "hard negatives" = recommended intersection with user's disliked.
+               These are "False positives".
+            2: "implicit hard negatives" = recommended minus users watch history
+            3: "out of distr negatives" = disliked - recommended.
+            4: "easy negatives" = movie catalog - watch history
+
       - transformation:
         - create_local_subgraph: packages the ids,senders, and
           receivers into jgraph.GraphsTuple

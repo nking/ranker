@@ -6,7 +6,7 @@
           ranked by highest similarity to uer vector
       - created as outputs of bi-encoder in rec sys/tfx pipelines project
         - formats are array_record
-    - ratings and negatives
+    - ratings
       - created rec sys/tfx pipelines project
         - formats are array_record
     - movies catalog

@@ -1,5 +1,5 @@
 import os
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from urllib.request import Request
 
 import requests
@@ -43,16 +43,11 @@ def get_project_dir() -> str:
 def get_bin_dir() -> str:
   return os.path.join(get_project_dir(), "bin")
 
-def get_train_val_test_liked_uris(use_small:bool=True) -> Tuple[str, str, str]:
+def get_train_val_test_liked_uris(use_small:bool=True) -> Dict[str, str]:
     base_dir = os.path.join(get_project_dir(), "src/test/resources/data/")
     if use_small:
         base_dir = os.path.join(base_dir, "small")
-    return (os.path.join(base_dir, "ratings_train_liked.array_record"),
-        os.path.join(base_dir, "ratings_val_liked.array_record"), os.path.join(base_dir, "ratings_test_liked.array_record"))
-    
-def get_train_val_test_disliked_uris(use_small:bool=True) -> Tuple[str, str, str]:
-    base_dir = os.path.join(get_project_dir(), "src/test/resources/data/")
-    if use_small:
-        base_dir = os.path.join(base_dir, "small")
-    return (os.path.join(base_dir, "ratings_train_disliked.array_record"),
-        os.path.join(base_dir, "ratings_val_disliked.array_record"), os.path.join(base_dir, "ratings_test_disliked.array_record"))
+    out = {}
+    for key in ('train_3', 'val_3', 'test_3', 'train_liked', 'val_liked', 'test_liked', 'train_disliked', 'val_disliked', 'test_disliked'):
+        out[key] = os.path.join(base_dir, f"ratings_{key}.array_record")
+    return out

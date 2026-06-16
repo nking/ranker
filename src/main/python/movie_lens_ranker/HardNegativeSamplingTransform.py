@@ -3,40 +3,71 @@ import numpy as np
 import grain.python as pgrain
 from array_record.python import array_record_module
 
-from movie_lens_ranker.Negatives_vec import Negatives
 from movie_lens_ranker.RecommendedMovies import RecommendedMovies
 
 from movie_lens_ranker.UserHistory import UserHistory
+from movie_lens_ranker.util_numba import row_wise_intersect, \
+    row_wise_sortedset_subtract, generate_type_4_negatives, build_negative_pool_numba, \
+    simultaneous_shuffle
 
-class HardNegativeSamplingTransform(pgrain.MapTransform):
+class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
     """
     class to map a user's local history to the same local history enriched with negative sampling
     as "candidate_ids" and "labels"
     """
-    def __init__(self, history_lookup: UserHistory, all_movie_ids:List[int], negatives:Negatives,
-        recommendations:RecommendedMovies, num_candidates=20,
-        seed:int = 0):
+    def __init__(self, history_lookup : UserHistory, history_lookup_disliked : UserHistory,
+            all_movie_ids:List[int],
+            recommendations:RecommendedMovies, num_candidates=20):
         """
-        initialize a CandidateSamplingTransform object
+        initialize a CandidateSamplingTransform object.
+        The negative lists dynamically created in map are composed from 4 types of negatives:
+        1) "hard negatives" = recommended intersection with user's disliked.
+        These are "False positives".
+        2) "implicit hard negatives" = recommended minus users watch history
+        3) "out of distr negatives" = disliked - recommended.
+        4) "easy negatives" = movie catalog - watch history
+        
+        For example, given:
+            movie catalog is A,B,C,D,E,F,G,H,I,J
+            watched = A,B,C,D,G
+            disliked = A,B,C,D
+            recommended = B,D,F,G,H
+        we have for the 4 types:
+            1) intersect({B,D,F,G,H}, {A,B,C,D}) = B,D
+            2) subtract({B,D,F,G,H}, {A,B,C,D,G}) = F,H
+            3) subtract({A,B,C,D}, {B,D,F,G,H}) = A,C
+            4) subtract({A,B,C,D,E,F,G,H,I,J}, {A,B,C,D,G}) = E,F,H,I,J
+ 
         :param history_lookup:  Dict[user_id:int, Tuple(arrays of ts, movie_id, rating)]
+        :param history_lookup_disliked:  Dict[user_id:int, Tuple(arrays of ts, movie_id, rating)] for ratings > 3
         :param all_movie_ids: list of all movie_ids
-        :param negatives: instance holding user negatives
-        :param recommendations: class to retrieve unseen move recommendations for batch of users
-        :param num_candidates: total number of candidates to create from 1 postive and mulitple negatives
+        :param recommendations: class to retrieve unseen movie recommendations for batch of users
+        :param num_candidates: total number of candidates to create from 1 positive and multiple negatives
         :param seed: seed for random number generator
         """
         self.history_lookup = history_lookup
-        self.negatives = negatives
-        self.all_movie_ids = np.asarray(all_movie_ids) #to o use in approx hard negatives
+        self.history_lookup_disliked = history_lookup_disliked
+        self.all_movie_ids = np.asarray(all_movie_ids)
+        self.recommendations = recommendations
         self.num_candidates = num_candidates
+        
+        self.num_1_negatives = round(num_candidates * 0.15)
+        self.num_2_negatives = round(num_candidates * 0.55)
+        self.num_3_negatives = round(num_candidates * 0.15)
+        #self.num_4_negatives = self.num_candidates - (self.num_1_negatives + self.num_2_negatives + self.num_3_negatives)
+        
         self.n_approx = self.num_candidates // 2
         self.n_hard = self.num_candidates - 1 - self.n_approx
-        self.recommendations = recommendations
-        self.seed = seed
-
-    def map(self, batch:Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        
+        self.pad_value = self.history_lookup.pad_value
+        if self.history_lookup.pad_value != self.pad_value:
+            raise ValueError("history_lookup.pad_value must be equal to self.history_lookup.pad_value")
+        if self.recommendations.pad_value != self.pad_value:
+            raise ValueError("recommendations.pad_value must be equal to self.history_lookup.pad_value")
+  
+    def random_map(self, batch:Dict[str, np.ndarray], rng:np.random.Generator) -> Dict[str, np.ndarray]:
         """
-        given the current user history, add a hard negative mining list as "column_ids" and "labels"
+        given the current user history, add a negative mining list as "column_ids" and "labels"
         :param batch: a dictionary containing np.ndarrays
             'user_id' of length batch_size,
             'movie_id' of length batch_size,
@@ -61,9 +92,7 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
         # we want to form the list of positive and negatives for ranking and their labels as 1 and 0 respectively.
         # for each row in the batch:
         #   candidate_ids = the positive movie rated + self.num_candidates - 1 negatives.
-        #       half of the negatives are from the hard negatives if possible, and the other
-        #       half or more if needed, are randomly sampled from the full movie catalog excluding
-        #       the user's history and recommendations for them.
+        #       see the code comments for the composition of negatives.
         #       note that timestamps are used in forming these lists.
         #   labels = an array of length self.num_candidates where the first is a 1 and the rest are 0s.
         # the candidate_ids and labels are similarly shuffled to prevent the model from memorizing
@@ -73,68 +102,62 @@ class HardNegativeSamplingTransform(pgrain.MapTransform):
     
         n_users = batch['user_id'].shape[0]
         n_negs = self.num_candidates - 1  # Total negatives needed per user
-        rng = np.random.default_rng(self.seed)
         
-        # PREPARE EXCLUSIONS
-        # Get history to ensure approx negatives are actually "unseen"
+        #empty values are self.pad_value which is -1
         movie_histories = self.history_lookup.get_movieids_before_timestamp(
             user_id=batch['user_id'], timestamp=batch['timestamp'],
             max_hist=self.history_lookup.fixed_size)
-        exclude = np.hstack([movie_histories, batch['movie_id'][:, np.newaxis]])
         
-        # CREATE THE "BASE" APPROXIMATE POOL
-        # We draw a surplus to ensure we can fill all n_negs slots after filtering
-        n_draw = n_negs * 3
-        approx_indices = rng.integers(0, len(self.all_movie_ids), size=(n_users, n_draw))
-        approx_candidates = self.all_movie_ids[approx_indices]
+        # empty values are -1
+        movie_histories_disliked = self.history_lookup_disliked.get_movieids_before_timestamp(
+            user_id=batch['user_id'], timestamp=batch['timestamp'],
+            max_hist=self.history_lookup_disliked.fixed_size)
         
-        # Collision Check: (n_users, n_draw, 1) == (n_users, 1, n_forbidden)
-        is_forbidden = np.any(
-            approx_candidates[:, :, np.newaxis] == exclude[:, np.newaxis, :], axis=2)
+        movie_recommendations = self.recommendations.get_unseen_movies(
+            user_id=batch['user_id'], timestamp=batch['timestamp'], top_k=n_negs)
         
-        # Sort by noise, pushing forbidden items (noise = -1) to the back
-        noise = rng.random(approx_candidates.shape)
-        noise[is_forbidden] = -1.0
-        shuffled_idx = np.argsort(noise, axis=1)[:, ::-1]
+        # Type 1: "hard negatives" = recommended intersection with user's disliked.
+        # highest scoring are at beginning of array. empty values of pad_value are at end of array.
+        type_1_neg = row_wise_intersect(movie_histories, movie_histories_disliked, pad_value=self.pad_value)
         
-        # Initialize the negatives_pool with ONLY valid approximate negatives
-        row_grid = np.arange(n_users)[:, np.newaxis]
-        negatives_pool = approx_candidates[row_grid, shuffled_idx[:, :n_negs]]
+        #Type 2: "implicit hard negatives" = recommended - watch history
+        type_2_neg = row_wise_sortedset_subtract(movie_recommendations, movie_histories, pad_value=self.pad_value)
         
-        # OVERWRITE WITH HARD NEGATIVES
-        # Fetch hard negatives
-        hard_negs = self.negatives.get_negatives(user_id=batch['user_id'], length=self.n_hard, seed=self.seed)
+        #Type 3: "out of distr negatives" = disliked - recommended
+        type_3_neg = row_wise_sortedset_subtract(movie_histories_disliked, movie_recommendations, pad_value=self.pad_value)
         
-        # Vectorized overwrite: Only replace the approx negative if the hard negative is valid (!= -1)
-        # We only look at the first self.n_hard slots of our pool
-        is_valid_hard = (hard_negs != -1)
-        negatives_pool[:, :self.n_hard] = np.where(is_valid_hard, hard_negs, negatives_pool[:, :self.n_hard])
+        #Type 4: "easy negatives" = movie catalog - watch history
+        type_4_neg = generate_type_4_negatives(self.all_movie_ids, movie_histories, n_negs=n_negs,
+            pad_value=self.pad_value, seed=int(rng.integers(0, 2 ** 31 - 1)))
         
-        # 4. FINAL ASSEMBLY
-        # Stack: [Positive] + [Negatives Pool (Hard + Approx)]
+        negatives = build_negative_pool_numba(arr1=type_1_neg, arr2=type_2_neg, arr3=type_3_neg,
+                arr4=type_4_neg, target1 = self.num_1_negatives, target2 = self.num_2_negatives,
+                target3=self.num_3_negatives, num_negatives=n_negs, pad_value=self.pad_value,
+                seed=int(rng.integers(0, 2 ** 31 - 1)))
+            
+        # Stack: [Positive] + [Negatives Pool]
         candidate_ids = np.hstack([
             batch['movie_id'][:, np.newaxis],
-            negatives_pool
+            negatives
         ])
         
         # ULTIMATE SAFETY VALVE
         # In the nearly impossible case a user saw the entire catalog,
         # replace any remaining -1s with a truly random draw
-        if (candidate_ids == -1).any():
-            mask = (candidate_ids == -1)
+        if (candidate_ids == self.pad_value).any():
+            mask = (candidate_ids == self.pad_value)
             candidate_ids[mask] = rng.choice(self.all_movie_ids, size=np.sum(mask))
         
-        # LABELS AND SHUFFLE
+        # LABELS
         labels = np.zeros((n_users, self.num_candidates), dtype=np.float32)
         labels[:, 0] = 1.0  # Positive is at index 0
         
-        # Shuffle labels and candidates together
-        perm_idx = np.argsort(rng.random((n_users, self.num_candidates)), axis=1)
-        final_candidates = candidate_ids[row_grid, perm_idx]
-        final_labels = labels[row_grid, perm_idx]
+        #shuffle so the model doesn't learn that first label is always right
+        simultaneous_shuffle(candidate_ids, labels, seed=int(rng.integers(0, 2 ** 31 - 1)))
         
         return {
             **batch,
-            "candidate_ids": final_candidates,
-            "labels": final_labels
+            "candidate_ids": candidate_ids,
+            "labels": labels
         }
+    

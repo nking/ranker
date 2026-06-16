@@ -8,9 +8,6 @@ from grain import DataLoader
 from movie_lens_ranker.BatchSampler import BatchSampler
 from movie_lens_ranker.HardNegativeSamplingTransform import \
     HardNegativeSamplingTransform
-from movie_lens_ranker.JraphPaddedGraphTupleTransform import \
-    JraphPaddedGraphTupleTransform
-from movie_lens_ranker.Negatives_vec import Negatives
 from movie_lens_ranker.RandomAccessArrayRecordDataSource import \
     RandomAccessArrayRecordDataSource
 from movie_lens_ranker.RatingsHistoryLookupTransform import \
@@ -24,9 +21,14 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 def create_train_and_val_dataloaders(
+        num_users:int,
         movies_uri:str, recommendations_uri:str, recommendations_ts_uri:str,
-        train_ratings_uri:str, val_ratings_uri:str,
-        train_negatives_uri:str, val_negatives_uri:str,
+        ratings_train_data_uri:str,
+        ratings_train_history_uris:List[str],
+        ratings_train_disliked_uris:List[str],
+        ratings_val_data_uri:str,
+        ratings_val_history_uris:List[str],
+        ratings_val_disliked_uris:List[str],
         max_history:int, num_candidates:int,
         num_epochs:int, batch_size:int, seed:int=0) -> Tuple[DataLoader, DataLoader]:
         
@@ -34,42 +36,70 @@ def create_train_and_val_dataloaders(
     
     # the number per user must be >= half of num_candidates
     recommendations = RecommendedMovies(
-        movie_rec_file_path=recommendations_uri,
-        movie_rec_ts_file_path=recommendations_ts_uri)
+        num_users=num_users,
+        movie_rec_file_uri=recommendations_uri,
+        movie_rec_ts_file_uri=recommendations_ts_uri)
     
     train_dataloader = _create_dataloader(
         all_movie_ids=all_movie_ids,
         recommendations=recommendations,
-        ratings_uri=train_ratings_uri, negatives_uri=train_negatives_uri,
+        rattings_data_uri = ratings_train_data_uri,
+        ratings_history_uris = ratings_train_history_uris,
+        ratings_disliked_uris = ratings_train_disliked_uris,
         max_history=max_history, num_candidates=num_candidates,
         num_epochs=num_epochs, batch_size=batch_size, seed=seed)
     
     val_dataloader = _create_dataloader(
         all_movie_ids=all_movie_ids,
         recommendations=recommendations,
-        ratings_uri=val_ratings_uri, negatives_uri=val_negatives_uri,
+        rattings_data_uri=ratings_val_data_uri,
+        ratings_history_uris=ratings_val_history_uris,
+        ratings_disliked_uris=ratings_val_disliked_uris,
         max_history=max_history, num_candidates=num_candidates,
         num_epochs=1, batch_size=batch_size, seed=seed, shuffle=False)
     
     return train_dataloader, val_dataloader
 
 def create_test_dataloader(
-        movies_uri: str, recommendations_uri: str, recommendations_ts_uri: str,
-        ratings_uri: str, negatives_uri: str,
+        num_users:int,
+        movies_uri: str,
+        recommendations_uri: str,recommendations_ts_uri: str,
+        rattings_data_uri: str,
+        ratings_history_uris: List[str],
+        ratings_disliked_uris: List[str],
         max_history: int, num_candidates: int,
         batch_size: int, seed: int) -> DataLoader:
+    """
+    create test data loader
+    :param num_users:
+    :param movies_uri:
+    :param recommendations_uri:
+    :param recommendations_ts_uri:
+    :param rattings_data_uri:
+    :param ratings_history_uris:
+    :param ratings_disliked_uris:
+    :param max_history:
+    :param num_candidates:
+    :param batch_size:
+    :param seed:
+    :return:
+    """
     
     all_movie_ids: List[int] = read_movies_array_record(movies_uri,
         batch_size=batch_size)
     
     # the number per user must be >= half of num_candidates
     recommendations = RecommendedMovies(
-        movie_rec_file_path=recommendations_uri,
-        movie_rec_ts_file_path=recommendations_ts_uri)
+        num_users=num_users,
+        movie_rec_file_uri=recommendations_uri,
+        movie_rec_ts_file_uri=recommendations_ts_uri)
     
     dataloader = _create_dataloader(
-        all_movie_ids=all_movie_ids, recommendations=recommendations,
-        ratings_uri=ratings_uri, negatives_uri=negatives_uri,
+        all_movie_ids=all_movie_ids,
+        recommendations=recommendations,
+        rattings_data_uri = rattings_data_uri,
+        ratings_history_uris = ratings_history_uris,
+        ratings_disliked_uris = ratings_disliked_uris,
         max_history=max_history, num_candidates=num_candidates,
         num_epochs=1, batch_size=batch_size, seed=seed, shuffle=False)
         
@@ -77,7 +107,9 @@ def create_test_dataloader(
 
 def _create_dataloader(
         all_movie_ids: List[int], recommendations: RecommendedMovies,
-        ratings_uri:str, negatives_uri:str,
+        rattings_data_uri: str,
+        ratings_history_uris: List[str],
+        ratings_disliked_uris: List[str],
         max_history: int, num_candidates: int,
         num_epochs:int, batch_size: int, seed: int, shuffle:bool=True) -> DataLoader:
     
@@ -88,18 +120,17 @@ def _create_dataloader(
         num_threads = int(os.environ.get("grain_read_options_num_threads", 16))
     )
     
-    # each worker will have its own copy of these:
-    user_history = UserHistory(ratings_uri_list=ratings_uri, fixed_size=2048)
+    user_history = UserHistory(ratings_uri_list=ratings_history_uris, fixed_size=2048)
     
-    negatives = Negatives(negatives_uri, fixed_size=256)
+    user_disliked_history = UserHistory(ratings_uri_list=ratings_disliked_uris, fixed_size=256)
     
-    datasource = RandomAccessArrayRecordDataSource(ratings_uri)
+    datasource = RandomAccessArrayRecordDataSource(rattings_data_uri)
     
     ra_sampler = BatchSampler(num_records=datasource.__len__(),
         num_epochs=num_epochs,
         batch_size=batch_size, shuffle=shuffle, seed=seed,
         shard_options=shard_opts)
-    
+        
     # NOTE that train_history_dict, etc. are passed by reference to the MapTransforms
     dataloader = DataLoader(
         data_source=datasource,
@@ -111,10 +142,10 @@ def _create_dataloader(
                 max_history=max_history),
             HardNegativeSamplingTransform(
                 history_lookup=user_history,
+                history_lookup_disliked=user_disliked_history,
                 all_movie_ids=all_movie_ids,
-                negatives=negatives,
                 recommendations=recommendations,
-                num_candidates=num_candidates, seed=seed),
+                num_candidates=num_candidates),
             SparseLocalSubgraphTransform(),
             #moving this logic to the train loop to allow for multi-host partition of graphs
             #JraphPaddedGraphTupleTransform(batch_size=batch_size,
