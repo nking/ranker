@@ -7,7 +7,7 @@ from movie_lens_ranker.RecommendedMovies import RecommendedMovies
 
 from movie_lens_ranker.UserHistory import UserHistory
 from movie_lens_ranker.util_numba import row_wise_intersect, \
-    row_wise_sortedset_subtract, generate_type_4_negatives, build_negative_pool_numba, \
+    row_wise_sortedset_subtract, generate_type_4_negatives, build_negative_pool, \
     simultaneous_shuffle
 
 class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
@@ -122,38 +122,46 @@ class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
         
         #Type 2: "implicit hard negatives" = recommended - watch history
         type_2_neg = row_wise_sortedset_subtract(movie_recommendations, movie_histories, pad_value=self.pad_value)
-        
+       
         #Type 3: "out of distr negatives" = disliked - recommended
         type_3_neg = row_wise_sortedset_subtract(movie_histories_disliked, movie_recommendations, pad_value=self.pad_value)
         
+        # deterministic above this point
+        
+        # and deterministically reproducible with same seed, after this point
+       
+        seed1 = int(rng.integers(0, 2 ** 31 - 1))
+        
         #Type 4: "easy negatives" = movie catalog - watch history
         type_4_neg = generate_type_4_negatives(self.all_movie_ids, movie_histories, n_negs=n_negs,
-            pad_value=self.pad_value, seed=int(rng.integers(0, 2 ** 31 - 1)))
+            pad_value=self.pad_value, seed=seed1)
         
-        negatives = build_negative_pool_numba(arr1=type_1_neg, arr2=type_2_neg, arr3=type_3_neg,
+        seed2 = int(rng.integers(0, 2 ** 31 - 1))
+        negatives = build_negative_pool(arr1=type_1_neg, arr2=type_2_neg, arr3=type_3_neg,
                 arr4=type_4_neg, target1 = self.num_1_negatives, target2 = self.num_2_negatives,
                 target3=self.num_3_negatives, num_negatives=n_negs, pad_value=self.pad_value,
-                seed=int(rng.integers(0, 2 ** 31 - 1)))
-            
+                seed=seed2)
+        
         # Stack: [Positive] + [Negatives Pool]
         candidate_ids = np.hstack([
             batch['movie_id'][:, np.newaxis],
             negatives
         ])
-        
+    
         # ULTIMATE SAFETY VALVE
         # In the nearly impossible case a user saw the entire catalog,
         # replace any remaining -1s with a truly random draw
         if (candidate_ids == self.pad_value).any():
             mask = (candidate_ids == self.pad_value)
             candidate_ids[mask] = rng.choice(self.all_movie_ids, size=np.sum(mask))
-        
+            
         # LABELS
         labels = np.zeros((n_users, self.num_candidates), dtype=np.float32)
         labels[:, 0] = 1.0  # Positive is at index 0
-        
+       
+        seed3 = int(rng.integers(0, 2 ** 31 - 1))
         #shuffle so the model doesn't learn that first label is always right
-        simultaneous_shuffle(candidate_ids, labels, seed=int(rng.integers(0, 2 ** 31 - 1)))
+        simultaneous_shuffle(candidate_ids, labels, seed=seed3)
         
         return {
             **batch,

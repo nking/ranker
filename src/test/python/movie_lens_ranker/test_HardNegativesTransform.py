@@ -12,7 +12,7 @@ class TestRanker(unittest.TestCase):
     
     def setUp(self):
         
-        ratings_uri_dict = get_train_val_test_liked_uris(use_small=True)
+        ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY)
         
         self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]
         self.ratings_val_liked_uri = ratings_uri_dict["val_liked"]
@@ -78,28 +78,48 @@ class TestRanker(unittest.TestCase):
         
         result1:Dict[str, np.ndarray] = transform1.map(batch)
         
-        transform2 = HardNegativeSamplingTransform(
-            history_lookup=watch_history,
-            history_lookup_disliked=disliked_history,
-            all_movie_ids= all_movie_ids,
-            recommendations=self.recommended_movies_getter,
-            num_candidates = num_candidates)
+        results_dict = {}
         
-        rng = np.random.default_rng(seed=0)
-        
-        result2:Dict[str, np.ndarray] = transform2.random_map(result1, rng=rng)
-        
-        self.assertTrue(isinstance(result2, dict))
-        
-        expected_keys = {"user_id", "movie_id", "rating", "timestamp",
-            "history_movie_ids", "history_ratings", "history_length",
-            "candidate_ids", "labels"}
-        for expected_key in expected_keys:
-            self.assertTrue(expected_key in result2.keys())
-            self.assertTrue(isinstance(result2[expected_key], np.ndarray))
-        
-        for i, user_id in enumerate(result2["user_id"]):
-            self.assertEqual(batch[i][0], user_id)
+        for i, seed in enumerate((0, 0, 123)):
             
+            rng = np.random.default_rng(seed)
+
+            transform2 = HardNegativeSamplingTransform(
+                history_lookup=watch_history,
+                history_lookup_disliked=disliked_history,
+                all_movie_ids= all_movie_ids,
+                recommendations=self.recommended_movies_getter,
+                num_candidates = num_candidates)
+                
+            result2:Dict[str, np.ndarray] = transform2.random_map(result1, rng=rng)
+            
+            self.assertTrue(isinstance(result2, dict))
+            
+            results_dict[i] = result2
+            
+            expected_keys = {"user_id", "movie_id", "rating", "timestamp",
+                "history_movie_ids", "history_ratings", "history_length",
+                "candidate_ids", "labels"}
+            for expected_key in expected_keys:
+                self.assertTrue(expected_key in result2.keys())
+                self.assertTrue(isinstance(result2[expected_key], np.ndarray))
+            
+            for i, user_id in enumerate(result2["user_id"]):
+                self.assertEqual(batch[i][0], user_id)
+        
+        dict0 = results_dict[0]
+        dict1 = results_dict[1]
+        dict2 = results_dict[2]
+        
+        a = dict0['candidate_ids']
+        b = dict1['candidate_ids']
+        np.testing.assert_array_equal(a, b, strict=True)
+        np.testing.assert_raises(
+            AssertionError,
+            np.testing.assert_array_equal,
+            dict1['candidate_ids'],
+            dict2['candidate_ids']
+        )
+        
     if __name__ == '__main__':
         unittest.main()

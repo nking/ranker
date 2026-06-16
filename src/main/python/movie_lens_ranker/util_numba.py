@@ -83,7 +83,7 @@ def row_wise_sortedset_subtract(arr1:np.ndarray, arr2:np.ndarray, pad_value:int)
     return result
 
 @numba.njit(parallel=True, cache=True)
-def build_negative_pool_numba(arr1:np.ndarray, arr2:np.ndarray, arr3:np.ndarray,
+def build_negative_pool(arr1:np.ndarray, arr2:np.ndarray, arr3:np.ndarray,
         arr4:np.ndarray, target1:int, target2:int, target3:int, num_negatives:int,
         pad_value:int, seed:int) -> np.ndarray:
     """
@@ -117,41 +117,42 @@ def build_negative_pool_numba(arr1:np.ndarray, arr2:np.ndarray, arr3:np.ndarray,
     # Pre-allocate the final pool with -1 padding
     pool = np.full((num_users, num_negatives), pad_value, dtype=arr1.dtype)
     
-    buff1 = np.empty(arr1.shape[1], dtype=arr1[1].dtype)
-    buff2 = np.empty(arr2.shape[1], dtype=arr2[1].dtype)
-    buff3 = np.empty(arr3.shape[1], dtype=arr3[1].dtype)
-    buff4 = np.empty(arr4.shape[1], dtype=arr4[1].dtype)
-    
-    np.random.seed(seed)
+    buff1 = np.empty((num_users, arr1.shape[1]), dtype=arr1.dtype)
+    buff2 = np.empty((num_users, arr2.shape[1]), dtype=arr2.dtype)
+    buff3 = np.empty((num_users, arr3.shape[1]), dtype=arr3.dtype)
+    buff4 = np.empty((num_users, arr4.shape[1]), dtype=arr4.dtype)
     
     # Distribute rows across CPU cores
     for i in numba.prange(num_users):
+        
+        np.random.seed(seed + i)
+        
         write_idx = 0
         
         # --- PROCESS ARRAY 1 ---
         write_idx = _extract_shuffle_and_append(arr1[i], target1, pool[i],
-            write_idx, num_negatives, pad_value=pad_value, buffer_row=buff1)
+            write_idx, num_negatives, pad_value=pad_value, buffer_row=buff1[i])
         
         # --- PROCESS ARRAY 2 ---
         write_idx = _extract_shuffle_and_append(arr2[i], target2, pool[i],
-            write_idx, num_negatives, pad_value=pad_value, buffer_row=buff2)
+            write_idx, num_negatives, pad_value=pad_value, buffer_row=buff2[i])
         
         # --- PROCESS ARRAY 3 ---
         write_idx = _extract_shuffle_and_append(arr3[i], target3, pool[i],
-            write_idx, num_negatives, pad_value=pad_value, buffer_row=buff3)
+            write_idx, num_negatives, pad_value=pad_value, buffer_row=buff3[i])
         
         # --- PROCESS ARRAY 4 (Filler) ---
         # For the filler, we can take up to the remaining slots available in the pool
         remainder_needed = num_negatives - write_idx
         if remainder_needed > 0:
             _extract_shuffle_and_append(arr4[i], remainder_needed, pool[i],
-                write_idx, num_negatives, pad_value=pad_value, buffer_row=buff4)
+                write_idx, num_negatives, pad_value=pad_value, buffer_row=buff4[i])
     
     return pool
 
 @numba.njit
 def _extract_shuffle_and_append(source_row:np.ndarray, max_take:int, pool_row:np.ndarray,
-        write_idx:int, num_negatives:int, pad_value:int, buffer_row:np.ndarray, seed:int=None):
+        write_idx:int, num_negatives:int, pad_value:int, buffer_row:np.ndarray):
     """
     
     :param source_row:
@@ -170,9 +171,6 @@ def _extract_shuffle_and_append(source_row:np.ndarray, max_take:int, pool_row:np
     # (Pre-allocating to row size to avoid dynamic list overhead in Numba)
     #beause pad_value are at highest indices if present at all, we can find
     # the first pad_value and copy up to that point into new buffer
-    
-    if seed is not None:
-        np.random.seed(seed)
     
     count = 0
     for val in source_row:
@@ -202,11 +200,6 @@ def _extract_shuffle_and_append(source_row:np.ndarray, max_take:int, pool_row:np
     
     return write_idx
 
-
-import numpy as np
-import numba
-
-
 @numba.njit(parallel=True, cache=True)
 def generate_type_4_negatives(all_movie_ids:np.ndarray, exclude:np.ndarray, n_negs:int, pad_value:int,
     seed:int):
@@ -219,9 +212,6 @@ def generate_type_4_negatives(all_movie_ids:np.ndarray, exclude:np.ndarray, n_ne
     :return: a 2D array of shape (exclude.shape[0], n_negs) holding a random sampling of n_negs number of negative samples per row
     after excluding the exclude contents.
     """
-    
-    np.random.seed(seed)
-    
     n_users = exclude.shape[0]
     n_movies = len(all_movie_ids)
     
@@ -232,6 +222,9 @@ def generate_type_4_negatives(all_movie_ids:np.ndarray, exclude:np.ndarray, n_ne
     pool = np.empty((n_users, n_negs), dtype=all_movie_ids.dtype)
     
     for i in numba.prange(n_users):
+        
+        np.random.seed(seed + i)
+        
         count = 0
         
         # Keep drawing until we successfully find n_negs valid movies
@@ -265,11 +258,6 @@ def generate_type_4_negatives(all_movie_ids:np.ndarray, exclude:np.ndarray, n_ne
     
     return pool
 
-
-import numpy as np
-import numba
-
-
 @numba.njit(parallel=True, cache=True)
 def simultaneous_shuffle(candidates:np.ndarray, labels:np.ndarray, seed:int):
     """
@@ -283,21 +271,24 @@ def simultaneous_shuffle(candidates:np.ndarray, labels:np.ndarray, seed:int):
     if labels.shape[0] != num_users or labels.shape[1] != num_cols:
         raise ValueError('candidates and labels must have same shapes')
     
-    np.random.seed(seed)
-    
     for i in numba.prange(num_users):
+        
+        np.random.seed(seed + i)
+        
         # Fisher-Yates shuffle across the columns of the current row
+        row_cand = candidates[i]
+        row_label = labels[i]
         for j in range(num_cols - 1, 0, -1):
             k = np.random.randint(0, j + 1)
             
             # Swap the candidate IDs
-            tmp_c = candidates[i, j]
-            candidates[i, j] = candidates[i, k]
-            candidates[i, k] = tmp_c
+            tmp_c = row_cand[j]
+            row_cand[j] = row_cand[k]
+            row_cand[k] = tmp_c
             
             # Swap the exact same indices in the labels array
-            tmp_l = labels[i, j]
-            labels[i, j] = labels[i, k]
-            labels[i, k] = tmp_l
+            tmp_l = row_label[j]
+            row_label[j] = row_label[k]
+            row_label[k] = tmp_l
     
     return candidates, labels
