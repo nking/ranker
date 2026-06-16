@@ -99,32 +99,6 @@ def convert_to_global(arr, mesh, sync:bool=True):
     
     return jax.make_array_from_callback(global_shape, global_sharding, data_callback)
 
-def get_nontrainable_train_config(movies_uri:str,
-        recommendations_uri:str, recommendations_ts_uri:str,
-        ratings_train_uri:str, ratings_val_uri:str,
-        train_negatives_uri:str, val_negatives_uri:str,
-        latest_checkpoint_uri:str, best_checkpoint_uri:str,
-        movie_embeddings_uri:str, user_embeddings_uri:str,
-        num_epochs:int=120, batch_size:int=64, seed:int=0) -> Dict[str, Union[str, int, float]]:
-    
-    config = {}
-    config['movies_uri'] = movies_uri
-    config['recommendations_uri'] = recommendations_uri
-    config['recommendations_ts_uri'] = recommendations_ts_uri
-    config['ratings_train_uri'] = ratings_train_uri
-    config['ratings_val_uri'] = ratings_val_uri
-    config['train_negatives_uri'] = train_negatives_uri
-    config['val_negatives_uri'] = val_negatives_uri
-    config['latest_checkpoint_uri']= latest_checkpoint_uri
-    config['best_checkpoint_uri']= best_checkpoint_uri
-    config['movie_embeddings_uri']= movie_embeddings_uri
-    config['user_embeddings_uri']= user_embeddings_uri
-    config['seed'] = seed
-    config['num_epochs'] = num_epochs
-    config['batch_size'] = batch_size
-   
-    return config
-
 def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple):
     # Forward Pass: returns ONLY candidate scores [num_total_graphs * K]
     all_scores = model(padded_graph) #LinearizeTracer<float32[60]>

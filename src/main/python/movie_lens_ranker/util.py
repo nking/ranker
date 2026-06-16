@@ -15,7 +15,8 @@ from jax.experimental import mesh_utils
 
 FLAGS = flags.FLAGS
 
-data_params_nontrainable_keys = {'movies_uri', 'recommendations_uri',
+data_params_nontrainable_keys = {
+    'movies_uri', 'recommendations_uri',
     'recommendations_ts_uri',
     'ratings_train_3_uri', 'ratings_val_3_uri', 'ratings_test_3_uri',
     'ratings_train_liked_uri', 'ratings_val_liked_uri', 'ratings_test_liked_uri',

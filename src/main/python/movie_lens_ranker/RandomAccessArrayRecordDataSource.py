@@ -21,14 +21,14 @@ class RandomAccessArrayRecordDataSource(
     in a dataloader.
     
     example usages:
-        datasource = RandomAccessArrayRecordDataSource(ratings_train_uri)
+        datasource = RandomAccessArrayRecordDataSource(ratings_uri)
         for record in datasource:
             pass
             
         batch = datasource.__getitems__([100, 100 + batch_size])
         
         note:  can use type parameter, but it won't affect results:
-            datasource = RandomAccessArrayRecordDataSource[MovieRating](ratings_train_uri)
+            datasource = RandomAccessArrayRecordDataSource[MovieRating](ratings_uri)
             ...
     """
     def __init__(self, uri: str):

@@ -126,6 +126,13 @@ def _create_dataloader(
     
     datasource = RandomAccessArrayRecordDataSource(rattings_data_uri)
     
+    import jax
+    num_records = datasource.__len__()
+    process_count = jax.process_count()
+    if ((num_records // batch_size) // process_count) == 0:
+        raise ValueError("batch_size is too small.  num_records={num_records} divided by "
+            "batch_size={batch_size} then partitioned over {process_count} processes is 0")
+    
     ra_sampler = BatchSampler(num_records=datasource.__len__(),
         num_epochs=num_epochs,
         batch_size=batch_size, shuffle=shuffle, seed=seed,

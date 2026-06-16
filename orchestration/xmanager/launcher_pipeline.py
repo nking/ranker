@@ -195,17 +195,17 @@ def main(_):
             "recommendations_uri": "gs://data/recommended_movies.array_record",
             "recommendations_ts_uri": "gs://data/recommended_movies_timestamps.array_record",
             
-            'ratings_train_liked_uri' : "gs://data/ratings_train_liked.array_record",
-            'ratings_train_3_uri': "gs://data/ratings_train_3.array_record",
-            'ratings_train_disliked_uri': "gs://data/ratings_train_disliked.array_record",
+            'ratings_train_liked_uri' : "gs://data/small/ratings_train_liked.array_record",
+            'ratings_train_3_uri': "gs://data/small/ratings_train_3.array_record",
+            'ratings_train_disliked_uri': "gs://data/small/ratings_train_disliked.array_record",
             
-            'ratings_val_liked_uri' :"gs://data/ratings_val_liked.array_record",
-            'ratings_val_3_uri': "gs://data/ratings_val_3.array_record",
-            'ratings_val_disliked_uri' : "gs://data/ratings_val_disliked.array_record",
+            'ratings_val_liked_uri' :"gs://data/small/ratings_val_liked.array_record",
+            'ratings_val_3_uri': "gs://data/small/ratings_val_3.array_record",
+            'ratings_val_disliked_uri' : "gs://data/small/ratings_val_disliked.array_record",
             
-            'ratings_test_liked_uri': "gs://data/ratings_test_liked.array_record",
-            'ratings_test_3_uri': "gs://data/ratings_test_3.array_record",
-            'ratings_test_disliked_uri': "gs://data/ratings_test_disliked.array_record",
+            'ratings_test_liked_uri': "gs://data/small/ratings_test_liked.array_record",
+            'ratings_test_3_uri': "gs://data/small/ratings_test_3.array_record",
+            'ratings_test_disliked_uri': "gs://data/small/ratings_test_disliked.array_record",
             
             "movie_embeddings_uri": "gs://data/movie_emb-00000-of-00001.array_record",
             "user_embeddings_uri": "gs://data/user_emb-00000-of-00001.array_record",
