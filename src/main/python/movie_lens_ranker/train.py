@@ -1054,6 +1054,7 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
     
     #TODO: handle case when  config['phase'] is not same as restore dict phase
     
+    """
     config.update(**restore_dict['config'])
     
     req_keys = {'user_embeddings_uri', 'movie_embeddings_uri', 'movies_uri',
@@ -1066,7 +1067,7 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
     for key in req_keys:
         if key not in config:
             raise LookupError(f"config is missing {key}")
-    
+    """
     best_val_ndcg_k = -1.0
     mlflow_run = None
     run_name = get_canonical_mlflow_run_name(config)

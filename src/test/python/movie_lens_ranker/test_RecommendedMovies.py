@@ -14,7 +14,7 @@ from movie_lens_ranker.util import _read_embeddings, read_embeddings
 
 class TestRecommendedMovies(unittest.TestCase):
     def setUp(self):
-        ratings_uri_dict = get_train_val_test_liked_uris(use_small=True)
+        ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.SMALL)
         
         self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]
         self.ratings_val_liked_uri = ratings_uri_dict["val_liked"]

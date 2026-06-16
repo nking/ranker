@@ -4,7 +4,7 @@ from urllib.request import Request
 
 import requests
 from requests import HTTPError, RequestException
-
+from enum import Enum
 
 def fake_gcs_server_is_alive():
     try:
@@ -43,10 +43,17 @@ def get_project_dir() -> str:
 def get_bin_dir() -> str:
   return os.path.join(get_project_dir(), "bin")
 
-def get_train_val_test_liked_uris(use_small:bool=True) -> Dict[str, str]:
+class DataSize(Enum):
+    FULL = 'full'
+    SMALL = 'small'
+    TINY = 'tiny'
+    
+def get_train_val_test_liked_uris(data_size:DataSize=DataSize.TINY) -> Dict[str, str]:
     base_dir = os.path.join(get_project_dir(), "src/test/resources/data/")
-    if use_small:
+    if data_size == DataSize.SMALL:
         base_dir = os.path.join(base_dir, "small")
+    elif data_size == DataSize.TINY:
+        base_dir = os.path.join(base_dir, "tiny")
     out = {}
     for key in ('train_3', 'val_3', 'test_3', 'train_liked', 'val_liked', 'test_liked', 'train_disliked', 'val_disliked', 'test_disliked'):
         out[key] = os.path.join(base_dir, f"ratings_{key}.array_record")

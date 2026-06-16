@@ -158,7 +158,7 @@ class TestRanker(unittest.TestCase):
         for k, v in dotenv_values(env_file).items():
             os.environ[k] = v
             
-        ratings_uri_dict = get_train_val_test_liked_uris(use_small=True)
+        ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY)
         
         self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]
         self.ratings_val_liked_uri = ratings_uri_dict["val_liked"]
@@ -692,6 +692,7 @@ class TestRanker(unittest.TestCase):
         
         model.eval()
         all_scores = model(fake_data)
+        model.train()
         
         self.assertIsNotNone(all_scores)
         

@@ -110,14 +110,14 @@ class NumbaOpsTest(TestCase):
         pad_value = -1
         seed = int(time.time())
         
-        negatives = build_negative_pool_numba(arr1=arr1, arr2=arr2, arr3=arr3,
+        negatives = build_negative_pool(arr1=arr1, arr2=arr2, arr3=arr3,
             arr4=arr4, target1=target1, target2=target2, target3=target3,
             num_negatives=num_negatives, pad_value=pad_value, seed=seed)
         
         #np.array([[1 or 2,  3 or 4,  5or6or7or8, 5or6or7or8],
         #         [9, 10, 21or22or23or34, 21or22or23or34]])"
-        self.assertTrue(negatives[0][0] in set(arr1[0, 0:1].tolist()))
-        self.assertTrue(negatives[0][1] in set(arr2[0, 0:1].tolist()))
+        self.assertTrue(negatives[0][0] in set(arr1[0, 0:2].tolist()))
+        self.assertTrue(negatives[0][1] in set(arr2[0, 0:2].tolist()))
         self.assertTrue(negatives[0][2] in set(arr4[0].tolist()))
         
         self.assertTrue(negatives[1][0] == arr2[1][0])

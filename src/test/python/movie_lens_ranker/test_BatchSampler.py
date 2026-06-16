@@ -31,11 +31,10 @@ import grain
 class TestBatchSampler(unittest.TestCase):
     def setUp(self):
         self.ratings_test_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/ratings_test_liked.array_record")
+            "src/test/resources/data/tiny/ratings_test_liked.array_record")
 
     def _get_record_0(self):
         reader = array_record_module.ArrayRecordReader(self.ratings_test_uri)
-        
         batch_bytes = reader.read([0])
         data = [msgpack.unpackb(b, use_list=False) for b in batch_bytes]  # list of tuples of 4 integers
         reader.close()
@@ -43,48 +42,63 @@ class TestBatchSampler(unittest.TestCase):
     
     def test_BatchSampler(self):
        
-        seed = 0
-        batch_size = 100
+        seed = 1234
+        batch_size = 10
         num_epochs = 1
+        num_records = 100
         
-        datasource = RandomAccessArrayRecordDataSource(self.ratings_test_uri)
-        num_records = datasource.__len__()
-        print(f'num_records={num_records}', flush=True)
+        batch_dict = {}
         
-        n_batches = num_records // batch_size
+        # testing deterministic random results
+        for inst_num in range(3):
+            if inst_num == 2:
+                seed = 456
+            batch_dict[inst_num] = []
+            datasource = RandomAccessArrayRecordDataSource(self.ratings_test_uri)
+            num_records = datasource.__len__()
+            #print(f'num_records={num_records}', flush=True)
+            
+            n_batches = num_records // batch_size
+            
+            #shard_opts = grain.sharding.ShardOptions(shard_index=0, shard_count=1)
+            shard_opts = grain.sharding.ShardByJaxProcess()
+            
+            ra_sampler = BatchSampler(num_records=datasource.__len__(),
+                batch_size=batch_size,
+                shuffle=True, seed=seed,
+                num_epochs=num_epochs, shard_options=shard_opts)
+            
+            dataloader0 = grain.DataLoader(
+                data_source=datasource,
+                sampler=ra_sampler,
+                operations=[
+                    # grain.python.Batch(batch_size=batch_size),  #do not use the batch transform, instead use batch in sampling
+                    # grain.python.BatchShuffle(seed=42, buffer_size=10000),
+                ],
+                # worker_count=1,
+                worker_buffer_size=0,
+                shard_options=shard_opts,
+                # read_options=grain.ReadOptions(num_threads=1, prefetch_buffer_size=0)
+            )
+            
+            count = 0
+            for i, batch in enumerate(dataloader0):  # batch is a tuple of lists of the 4 datums: ([user_ids],[movie_ids],[ratings],[timestamps])
+                count += 1
+                batch_dict[inst_num].append(batch)
+            self.assertEqual(count, n_batches)
         
-        #shard_opts = grain.sharding.ShardOptions(shard_index=0, shard_count=1)
-        shard_opts = grain.sharding.ShardByJaxProcess()
+        #assert not same batch_dict[inst_num]
         
-        ra_sampler = BatchSampler(num_records=datasource.__len__(),
-            batch_size=batch_size, shuffle=True, seed=seed, num_epochs=num_epochs,
-            shard_options=shard_opts)
-        
-        dataloader0 = grain.DataLoader(
-            data_source=datasource,
-            sampler=ra_sampler,
-            operations=[
-                # grain.python.Batch(batch_size=batch_size),  #do not use the batch transform, instead use batch in sampling
-                # grain.python.BatchShuffle(seed=42, buffer_size=10000),
-            ],
-            # worker_count=1,
-            worker_buffer_size=0,
-            shard_options=shard_opts,
-            # read_options=grain.ReadOptions(num_threads=1, prefetch_buffer_size=0)
-        )
-        
-        count = 0
-        for i, batch in enumerate(dataloader0):  # batch is a tuple of lists of the 4 datums: ([user_ids],[movie_ids],[ratings],[timestamps])
-            count += 1
-            if i == 0:
-                first_row_file = self._get_record_0()[0] #[(24, 6505, 4, 978133414)]
-                first_row_file = " ".join(map(str, first_row_file))
-                first_row_batch = batch[0]
-                first_row_batch = " ".join(map(str, first_row_batch))
-                print(f'first_row in file={first_row_file}', flush=True)
-                print(f'first row in batch={first_row_batch}', flush=True)
-                self.assertTrue(first_row_file != first_row_batch)
-        self.assertEqual(count, n_batches)
+        n_diff = 0
+        for batch0, batch1, batch2 in zip(batch_dict[0], batch_dict[1], batch_dict[2]):
+            batch0_str = " ".join(map(str, batch0))
+            batch1_str = " ".join(map(str, batch1))
+            batch2_str = " ".join(map(str, batch2))
+            self.assertTrue(batch0_str == batch1_str)
+            if (batch1_str != batch2_str):
+                n_diff += 1
+        #print(f'n_diff={n_diff} out of {num_records // batch_size}', flush=True)
+        self.assertTrue(n_diff > int(0.75*num_records // batch_size))
    
 if __name__ == '__main__':
     unittest.main()
