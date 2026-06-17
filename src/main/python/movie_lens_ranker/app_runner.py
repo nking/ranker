@@ -57,6 +57,8 @@ def safe_jax_init():
     except RuntimeError as e:
         #absorb the error to avoid failure from more than one init attempt
         logging.exception(f'WARNING while trying to initialize JAX distributed: {e}')
+        
+    logging.info(f"jax devices={jax.devices()}, jax.loca_devices={jax.local_devices()}")
 
 safe_jax_init()
 

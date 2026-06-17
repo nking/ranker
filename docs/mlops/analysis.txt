@@ -1,25 +1,73 @@
-The prototype is done.
+The prototype is done now, so this lacks the software design analysis.
+   the sofware engineering challenges were:
+   - coding for multi-host ability and validation that model checkpoints 
+     saves and restores were correct.
+   - getting the datasets correct for contrastive learning.
+   - coding for the k8s, and kfp runs using kubeflow trainer v2
+
+Here are empirically measured runtimes used afterwards for 
+estimating full train times with and without accelerators.
 
 Running on a laptop w/ 32 GB RAM and 2.8 GHZ processor with 4 cores.
-batch_size of 64, num_epochs=1, num train samples=1000, num validation samples=1000.
-and using 1 processer, 1 HPO trial takes 1.75 min using a train dataset
-Each subsequent trial takes 1 minute each.
-10 trials is about 11 minutes.
+num train samples=1000, num validation samples=1000, 1 jax proccess,
+num_trials=4 and num_trials_per_worker=num_trials.
+num_epochs=2.
 
- 4 trials w/ num_epochs=2 took about 9 minutes (3.2 min, then 2 min for each after)
+The first trial is always longer than the subsequent trials so they
+are listed separately in the measurements.
 
-10 trials on kaggle for num_epochs=1:
-scaling up to 463,000 train samples and 67,000 validation for 10 trials
-would roughly be ((11 min * 463)/60.)/24. = 3.54 days on CPU.
-Using the Kaggle P100, T4, or L4 GPUs accelerators could reduce the time by a factor
-of roughly 8, making the HPO phase about 11 hours.
-the train phase = about 2 hours.
-the test phase = about 20 minutes.
+batch_size=64:
+   168 sec + 3*97 sec = 7.65 min
 
-5 trials on kaggle for num_epochs=1:
-((6 min * 463)/60.)/24. = 2 days
-using accelerators ~ 6 hours
+batch_size=128:
+   140 sec + 3 * 80 sec = 6.3 min
 
-expect can increase batch_size to 128, 256, or 512
-and num_epochs should be between 3 and 10
+batch_size=256:
+   same times as for batch_size=128 = 6.3 min
+
+batch_Size=512:
+   swap use (disk thrashing) begins to occur when 80% RAM is used
+   so times are longer = 7.7 min
+
+running for num_epochs=4 now:
+batch_size=256
+   305 sec + 3*220 sec = 16 min
+   so it didn't scale linearly
+
+-----
+
+scaling up to 470,000 train samples and 70,000 validation samples:
+
+Total samples per epoch measured = 2,000
+New total samples per epoch = 540,000 (470k train + 70k val)
+Scale factor = 270x more data per epoch.
+
+on CPU: 3 days for 4 trials.  18 h per trial.
+
+GPU P100: 30-50 min per trial 
+   if expect a 20 x incr in GFLOPS:
+      less than 1 hour per trial
+   if expect an 8 x incr in GFLOPS (memory bound):
+      2.25 hr per trial
+      
+T4x2 GPU: 30-50 min per trial
+  using both GPUs: half of the GPU runtime estimate
+
+the RAM used for training:
+   if using Kaggle CPU:
+      system RAM holds model weights, activations, and gradients
+      system RAM holds dataloader
+   if using Kaggle GPU:
+      GPU VRAM holds model weights, activations, and gradients
+      system RAM holds dataloader
+  
+   so will use batch_size=256 and if memory used is <= 50%, will
+   increase it to batch_size=512
+
+       on CPU: system RAM
+       on
+Memory Burden	CPU-Only Training (Laptop)	T4x2 GPU Training (Kaggle)
+Model Weights	System RAM	GPU VRAM
+Activations & Gradients	System RAM	GPU VRAM
+Dataloader (Grain Buffers)	System RAM	System RAM
 

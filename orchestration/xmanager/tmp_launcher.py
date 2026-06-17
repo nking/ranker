@@ -75,6 +75,8 @@ def main(_):
         num_trials = 4  # 4
         num_trials_per_worker = num_trials
         num_processes = 1
+        num_epochs = 4
+        batch_size = 256
         num_hosts = 1
         print(f'JAX_NUM_PROCESSES={num_processes}', flush=True)
         
@@ -129,13 +131,12 @@ def main(_):
             
             "movie_embeddings_uri": "gs://data/movie_emb-00000-of-00001.array_record",
             "user_embeddings_uri": "gs://data/user_emb-00000-of-00001.array_record",
-            "num_epochs": 2,
-            "batch_size": 64,
+            "num_epochs": num_epochs,
+            "batch_size": batch_size,
             "seed": 23456,
             "phase": "tune",
             'project_id': project_id,
             "grain_num_threads_fetching_records": 2,
-            "grain_num_threads_computing_num_records": 2,
         }
         
         executable = experiment.package([

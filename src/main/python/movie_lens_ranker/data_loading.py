@@ -117,7 +117,8 @@ def _create_dataloader(
     logging.info(f'grain shard_opts={shard_opts}')
     
     read_opts = grain.ReadOptions(
-        num_threads = int(os.environ.get("grain_read_options_num_threads", 16))
+        num_threads = int(os.environ.get("grain_read_options_num_threads", 4)),
+        prefetch_buffer_size=int(os.environ.get("grain_read_buffer_size", 50)),
     )
     
     user_history = UserHistory(ratings_uri_list=ratings_history_uris, fixed_size=512)
@@ -160,7 +161,7 @@ def _create_dataloader(
         ],
         # worker_count=worker_count,
         shard_options=shard_opts,
-        #read_options=read_opts,
+        read_options=read_opts,
     )
     
     return dataloader
