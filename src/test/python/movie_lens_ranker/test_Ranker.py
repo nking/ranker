@@ -17,6 +17,12 @@ def safe_jax_init():
         print(f'WARNING while trying to initialize jax distributed: {e}')
 safe_jax_init()
 
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    category=DeprecationWarning,
+    message=r".*'\.value' access is now deprecated\..*"
+)
 import fsspec
 import gcsfs
 from mlflow import MlflowClient, config
@@ -50,6 +56,13 @@ from movie_lens_ranker.app_runner import main as app_runner, \
 
 import unittest
 import subprocess
+import sys
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)], # Route to stdout to avoid red text in PyCharm
+    force=True # CRITICAL: Overrides any logging setups initialized by jax, grain, or mlflow
+)
 
 #found by ip addr show docker0
 base_url = "172.17.0.1"
@@ -369,7 +382,9 @@ class TestRanker(unittest.TestCase):
         best_val_ndcg_k_2 = resume_train_fn(config=earlier_restore_dict['config'],
             trial=None, save_checkpoints=True)
         
+        #already done, so no new value:
         print(f'best_val_ndcg_k from resume 2nd to last chkpt training={best_val_ndcg_k_2}')
+        self.assertAlmostEqual(best_val_ndcg_k_2, -1.0, places=6)
         
         # ===== read mlflow db metrics ======
         #experiments: name, experiment_id

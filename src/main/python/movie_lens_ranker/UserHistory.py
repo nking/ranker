@@ -8,7 +8,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 class UserHistory (object):
-    def __init__(self, ratings_uri_list: Union[str, List[str]], fixed_size:int = 2048):
+    def __init__(self, ratings_uri_list: Union[str, List[str]], fixed_size:int = 512):
         self.pad_value = -1
         self.ts_pad_value = 2524608000 #year 2050
         #each user's the movie_ids, ratings and timestamps is already sorted by timestamp
@@ -16,7 +16,7 @@ class UserHistory (object):
         self.fixed_size = fixed_size
         
     def _load_history(self, ratings_uri_list: Union[str, List[str]],
-            fixed_size:int = 2048) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+            fixed_size:int = 512) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         
         #buildnumpy vectors, making padded lists of length fixed_history_length for movies, ratings, and timestamps
         # lookup is tuple of dictionary of { user_id: {ts, movie_id, rating} } in which ts, movie_id

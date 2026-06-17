@@ -154,7 +154,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     :return:
     """
     
-    debug_weight_before = jnp.linalg.norm(model.score_head.kernel.get_value())
+    #debug_weight_before = jnp.linalg.norm(model.score_head.kernel.get_value())
     
     def loss_fn(model, padded_graph) -> Array:
         scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
@@ -179,13 +179,13 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     # each process updates its model with the same values, so the model stays implicitly synchronized.
     optimizer.update(model, grads)
     
-    debug_weight_after = jnp.linalg.norm(model.score_head.kernel.get_value())
-    diff = jnp.abs(debug_weight_before - debug_weight_after)
-    # if > 1E-4, is a significant change
-    # if > 1, exploding gradient or learning rate issue
-    jax.debug.print("Weight Norm: Before={b:.6f}, After={a:.6f}, Delta={d:.8f}",
-        b=debug_weight_before, a=debug_weight_after, d=diff)
-    
+    #debug_weight_after = jnp.linalg.norm(model.score_head.kernel.get_value())
+    #diff = jnp.abs(debug_weight_before - debug_weight_after)
+    ## if > 1E-4, is a significant change
+    ## if > 1, exploding gradient or learning rate issue
+    #jax.debug.print("Weight Norm: Before={b:.6f}, After={a:.6f}, Delta={d:.8f}",
+    #    b=debug_weight_before, a=debug_weight_after, d=diff)
+  
     return loss
 
 @nnx.jit
@@ -303,7 +303,7 @@ def pad_graph_tuple_batch(graph_tuple_batch: jraph.GraphsTuple, jax_graph_comp_d
         
     n_samples = len(batch)
     
-    logging.info(f"pad_graph_tuple_batch: n_samples={n_samples}")
+    #logging.info(f"pad_graph_tuple_batch: n_samples={n_samples}")
     
     batch = jraph.batch(batch)
     
@@ -346,6 +346,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     #tracked_fn_1 = chex.assert_max_traces(train_step, n=1)
     #tracked_fn_2 = chex.assert_max_traces(eval_step, n=1)
     
+    #TOTAL_RECORDS here is the same as train_dataloader._data_source.__len__()
     TRAIN_BATCH_SIZE = train_dataloader._sampler.batch_size
     TOTAL_RECORDS = train_dataloader._sampler.total_records
     STEPS_PER_EPOCH_GLOBAL = train_dataloader._sampler.num_batches_per_epoch  # = 7234
@@ -407,11 +408,12 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     
     if restored_train_dataloader_iter is None:
         train_dataloader_iter = iter(train_dataloader)
+        start_batch_idx = 0
     else:
         train_dataloader_iter = restored_train_dataloader_iter
         if restored_global_step is None:
             raise RuntimeError('globalrestored_global_step_step cannot be None if restored_train_dataloader_iter because restore is implicit')
-        #global_step = batch_idx * NUM_TRAIN_SHARDS
+        start_batch_idx = restored_global_step // (TRAIN_BATCH_SIZE * NUM_TRAIN_SHARDS)
     
     #NOTE: cannot improve efficiency for this outer loop because gradient loss needs to
     # be calculated and updated for each iteration.
@@ -428,10 +430,13 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     jax_graph_comp_dict = calc_number_jax_graph_components(config_dict['batch_size'],
         config_dict['max_history'], config_dict['num_candidates'])
         
-    for batch_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
+    last_epoch = 0
+    for loop_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
+        batch_idx = start_batch_idx + loop_idx
         local_step = batch_idx * TRAIN_BATCH_SIZE
         global_step = local_step * NUM_TRAIN_SHARDS
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
+        last_epoch = epoch
         
         padded_super_graph_0, n_samples = pad_graph_tuple_batch(graphs_tuple_batch, jax_graph_comp_dict)
         
@@ -451,9 +456,10 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         epoch_avg_train_loss.append(loss)
         
         if batch_idx % 5 == 0:# and rank==0:
-            logging.info(f"batch {batch_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}")
+            logging.info(f"batch {batch_idx}, loop_idx={loop_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}")
         
-        if (batch_idx + 1) % STEPS_PER_EPOCH_GLOBAL == 0:
+        if (batch_idx + 1) % STEPS_PER_EPOCH_LOCAL == 0:
+            logging.info(f"*batch {batch_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}")
             #finished a train epoch.  calc avg train loss and val metrics
             avg_train_loss = jnp.mean(jnp.array(epoch_avg_train_loss))
             epoch_avg_train_loss.clear()
@@ -566,7 +572,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         if early_stop_triggered[0]:
             break
             
-    logging.info(f'elapsed time in sec = {time.perf_counter() - start_time}.  num_epochs={epoch}')
+    logging.info(f'elapsed time in sec = {time.perf_counter() - start_time}.  last_epoch={last_epoch}')
 
     return best_ndcg
 
@@ -624,6 +630,13 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         batch_size=config['batch_size'],
         seed=config.get('seed', 0),)
     
+    process_count = jax.process_count()
+    num_records = train_dataloader._data_source.__len__()
+    steps_per_epoch = num_records // config['batch_size']  # 7,343 steps
+    steps_per_epoch_local = steps_per_epoch // process_count
+    total_training_steps_local = config['num_epochs'] * steps_per_epoch_local
+    warmup_steps = int(0.1 * total_training_steps_local)
+    
     nnx.use_eager_sharding(False)
     model_mesh = get_model_mesh()
     with jax.set_mesh(model_mesh):
@@ -650,8 +663,16 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         model(fake_data)
         model.train()
         
+        lr_scheduler = optax.warmup_cosine_decay_schedule(
+            init_value=0.0,
+            peak_value=config['learning_rate'],
+            warmup_steps=warmup_steps,
+            decay_steps=total_training_steps_local,
+            end_value=1e-6  # Minimum learning rate tail
+        )
+        
         optimizer = nnx.Optimizer(model,
-            optax.adamw(config['learning_rate'],
+            optax.adamw(learning_rate=lr_scheduler,
                 weight_decay=config['weight_decay']), wrt=nnx.Param)
         
         def to_named_sharding(spec):

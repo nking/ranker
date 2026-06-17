@@ -120,7 +120,7 @@ def _create_dataloader(
         num_threads = int(os.environ.get("grain_read_options_num_threads", 16))
     )
     
-    user_history = UserHistory(ratings_uri_list=ratings_history_uris, fixed_size=2048)
+    user_history = UserHistory(ratings_uri_list=ratings_history_uris, fixed_size=512)
     
     user_disliked_history = UserHistory(ratings_uri_list=ratings_disliked_uris, fixed_size=256)
     

@@ -484,7 +484,7 @@ def build_history_lookup(ratings_uri_list: Union[str, List[str]], batch_size: in
         finally:
             if reader is not None:
                 reader.close()
-    logging.info(f'rewrite lookup size = {len(lookup)}')
+    #logging.info(f'rewrite lookup size = {len(lookup)}')
     max_history = 0
     lookup2 = {}
     for u in lookup:

@@ -2,12 +2,7 @@ import jraphx
 import jraph
 from array_record.python import array_record_module
 from flax import nnx
-
-from movie_lens_ranker.data_loading import *
 import jax.numpy as jnp
-import jax
-
-import numpy as np
 
 class GraphRanker(nnx.Module):
     def __init__(self, user_movie_embeds: jnp.ndarray,
