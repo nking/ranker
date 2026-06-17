@@ -89,7 +89,7 @@ State Managements: Orbax
 Experiment Tracking: MLFlow-skinny
 MLOps workflow tasks:  
 code container: Docker or equiv
-orchestrator: xmanager for dev, kfp later
+orchestrator: xmanager for dev, kfp for dev and production
 
 MLOps details:
   tasks for the workflow or indiv tasks:

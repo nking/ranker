@@ -3,8 +3,13 @@ The prototype is done.
 Running on a laptop w/ 32 GB RAM and 2.8 GHZ processor with 4 cores
 and using 1 processer, 1 HPO trial takes 1.75 min using a train dataset
 size of 1000 and validation dataset size of 1000.
-scaling up to 20 trials and 463,0000 train samples and 67,000 validation
-samples would roughly be ((1.75*20*463)/60.)/24. = 11 days.
+Each subsequent trial takes 1 minute each.
+10 trials is about 11 minutes.
+
+scaling up to 463,000 train samples and 67,000 validation for 10 trials
+would roughly be ((11 min * 463)/60.)/24. = 3.54 days
 Using the Kaggle P100, T4, or L4 GPUs could reduce the time by a factor
-of roughly 8, making the HPO phase almost a day and a half.
+of roughly 8, making the HPO phase about 11 hours.
+the train phase = about 2 hours.
+the test phase = about 20 minutes.
 
