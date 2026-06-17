@@ -6,10 +6,16 @@ size of 1000 and validation dataset size of 1000.
 Each subsequent trial takes 1 minute each.
 10 trials is about 11 minutes.
 
+10 trials on kaggle:
 scaling up to 463,000 train samples and 67,000 validation for 10 trials
-would roughly be ((11 min * 463)/60.)/24. = 3.54 days
-Using the Kaggle P100, T4, or L4 GPUs could reduce the time by a factor
+would roughly be ((11 min * 463)/60.)/24. = 3.54 days on CPU.
+Using the Kaggle P100, T4, or L4 GPUs accelerators could reduce the time by a factor
 of roughly 8, making the HPO phase about 11 hours.
 the train phase = about 2 hours.
 the test phase = about 20 minutes.
+
+5 trials on kaggle:
+((7 min * 463)/60.)/24. = 2.25 days
+using accelerators ~ 7 hours
+
 
