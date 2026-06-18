@@ -43,7 +43,7 @@ def create_train_and_val_dataloaders(
     train_dataloader = _create_dataloader(
         all_movie_ids=all_movie_ids,
         recommendations=recommendations,
-        rattings_data_uri = ratings_train_data_uri,
+        ratings_data_uri= ratings_train_data_uri,
         ratings_history_uris = ratings_train_history_uris,
         ratings_disliked_uris = ratings_train_disliked_uris,
         max_history=max_history, num_candidates=num_candidates,
@@ -52,7 +52,7 @@ def create_train_and_val_dataloaders(
     val_dataloader = _create_dataloader(
         all_movie_ids=all_movie_ids,
         recommendations=recommendations,
-        rattings_data_uri=ratings_val_data_uri,
+        ratings_data_uri=ratings_val_data_uri,
         ratings_history_uris=ratings_val_history_uris,
         ratings_disliked_uris=ratings_val_disliked_uris,
         max_history=max_history, num_candidates=num_candidates,
@@ -97,7 +97,7 @@ def create_test_dataloader(
     dataloader = _create_dataloader(
         all_movie_ids=all_movie_ids,
         recommendations=recommendations,
-        rattings_data_uri = rattings_data_uri,
+        ratings_data_uri= rattings_data_uri,
         ratings_history_uris = ratings_history_uris,
         ratings_disliked_uris = ratings_disliked_uris,
         max_history=max_history, num_candidates=num_candidates,
@@ -107,7 +107,7 @@ def create_test_dataloader(
 
 def _create_dataloader(
         all_movie_ids: List[int], recommendations: RecommendedMovies,
-        rattings_data_uri: str,
+        ratings_data_uri: str,
         ratings_history_uris: List[str],
         ratings_disliked_uris: List[str],
         max_history: int, num_candidates: int,
@@ -125,7 +125,7 @@ def _create_dataloader(
     
     user_disliked_history = UserHistory(ratings_uri_list=ratings_disliked_uris, fixed_size=256)
     
-    datasource = RandomAccessArrayRecordDataSource(rattings_data_uri)
+    datasource = RandomAccessArrayRecordDataSource(ratings_data_uri)
     
     import jax
     num_records = datasource.__len__()

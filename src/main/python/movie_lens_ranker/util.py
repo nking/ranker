@@ -61,6 +61,7 @@ def get_recognized_keys():
         *mlflow_config_keys,
         *model_params_trainable_keys,
         *hpo_config_keys,
+        *{'connection_check', 'debug'}
     }
 
 def app_runner_is_missing_minimum_required_keys(config: Dict[str, Any]) -> bool:
@@ -315,6 +316,8 @@ def define_flags():
     flags.DEFINE_bool("debug", default=False,
         help="prints debug statements"
     )
+    flags.DEFINE_bool("connection_check", default=False,
+        help="check if can connect to dbs and makes a gpu check if JAX_PLATFORM_NAME=gpu")
 
 def stringify_mlflow_params(config:dict):
     return {k: json.dumps(v) for k, v in config.items() if

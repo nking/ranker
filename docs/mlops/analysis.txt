@@ -64,10 +64,3 @@ the RAM used for training:
    so will use batch_size=256 and if memory used is <= 50%, will
    increase it to batch_size=512
 
-       on CPU: system RAM
-       on
-Memory Burden	CPU-Only Training (Laptop)	T4x2 GPU Training (Kaggle)
-Model Weights	System RAM	GPU VRAM
-Activations & Gradients	System RAM	GPU VRAM
-Dataloader (Grain Buffers)	System RAM	System RAM
-

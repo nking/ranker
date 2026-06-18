@@ -632,6 +632,64 @@ def run_export_results(config: Dict[str, Any]):
         logging.exception(f'ERROR while trying to write to {config["output_metrics_uri"]}: {e}.  Check for permission errors')
         raise e
 
+def _jax_sees_gpus() -> bool:
+    gpu_count = 0
+    gpus_expected = 0
+    for device in jax.local_devices():
+        if device.platform == 'gpu':
+            gpu_count += 1
+            if device.device_kind is not None:
+                if device.device_kind.lower().index('t4') > -1:
+                    gpus_expected = 2
+                elif device.device_kind.lower().index('p100') > -1:
+                    gpus_expected = 1
+    return (gpu_count > 0 and gpus_expected == gpu_count)
+    
+def _vizier_connection(vizier_endpoint:str) -> bool:
+    """
+    check the vizier connection by creating a deleting a study
+    :param config:
+    :return: True if no exception raised
+    """
+    vz_clients.environment_variables.server_endpoint = vizier_endpoint
+    study = vz_clients.Study.from_owner_and_id(owner='tmp', study_id='tmp')
+    study.delete()
+    return True
+
+def _mlflow_connection(mlflow_tracking_uri:str) -> bool:
+    """
+    check that can connect to MLFlow server
+    :param mlflow_tracking_uri:
+    :return: True if no exception raised
+    """
+    from mlflow.protos.service_pb2 import ViewType
+    client = MlflowClient(tracking_uri=mlflow_tracking_uri)
+    client.search_experiments(view_type = ViewType.ACTIVE_ONLY, max_results=1)
+    return True
+
+def _fake_gcs_server_connection(config) -> bool:
+    """
+    check the fake gcs server connection
+    :param config:
+    :return: True if exception is not throw and a data file is successfully read
+    """
+    from movie_lens_ranker.util import read_movies_array_record
+    gs_uri = "gs://data/movies-00000-of-00001.array_record"
+    emb = read_movies_array_record(gs_uri, batch_size=1024)
+    return emb is not None and len(emb) > 0
+    
+def connections_check(config):
+    
+    if os.environ.get('JAX_PLATFORM_NAME', '').lower().index('gpu') > -1:
+        if not _jax_sees_gpus():
+            raise EnvironmentError(f"could not find expected GPUs: {jax.devices()}")
+    
+    if jax.process_index() == 0:
+        _vizier_connection(config['vizier_endpoint'])
+        _mlflow_connection(config['mlflow_tracking_uri'])
+        _fake_gcs_server_connection(config)
+        logging.info('passed connections check')
+
 def main(_):
     config = FLAGS.flag_values_dict()
     
@@ -639,6 +697,9 @@ def main(_):
         logging.info(f'all args received from flags: {config}')
     
     config = {k:v for k, v in config.items() if k in get_recognized_keys()}
+    
+    if "connections_check" in config and config["connections_check"].lower() == "true":
+        connections_check(config)
     
     if app_runner_is_missing_minimum_required_keys(config):
         logging.info(f'warning: missing the minimum required flags')
