@@ -641,9 +641,9 @@ def _jax_sees_gpus() -> bool:
         if device.platform == 'gpu':
             gpu_count += 1
             if device.device_kind is not None:
-                if device.device_kind.lower().index('t4') > -1:
+                if device.device_kind.lower().find('t4') > -1:
                     gpus_expected = 2
-                elif device.device_kind.lower().index('p100') > -1:
+                elif device.device_kind.lower().find('p100') > -1:
                     gpus_expected = 1
     return (gpu_count > 0 and gpus_expected == gpu_count)
     
@@ -654,7 +654,10 @@ def _vizier_connection(vizier_endpoint:str) -> bool:
     :return: True if no exception raised
     """
     vz_clients.environment_variables.server_endpoint = vizier_endpoint
-    study = vz_clients.Study.from_owner_and_id(owner='tmp', study_id='tmp')
+    problem = vz.ProblemStatement()
+    study_config = vz.StudyConfig.from_problem(problem)
+    study = vz_clients.Study.from_study_config(study_config,
+        owner='tmp', study_id='tmp')
     study.delete()
     return True
 
@@ -682,7 +685,7 @@ def _fake_gcs_server_connection(config) -> bool:
     
 def connections_check(config):
     
-    if os.environ.get('JAX_PLATFORM_NAME', '').lower().index('gpu') > -1:
+    if os.environ.get('JAX_PLATFORM_NAME', '').lower().find('gpu') > -1:
         if not _jax_sees_gpus():
             raise EnvironmentError(f"could not find expected GPUs: {jax.devices()}")
     

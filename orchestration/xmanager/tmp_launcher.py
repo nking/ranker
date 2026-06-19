@@ -72,10 +72,10 @@ def main(_):
     
     with xm_local.create_experiment(experiment_title='xmngr_pipeline') as experiment:
         
-        num_trials = 4  # 4
+        num_trials = 1  # 4
         num_trials_per_worker = num_trials
         num_processes = 1
-        num_epochs = 4
+        num_epochs = 1
         batch_size = 256
         num_hosts = 1
         print(f'JAX_NUM_PROCESSES={num_processes}', flush=True)
@@ -284,8 +284,7 @@ def main(_):
         experiment.add(run_pipeline())
         
         logging.info("pipeline done.")
-        logging.info(f"total time elapsed = {time.perf_counter() - start_time}",
-            flush=True)
+        logging.info(f"total time elapsed = {time.perf_counter() - start_time}")
 
 if __name__ == '__main__':
     app.run(main)

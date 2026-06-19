@@ -283,10 +283,12 @@ class TestRanker(unittest.TestCase):
         print(f'process_index={jax.process_index()}')
     
     def test_run_app_check(self):
-        config = self.config
+        config = self.config.copy()
         config['connections_check'] = 1
+        del config['phase']
         set_flags_from_dict(config)
         app_runner(None)
+        pass
     
     def test_run_tune_train_test(self):
         """
