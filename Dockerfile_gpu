@@ -12,7 +12,7 @@ WORKDIR /app
 COPY requirements-gpu.txt ./
 RUN chown -R 1000:1000 /app
 
-RUN python3 -m pip install --no-deps --no-cache-dir -r requirements-gpu.txt . --prefix=/usr/local
+RUN python3 -m pip install --no-deps --no-cache-dir -r requirements-gpu.txt --prefix=/usr/local
 
 #only copying src/main/python/movie_lens_ranker.  see .dockerignore
 COPY ./src ./src

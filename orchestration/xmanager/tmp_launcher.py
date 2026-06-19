@@ -48,6 +48,55 @@ def reset_hpo_results_bucket(project_id:str, study_name:str):
     except subprocess.CalledProcessError as e:
         print(f"Error resetting database: {e.stderr}")
 
+
+import subprocess
+import logging
+
+
+def reset_vizier_database():
+    """Wipes all data from the Vizier SQLite database inside the docker container."""
+    
+    # Python script to run INSIDE the vizier-server container
+    python_script = """
+import sqlite3
+try:
+    conn = sqlite3.connect('/app/data/vizier.db')
+    cursor = conn.cursor()
+
+    # Get all tables, ignoring internal sqlite tables
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+    tables = cursor.fetchall()
+
+    # Delete all rows from each table
+    for table in tables:
+        cursor.execute(f"DELETE FROM {table[0]};")
+
+    conn.commit()
+    print("Vizier database tables successfully cleared.")
+except Exception as e:
+    print(f"Error wiping Vizier DB: {e}")
+finally:
+    if 'conn' in locals():
+        conn.close()
+"""
+    
+    command = [
+        "docker", "exec", "vizier-server",
+        "python3", "-c", python_script
+    ]
+    
+    try:
+        logging.info("Attempting to reset Vizier database...")
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        logging.info(result.stdout.strip())
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to reset Vizier database: {e.stderr}")
+
 async def check_await_status(handle):
     try:
         await handle.wait_until_complete()
@@ -67,6 +116,11 @@ def main(_):
    
     try:
         reset_hpo_results_bucket(project_id, study_name)
+    except Exception as ex:
+        pass
+    
+    try:
+        reset_vizier_database()
     except Exception as ex:
         pass
     
