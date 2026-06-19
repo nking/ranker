@@ -585,6 +585,8 @@ def run_export_results(config: Dict[str, Any]):
         
         # run_uuid is this:
         mlflow_run_id = best_trial_data.metadata.get('mlflow_run_id')
+        if "debug" in config and config["debug"]:
+            logging.info(f"mlflow_run_id={mlflow_run_id}")
         mlflow_run = mlflow.get_run(mlflow_run_id)
         hparams = destringify_mlflow_params(mlflow_run.data.params)
         hparams_json = json.dumps(hparams, indent=4, sort_keys=True)
@@ -698,7 +700,7 @@ def main(_):
     
     config = {k:v for k, v in config.items() if k in get_recognized_keys()}
     
-    if "connections_check" in config and config["connections_check"].lower() == "true":
+    if "connections_check" in config and int(config["connections_check"])==1:
         connections_check(config)
     
     if app_runner_is_missing_minimum_required_keys(config):

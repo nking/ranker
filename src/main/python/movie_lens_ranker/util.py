@@ -1,6 +1,6 @@
 import json
 from collections import defaultdict
-from typing import Tuple, Dict, List, Union, Set, Any
+from typing import Tuple, Dict, List, Union, Any
 import jax
 import jax.numpy as jnp
 from array_record.python import array_record_module
@@ -61,7 +61,7 @@ def get_recognized_keys():
         *mlflow_config_keys,
         *model_params_trainable_keys,
         *hpo_config_keys,
-        *{'connection_check', 'debug'}
+        *{'connections_check', 'debug'}
     }
 
 def app_runner_is_missing_minimum_required_keys(config: Dict[str, Any]) -> bool:
@@ -233,8 +233,9 @@ def define_flags():
     flags.DEFINE_bool("validate_checkpoint_restores", default=False, help="compares validation metrics of active model  "
         "with validation metrics for saved active model restored, but only if the phase is a train phase with save checkpoints enabled."
     )
+    #TODO: remove mlflow_experiment_name and make it clear that internally mlflow_experiment_name==study_name
     flags.DEFINE_string("study_name", default=None,
-        help="study name for use in vizier study and mflow experiment name"
+        help="study name for use in vizier study and mflow experiment name.  must be same as 'mlflow_experiment_name'"
     )
     flags.DEFINE_string("project_id", default=None,
         help="project_id for use with vizier HPO"
@@ -271,7 +272,7 @@ def define_flags():
         help="MLFlow tracking uri"
     )
     flags.DEFINE_string("mlflow_experiment_name", default=None,
-        help="MLFlow experiment name"
+        help="MLFlow experiment name.  must be the same as study_name"
     )
     flags.DEFINE_string("LOGNAME", default=None,
         help="linux env variable name"
@@ -316,8 +317,9 @@ def define_flags():
     flags.DEFINE_bool("debug", default=False,
         help="prints debug statements"
     )
-    flags.DEFINE_bool("connection_check", default=False,
-        help="check if can connect to dbs and makes a gpu check if JAX_PLATFORM_NAME=gpu")
+    flags.DEFINE_integer("connections_check", default=0,
+        help="set to 1 to run connections check before phase.  "
+             "additionally, if JAX_PLATFORM_NAME=gpu there will be a check for expected number of GPUs found")
 
 def stringify_mlflow_params(config:dict):
     return {k: json.dumps(v) for k, v in config.items() if
@@ -422,7 +424,6 @@ def read_movies_array_record(movies_uri:str, batch_size:int=1048) -> List[int]:
     movie_ids = []
     reader = None
     try:
-        logging.info(f'about to read movies_uri={movies_uri}')
         reader = array_record_module.ArrayRecordReader(movies_uri)
         n_records = reader.num_records()
         for i in range(0, n_records, batch_size):

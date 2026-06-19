@@ -108,7 +108,7 @@ def main(_):
             'LOGNAME': env_config.get('POSTGRES_USER'),
             'USER': env_config.get('POSTGRES_USER'),
             "study_name": study_name,
-            "mlflow_experiment_name": "GraphRanker_tuning_xmngr_2",
+            "mlflow_experiment_name": study_name,
             "mlflow_tracking_uri": f"postgresql://{env_config.get('POSTGRES_USER')}:{env_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db",
             "vizier_endpoint": f"{docker_bridge_gateway}:8000",
             "latest_checkpoint_uri": "gs://checkpoint-bucket/latest",
@@ -224,6 +224,7 @@ def main(_):
                             **run_config,
                             'trial_ids': dumps(list(trial_ids)),
                             "debug": False,
+                            "connections_check" : str(1)
                         },
                     )
                 

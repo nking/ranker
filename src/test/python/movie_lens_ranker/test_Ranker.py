@@ -204,6 +204,72 @@ class TestRanker(unittest.TestCase):
         # (movie_id, title, genres)
         self.movies_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")
+        
+        STUDY_NAME = "GraphRanker_tuning_unittest3"
+        
+        num_epochs = 4  # keep this to > 2 and < 10 for the restore tests at end of this method
+        batch_size = 64
+        seed = 234
+        
+        # tensorstore keeps trying to authenticate with google so for tests we'll use the abs path to checkpoint dir
+        checkpoint_dir = 'gs://checkpoint-bucket'
+        latest_checkpoint_uri = f'{checkpoint_dir}/latest'
+        best_checkpoint_uri = f'{checkpoint_dir}/best'
+        
+        # mflow_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}_mlflow.db")
+        # mflow_uri = f"sqlite:///{mflow_db_path}?mode=memory&cache=shared"
+        ##    postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]
+        vizier_endpoint = f'{base_url}:8000'
+        mlflow_uri = f"postgresql://{os.environ['POSTGRES_USER']}:{os.environ['POSTGRES_PASSWORD']}@{base_url}:5432/mlflow_db"
+        
+        self.config = {
+            'movies_uri': self.transform_to_gs_uri(self.movies_uri),
+            'recommendations_uri': self.transform_to_gs_uri(
+                self.recommendations_uri),
+            'recommendations_ts_uri': self.transform_to_gs_uri(
+                self.recommendations_ts_uri),
+            
+            'ratings_train_liked_uri': self.transform_to_gs_uri(
+                self.ratings_train_liked_uri),
+            'ratings_train_3_uri': self.transform_to_gs_uri(
+                self.ratings_train_3_uri),
+            'ratings_train_disliked_uri': self.transform_to_gs_uri(
+                self.ratings_train_disliked_uri),
+            
+            'ratings_val_liked_uri': self.transform_to_gs_uri(
+                self.ratings_val_liked_uri),
+            'ratings_val_3_uri': self.transform_to_gs_uri(
+                self.ratings_val_3_uri),
+            'ratings_val_disliked_uri': self.transform_to_gs_uri(
+                self.ratings_val_disliked_uri),
+            
+            'ratings_test_liked_uri': self.transform_to_gs_uri(
+                self.ratings_test_liked_uri),
+            'ratings_test_3_uri': self.transform_to_gs_uri(
+                self.ratings_test_3_uri),
+            'ratings_test_disliked_uri': self.transform_to_gs_uri(
+                self.ratings_test_disliked_uri),
+            
+            'movie_embeddings_uri': self.transform_to_gs_uri(
+                self.movie_embeddings_uri),
+            'user_embeddings_uri': self.transform_to_gs_uri(
+                self.user_embeddings_uri),
+            
+            'latest_checkpoint_uri': latest_checkpoint_uri,
+            'best_checkpoint_uri': best_checkpoint_uri,
+            
+            'num_epochs': num_epochs,
+            'batch_size': batch_size,
+            'seed': seed,
+            'study_name': STUDY_NAME,
+            'project_id': 'tune-unittest-02',
+            "trial_ids": json.dumps([0, 1]),
+            'phase': 'tune',
+            'top_k': 20,
+            'vizier_endpoint': vizier_endpoint,
+            'mlflow_tracking_uri': mlflow_uri,
+            'mlflow_experiment_name': STUDY_NAME,
+        }
     
     def transform_to_gs_uri(self, file_path:str):
         idx = file_path.find("/data/")
@@ -215,6 +281,12 @@ class TestRanker(unittest.TestCase):
         print(f'local device count={jax.local_device_count()}')
         print(f'process_count={jax.process_count()}')
         print(f'process_index={jax.process_index()}')
+    
+    def test_run_app_check(self):
+        config = self.config
+        config['connections_check'] = 1
+        set_flags_from_dict(config)
+        app_runner(None)
     
     def test_run_tune_train_test(self):
         """
@@ -244,58 +316,9 @@ class TestRanker(unittest.TestCase):
         except requests.exceptions.RequestException as e:
             print(f"An error occurred: {e}")
             return
+      
+        config = self.config
         
-        STUDY_NAME = "GraphRanker_tuning_unittest3"
-        
-        num_epochs = 4 #keep this to > 2 and < 10 for the restore tests at end of this method
-        batch_size = 64
-        seed = 234
-        
-        # tensorstore keeps trying to authenticate with google so for tests we'll use the abs path to checkpoint dir
-        checkpoint_dir = 'gs://checkpoint-bucket'
-        latest_checkpoint_uri = f'{checkpoint_dir}/latest'
-        best_checkpoint_uri = f'{checkpoint_dir}/best'
-        
-        #mflow_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}_mlflow.db")
-        #mflow_uri = f"sqlite:///{mflow_db_path}?mode=memory&cache=shared"
-        ##    postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]
-        vizier_endpoint = f'{base_url}:8000'
-        mlflow_uri = f"postgresql://{os.environ['POSTGRES_USER']}:{os.environ['POSTGRES_PASSWORD']}@{base_url}:5432/mlflow_db"
-        
-        config = {
-            'movies_uri': self.transform_to_gs_uri(self.movies_uri),
-            'recommendations_uri': self.transform_to_gs_uri(self.recommendations_uri),
-            'recommendations_ts_uri' : self.transform_to_gs_uri(self.recommendations_ts_uri),
-        
-            'ratings_train_liked_uri' : self.transform_to_gs_uri(self.ratings_train_liked_uri),
-            'ratings_train_3_uri': self.transform_to_gs_uri(self.ratings_train_3_uri),
-            'ratings_train_disliked_uri': self.transform_to_gs_uri(self.ratings_train_disliked_uri),
-            
-            'ratings_val_liked_uri' :self.transform_to_gs_uri(self.ratings_val_liked_uri),
-            'ratings_val_3_uri': self.transform_to_gs_uri(self.ratings_val_3_uri),
-            'ratings_val_disliked_uri' :self.transform_to_gs_uri(self.ratings_val_disliked_uri),
-            
-            'ratings_test_liked_uri': self.transform_to_gs_uri( self.ratings_test_liked_uri),
-            'ratings_test_3_uri': self.transform_to_gs_uri(self.ratings_test_3_uri),
-            'ratings_test_disliked_uri': self.transform_to_gs_uri(self.ratings_test_disliked_uri),
-            
-            'movie_embeddings_uri' : self.transform_to_gs_uri(self.movie_embeddings_uri),
-            'user_embeddings_uri': self.transform_to_gs_uri(self.user_embeddings_uri),
-            
-            'latest_checkpoint_uri': latest_checkpoint_uri,
-            'best_checkpoint_uri': best_checkpoint_uri,
-            
-            'num_epochs' : num_epochs,
-            'batch_size':batch_size, 'seed':seed,
-            'study_name' : STUDY_NAME,
-            'project_id' : 'tune-unittest-02',
-            "trial_ids" : json.dumps([0, 1]),
-            'phase' : 'tune',
-            'top_k' : 20,
-            'vizier_endpoint': vizier_endpoint,
-            'mlflow_tracking_uri': mlflow_uri,
-            'mlflow_experiment_name': STUDY_NAME,
-        }
         set_flags_from_dict(config)
         
         #reset oss vizier db
@@ -346,7 +369,7 @@ class TestRanker(unittest.TestCase):
         print(f'global_step next to last={earlier_restore_dict["global_step"]}')
         self.assertTrue(earlier_restore_dict['global_step'] > 0)
         epoch = (earlier_restore_dict['global_step']//TRAIN_BATCH_SIZE)//STEPS_PER_EPOCH_GLOBAL
-        self.assertEqual(epoch, (num_epochs-2))
+        self.assertEqual(epoch, (config['num_epochs']-2))
         
         #because this is next to last epoch saved, we should see < STEPS_PER_EPOCH_LOCAL loops over the iterator
         start_step = earlier_restore_dict['global_step'] // NUM_TRAIN_SHARDS
@@ -364,7 +387,7 @@ class TestRanker(unittest.TestCase):
         print(f'global_step last epoch={last_restored_dict["global_step"]}')
         self.assertTrue(earlier_restore_dict['global_step'] > 0)
         epoch = (last_restored_dict['global_step'] // TRAIN_BATCH_SIZE) // STEPS_PER_EPOCH_GLOBAL
-        self.assertEqual(epoch, (num_epochs - 1))
+        self.assertEqual(epoch, (config['num_epochs'] - 1))
         
         start_step = last_restored_dict['global_step'] // NUM_TRAIN_SHARDS
         n_iter = 0
@@ -411,8 +434,8 @@ class TestRanker(unittest.TestCase):
         expected_keys = {'loss', 'ndcg_20', 'mrr_20', 'recall_20'}
        
         metrics_dicts = get_mlflow_metrics_by_exp_name(
-            mlflow_tracking_uri=mlflow_uri,
-            experiment_name=STUDY_NAME)
+            mlflow_tracking_uri=config['mlflow_tracking_uri'],
+            experiment_name=config['study_name'])
         
         print(f'metrics_dicts={metrics_dicts}')
         metrics_dict = None
@@ -617,55 +640,7 @@ class TestRanker(unittest.TestCase):
     
     def test_feed_fake_data(self):
         
-        STUDY_NAME = "GraphRanker_tuning_unittest3"
-        
-        num_epochs = 4 #keep this to > 2 and < 10 for the restore tests at end of this method
-        batch_size = 16
-        seed = 234
-        
-        # tensorstore keeps trying to authenticate with google so for tests we'll use the abs path to checkpoint dir
-        checkpoint_dir = 'gs://checkpoint-bucket'
-        latest_checkpoint_uri = f'{checkpoint_dir}/latest'
-        best_checkpoint_uri = f'{checkpoint_dir}/best'
-        
-        #mflow_db_path = os.path.join(get_bin_dir(), f"{STUDY_NAME}_mlflow.db")
-        #mflow_uri = f"sqlite:///{mflow_db_path}?mode=memory&cache=shared"
-        ##    postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]
-        vizier_endpoint = f'{base_url}:8000'
-        mlflow_uri = f"postgresql://{os.environ['POSTGRES_USER']}:{os.environ['POSTGRES_PASSWORD']}@{base_url}:5432/mlflow_db"
-        
-        config = {
-            'movies_uri': self.transform_to_gs_uri(self.movies_uri),
-            'recommendations_uri': self.transform_to_gs_uri(self.recommendations_uri),
-            'recommendations_ts_uri' : self.transform_to_gs_uri(self.recommendations_ts_uri),
-            
-            'ratings_train_liked_uri' : self.transform_to_gs_uri(self.ratings_train_liked_uri),
-            'ratings_train_3_uri': self.transform_to_gs_uri(self.ratings_train_3_uri),
-            'ratings_train_disliked_uri': self.transform_to_gs_uri(self.ratings_train_disliked_uri),
-            
-            'ratings_val_liked_uri' :self.transform_to_gs_uri(self.ratings_val_liked_uri),
-            'ratings_val_3_uri': self.transform_to_gs_uri(self.ratings_val_3_uri),
-            'ratings_val_disliked_uri' :self.transform_to_gs_uri(self.ratings_val_disliked_uri),
-            
-            'ratings_test_liked_uri': self.transform_to_gs_uri( self.ratings_test_liked_uri),
-            'ratings_test_3_uri': self.transform_to_gs_uri(self.ratings_test_3_uri),
-            'ratings_test_disliked_uri': self.transform_to_gs_uri(self.ratings_test_disliked_uri),
-            
-            'latest_checkpoint_uri':latest_checkpoint_uri,
-            'best_checkpoint_uri': best_checkpoint_uri,
-            'movie_embeddings_uri' : self.transform_to_gs_uri(self.movie_embeddings_uri),
-            'user_embeddings_uri': self.transform_to_gs_uri(self.user_embeddings_uri),
-            'num_epochs' : num_epochs,
-            'batch_size':batch_size, 'seed':seed,
-            'study_name' : STUDY_NAME,
-            'project_id' : 'tune-unittest-02',
-            "trial_ids" : json.dumps([0, 1]),
-            'phase' : 'tune',
-            'top_k' : 20,
-            'vizier_endpoint': vizier_endpoint,
-            'mlflow_tracking_uri': mlflow_uri,
-            'mlflow_experiment_name': STUDY_NAME,
-        }
+        config = self.config
         
         embeddings, num_users = read_embeddings(
             user_embeddings_uri=config['user_embeddings_uri'],

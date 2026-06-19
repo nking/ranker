@@ -6,18 +6,8 @@ setup(
   packages=find_packages(where="src/main/python",
     include=['movie_lens_ranker']),
   package_dir={'': 'src/main/python'},
+  #  RUN pip install --no-deps -r requirements-cpu.txt or -gpu.txt
   install_requires = [
-    'jax-ai-stack==2025.10.28', 
-    'jraph @ git+https://github.com/deepmind/jraph.git@51f5990104f7374492f8f3ea1cbc47feb411c69c',
-     'jraphx==0.0.4',
-     'rax==0.4.0', 
-     'mlflow-skinny==3.11.1',
-     'psycopg2-binary==2.9.12',
-     'gcsfs==2026.2.0',
-     "google-vizier[jax]==0.1.24",
-     "numba==0.65.1",
-     #then install equinox==0.13.2 alembic==1.18.4 afterwards
-     #then install orbax-checkpoint-0.11.39
   ],
   #extras_require={"test": ["pytest"]},
   classifiers=[ 'Natural Language :: English',
