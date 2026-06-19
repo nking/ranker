@@ -182,6 +182,23 @@ For all means of running the code, these are the first steps
        docker compose down 
        docker compose up -d 
 
+    (3) after testing the cpu image, one can build the gpu image (or
+        build it grom start and tes with it)
+        to build the container images for the dbs and the GPU GraphRanker app:  
+            docker compose --project-directory . -f deploy/compose/docker-compose-gpus.yaml build app  
+        to check that needed libraries were loaded:
+            docker run --rm --gpus all --entrypoint python3 ranker-app-gpu:local -c 'import jax; print("Platform:", jax.lib.xla_bridge.get_backend().platform); import nvidia.cusparse; print("cuSPARSE loaded successfully!")'
+            docker run --rm --entrypoint python3 ranker-app-gpu:local -c "
+try:
+    import nvidia.cusparse
+    import nvidia.cublas
+    import jax
+    print('SUCCESS: All NVIDIA math libraries and JAX are successfully installed in the image!')
+except ImportError as e:
+    print('FAILED: Missing libraries:', e)
+"
+
+
 -----------------------------------------------------------------------
 Running Unit Tests:
 
