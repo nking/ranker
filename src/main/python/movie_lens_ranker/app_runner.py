@@ -705,6 +705,7 @@ def main(_):
     
     if "connections_check" in config and int(config["connections_check"])==1:
         connections_check(config)
+        return
     
     if app_runner_is_missing_minimum_required_keys(config):
         logging.info(f'warning: missing the minimum required flags')
