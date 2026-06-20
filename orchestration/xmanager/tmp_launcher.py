@@ -278,7 +278,7 @@ def main(_):
                             **run_config,
                             'trial_ids': dumps(list(trial_ids)),
                             "debug": False,
-                            "connections_check" : str(1)
+                            #"connections_check" : str(1)
                         },
                     )
                 

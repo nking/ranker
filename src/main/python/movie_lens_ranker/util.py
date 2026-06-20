@@ -10,7 +10,7 @@ from absl import flags
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 from jax.experimental import mesh_utils
-
+import subprocess
 # In JAX 0.8+, shard_map is typically in the main namespace
 
 FLAGS = flags.FLAGS
@@ -517,3 +517,27 @@ def calc_number_jax_graph_components(batch_size: int, max_history: int,
     max_graphs = batch_size + 1
     return {'max_nodes': max_nodes, 'max_edges': max_edges,
         'max_graphs': max_graphs}
+
+def is_running_on_gpu() -> bool:
+    for device in jax.local_devices():
+        if device.platform == 'gpu':
+            return True
+    return False
+
+def get_gpu_stats():
+    """Fetches real-time GPU utilization and VRAM usage."""
+    if not is_running_on_gpu():
+        return
+    try:
+        # Queries index, compute util %, used VRAM, and total VRAM
+        cmd = [
+            'nvidia-smi',
+            '--query-gpu=index,utilization.gpu,memory.used,memory.total',
+            '--format=csv,noheader'
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        # Format the output into a readable single-line string
+        stats = result.stdout.strip().replace('\n', ' | ')
+        return f"Hardware Stats [ID, Util%, Used, Total]: {stats}"
+    except Exception as e:
+        return f"Could not fetch GPU stats: {e}"

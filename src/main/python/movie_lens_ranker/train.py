@@ -4,7 +4,7 @@ and dataloader using SPMD paradigm.
 """
 import time
 from functools import partial
-from typing import Dict, Tuple, Union, Any
+from typing import Dict, Tuple, Union, Any, List, Sequence
 
 import mlflow
 import optax
@@ -33,7 +33,7 @@ from movie_lens_ranker.data_loading import create_train_and_val_dataloaders, \
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.util import read_embeddings, get_env_resources, \
     stringify_mlflow_params, get_canonical_mlflow_run_name, \
-    calc_number_jax_graph_components, get_model_mesh
+    calc_number_jax_graph_components, get_model_mesh, get_gpu_stats
 
 from jax.experimental import multihost_utils
 
@@ -425,10 +425,13 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     
     data_mesh = jax.sharding.Mesh(jax.devices(), axis_names=('data',))
     data_pspec = jax.sharding.PartitionSpec(('data'))
+    data_sharding = jax.sharding.NamedSharding(data_mesh, P("data"))
     
     sharded_batch_size = config_dict['batch_size'] // n_local_devices
     jax_graph_comp_dict = calc_number_jax_graph_components(config_dict['batch_size'],
         config_dict['max_history'], config_dict['num_candidates'])
+    
+    multihost = jax.process_count() > 1
         
     last_epoch = 0
     for loop_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
@@ -445,19 +448,26 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         # Map the function over the entire GraphsTuple PyTree.
         # Note that this is a shard across local interconnect, not a shard over global network even
         # though the mesh includes "global info"
-        padded_super_graph = jax.tree_util.tree_map(
-            lambda x: multihost_utils.host_local_array_to_global_array(
-                x, data_mesh, data_pspec),
-            padded_super_graph_0
-        )
+        if multihost:
+            padded_super_graph = jax.tree_util.tree_map(
+                lambda x: multihost_utils.host_local_array_to_global_array(
+                    x, data_mesh, data_pspec),
+                padded_super_graph_0
+            )
+        else:
+            padded_super_graph = jax.tree_util.tree_map(
+                lambda x: jax.device_put(x, data_sharding),
+                padded_super_graph_0
+            )
         
         loss = train_step(model, padded_super_graph, optimizer)
         
         epoch_avg_train_loss.append(loss)
         
-        if batch_idx % 5 == 0:# and rank==0:
+        if batch_idx % 10 == 0:# and rank==0:
             logging.info(f"batch {batch_idx}, loop_idx={loop_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}")
-        
+            logging.info(get_gpu_stats())
+            
         if (batch_idx + 1) % STEPS_PER_EPOCH_LOCAL == 0:
             logging.info(f"*batch {batch_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}")
             #finished a train epoch.  calc avg train loss and val metrics
@@ -709,6 +719,9 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     """
     if "phase" not in config:
         raise LookupError(f"config is missing key 'phase'")
+    
+    if "debug" in config and config['debug']:
+        logging.info(f'train_fn config: {config}')
     
     #fixed top_k for consistent stats with retrieval and reranker
     config['top_k'] = 20
