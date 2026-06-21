@@ -129,10 +129,10 @@ def _create_dataloader(
         num_threads = int(os.environ.get("grain_read_options_num_threads", 4)),
         prefetch_buffer_size=int(os.environ.get("grain_read_buffer_size", 50)),
     )
+
+    user_history = UserHistory(ratings_uri_list=ratings_history_uris, fixed_size=max_history)
     
-    user_history = UserHistory(ratings_uri_list=ratings_history_uris, fixed_size=512)
-    
-    user_disliked_history = UserHistory(ratings_uri_list=ratings_disliked_uris, fixed_size=256)
+    user_disliked_history = UserHistory(ratings_uri_list=ratings_disliked_uris, fixed_size=max_history)
     
     datasource = RandomAccessArrayRecordDataSource(ratings_data_uri)
     

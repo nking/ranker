@@ -182,10 +182,10 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False):
     root.add_discrete_param("num_layers", feasible_values=[2])
     #hidden_dim % num_heads == 0
     root.add_discrete_param("num_heads", feasible_values=[2, 4, 8])
-    root.add_discrete_param("hidden_dim", feasible_values=[64, 128, 256])
-    root.add_discrete_param("max_history", feasible_values=[i for i in range(2*top_k, 6*256, 248)])
+    root.add_discrete_param("hidden_dim", feasible_values=[64, 128])
+    root.add_discrete_param("max_history", feasible_values=[i for i in range(2*top_k, 100, 10)])
     
-    root.add_discrete_param("num_candidates", feasible_values=[i for i in range(2*top_k, 500 + 1, 10)])
+    root.add_discrete_param("num_candidates", feasible_values=[i for i in range(2*top_k, 100, 10)])
     
     #if want a linear relationship between lr and wd, setup a dependency:
     # wd_ratio = trial.suggest_float("wd_ratio", 0.01, 1.0, log=True)
