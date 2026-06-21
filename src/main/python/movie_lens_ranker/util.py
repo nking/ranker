@@ -531,7 +531,7 @@ def get_gpu_stats():
     try:
         # Queries index, compute util %, used VRAM, and total VRAM
         cmd = [
-            'nvidia-smi',
+            '/usr/bin/nvidia-smi',
             '--query-gpu=index,utilization.gpu,memory.used,memory.total',
             '--format=csv,noheader'
         ]

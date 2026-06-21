@@ -2,6 +2,29 @@ import os
 import logging
 #to test for multiple devices before using on GPUs or TPUs:
 #os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=4'
+
+# Force Python to spawn clean workers instead of cloning the GPU context.
+import multiprocessing as mp
+import os
+import logging
+
+def init_multiprocessing():
+    if mp.get_start_method(allow_none=True) != 'spawn':
+        mp.set_start_method('spawn', force=True)
+    try:
+        mp.get_logger().setLevel(logging.DEBUG)
+    except Exception:
+        pass
+    # Tell child processes to not see GPUs
+    # This prevents them from trying to initialize JAX/CUDA drivers
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    # Ensure PYTHONPATH is inherited by child processes
+    # This ensures child processes can actually find 'movie_lens_ranker' package
+    if "PYTHONPATH" not in os.environ:
+        os.environ["PYTHONPATH"] = ":".join(sys.path)
+
+init_multiprocessing()
+
 import jax
 
 def safe_jax_init():
@@ -355,7 +378,6 @@ class TestRanker(unittest.TestCase):
         restore_dict, train_run = self.run_train_and_restore_chkpoint_and_assert(config)
         
         self._run_test_and_assert(config, restore_dict)
-        
         
         ##====== load train_ for use in stats =======
         TRAIN_BATCH_SIZE = restore_dict['train_dataloader']._sampler.batch_size

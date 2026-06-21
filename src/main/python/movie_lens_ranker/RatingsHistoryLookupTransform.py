@@ -1,6 +1,8 @@
 from typing import Tuple, Dict, List, Union
 import grain.python as pgrain
 import numpy as np
+import os
+import sys
 from array_record.python import array_record_module
 
 from movie_lens_ranker.UserHistory import UserHistory
@@ -12,6 +14,11 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
         max_history: Fixed size for the history window (crucial for JAX).  This can be made as large as
         the longest history among all users to keep all ratings and pad to max_history.
         """
+        # This will print from every single worker process.
+        # If you don't see this in your logs, the process is dying before it even hits this code.
+        print(f"DEBUG: Worker PID {os.getpid()} - PYTHONPATH: {sys.path}", flush=True)
+        print(f"DEBUG: Worker PID {os.getpid()} - app_rootfs present: {'app_rootfs' in str(sys.path)}",
+            flush=True)
         self.history_lookup = history_lookup
         self.max_history = max_history
         self.pad_value = -1

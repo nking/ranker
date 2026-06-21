@@ -40,6 +40,9 @@ def create_train_and_val_dataloaders(
         movie_rec_file_uri=recommendations_uri,
         movie_rec_ts_file_uri=recommendations_ts_uri)
     
+    os.environ["PYTHONPATH"] = os.environ.get("PYTHONPATH", "")
+    os.environ["LD_LIBRARY_PATH"] = os.environ.get("LD_LIBRARY_PATH", "")
+    
     train_dataloader = _create_dataloader(
         all_movie_ids=all_movie_ids,
         recommendations=recommendations,
@@ -94,6 +97,9 @@ def create_test_dataloader(
         movie_rec_file_uri=recommendations_uri,
         movie_rec_ts_file_uri=recommendations_ts_uri)
     
+    os.environ["PYTHONPATH"] = os.environ.get("PYTHONPATH", "")
+    os.environ["LD_LIBRARY_PATH"] = os.environ.get("LD_LIBRARY_PATH", "")
+    
     dataloader = _create_dataloader(
         all_movie_ids=all_movie_ids,
         recommendations=recommendations,
@@ -115,6 +121,9 @@ def _create_dataloader(
     
     shard_opts = grain.sharding.ShardByJaxProcess()
     logging.info(f'grain shard_opts={shard_opts}')
+    
+    worker_count = int(os.environ.get("grain_worker_count", 4))
+    logging.info(f'grain worker_count={worker_count}')
     
     read_opts = grain.ReadOptions(
         num_threads = int(os.environ.get("grain_read_options_num_threads", 4)),
@@ -138,7 +147,12 @@ def _create_dataloader(
         num_epochs=num_epochs,
         batch_size=batch_size, shuffle=shuffle, seed=seed,
         shard_options=shard_opts)
-        
+    
+    original_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "0,1")
+    # 2. Hide GPUs from the next processes to be spawned
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    logging.info("Instantiating Grain DataLoader (hiding GPUs from child workers)...")
+    
     # NOTE that train_history_dict, etc. are passed by reference to the MapTransforms
     dataloader = DataLoader(
         data_source=datasource,
@@ -159,9 +173,12 @@ def _create_dataloader(
             #JraphPaddedGraphTupleTransform(batch_size=batch_size,
             #    max_history=max_history, num_candidates=num_candidates),
         ],
-        # worker_count=worker_count,
+        worker_count=worker_count,
         shard_options=shard_opts,
         read_options=read_opts,
     )
+    
+    os.environ["CUDA_VISIBLE_DEVICES"] = original_devices
+    logging.info("DataLoader instantiated. Restored parent GPU visibility.")
     
     return dataloader

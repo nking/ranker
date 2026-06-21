@@ -3,13 +3,39 @@ main runner for the tuning, training, and testing of a Jax AI stack
 model with JaxAI stack dataloader under SPMD paradigm with multi-host, multi-process
 abilities.
 """
+"""
+main runner for the tuning, training, and testing of a Jax AI stack
+model with JaxAI stack dataloader under SPMD paradigm with multi-host, multi-process
+abilities.
+"""
+
+# Force Python to spawn clean workers instead of cloning the GPU context.
+import multiprocessing as mp
 import os
+import logging
+
+def init_multiprocessing():
+    if mp.get_start_method(allow_none=True) != 'spawn':
+        mp.set_start_method('spawn', force=True)
+    try:
+        mp.get_logger().setLevel(logging.DEBUG)
+    except Exception:
+        pass
+    # Tell child processes to not see GPUs
+    # This prevents them from trying to initialize JAX/CUDA drivers
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    # Ensure PYTHONPATH is inherited by child processes
+    # This ensures child processes can actually find 'movie_lens_ranker' package
+    if "PYTHONPATH" not in os.environ:
+        os.environ["PYTHONPATH"] = ":".join(sys.path)
+
+init_multiprocessing()
+
 import uuid
 from typing import Dict, Union, Any
 
 import jax
 from mlflow import MlflowClient
-import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 def safe_jax_init():

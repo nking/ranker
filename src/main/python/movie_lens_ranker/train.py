@@ -339,6 +339,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     if not isinstance(val_dataloader._sampler, BatchSampler):
         raise ValueError("val_dataloader sampler must be an instance of BatchSampler")
     
+    logging.info(f'_train_fn config: {config}')
+    
     start_time = time.perf_counter()
     
     rank = jax.process_index()
@@ -435,6 +437,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         
     last_epoch = 0
     for loop_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
+        if "debug" in config and config["debug"]:
+            logging.info(f"START_BATCH_TIME: {time.time()}")
         batch_idx = start_batch_idx + loop_idx
         local_step = batch_idx * TRAIN_BATCH_SIZE
         global_step = local_step * NUM_TRAIN_SHARDS
@@ -579,6 +583,9 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                         early_stop_triggered[0] = True
                         break
                         
+        if "debug" in config and config["debug"]:
+            logging.info(f"END_BATCH_TIME: {time.time()}")
+        
         if early_stop_triggered[0]:
             break
             
@@ -719,9 +726,6 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
     """
     if "phase" not in config:
         raise LookupError(f"config is missing key 'phase'")
-    
-    if "debug" in config and config['debug']:
-        logging.info(f'train_fn config: {config}')
     
     #fixed top_k for consistent stats with retrieval and reranker
     config['top_k'] = 20
