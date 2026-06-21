@@ -16,7 +16,7 @@ class UserHistory (object):
         self.fixed_size = fixed_size
         
     def _load_history(self, ratings_uri_list: Union[str, List[str]],
-            fixed_size:int = 512) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+            fixed_size) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         
         #buildnumpy vectors, making padded lists of length fixed_history_length for movies, ratings, and timestamps
         # lookup is tuple of dictionary of { user_id: {ts, movie_id, rating} } in which ts, movie_id
@@ -42,9 +42,10 @@ class UserHistory (object):
             
             #place the values at beginnings of arrays.
             # any empty values at ends of arrays will be self.pad_value for move_id and self.ts_pad_value for timestamps
-            timestamps[i][:length] = user_ts[:length]
-            movie_ids[i][:length] = user_movies[:length]
-            ratings[i][:length] = user_ratings[:length]
+            # BUT, we store the most recent history, which are at the end of the history arrays
+            timestamps[i][:length] = user_ts[-length:]
+            movie_ids[i][:length] = user_movies[-length:]
+            ratings[i][:length] = user_ratings[-length:]
         
         #sort by user_ids to enable np.searchsorted later
         user_ids = np.array(user_ids, dtype=np.int32)
