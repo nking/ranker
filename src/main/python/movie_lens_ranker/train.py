@@ -339,7 +339,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     if not isinstance(val_dataloader._sampler, BatchSampler):
         raise ValueError("val_dataloader sampler must be an instance of BatchSampler")
     
-    logging.info(f'_train_fn config: {config}')
+    logging.info(f'_train_fn config: {config_dict}')
     
     start_time = time.perf_counter()
     
@@ -437,7 +437,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         
     last_epoch = 0
     for loop_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
-        if "debug" in config and config["debug"]:
+        if "debug" in config_dict and config_dict["debug"]:
             logging.info(f"START_BATCH_TIME: {time.time()}")
         batch_idx = start_batch_idx + loop_idx
         local_step = batch_idx * TRAIN_BATCH_SIZE
@@ -583,7 +583,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                         early_stop_triggered[0] = True
                         break
                         
-        if "debug" in config and config["debug"]:
+        if "debug" in config_dict and config_dict["debug"]:
             logging.info(f"END_BATCH_TIME: {time.time()}")
         
         if early_stop_triggered[0]:

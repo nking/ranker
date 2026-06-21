@@ -14,6 +14,7 @@ import multiprocessing as mp
 import os
 import logging
 
+
 def init_multiprocessing():
     if mp.get_start_method(allow_none=True) != 'spawn':
         mp.set_start_method('spawn', force=True)
@@ -21,11 +22,15 @@ def init_multiprocessing():
         mp.get_logger().setLevel(logging.DEBUG)
     except Exception:
         pass
-    # Tell child processes to not see GPUs
-    # This prevents them from trying to initialize JAX/CUDA drivers
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    
+    # If CUDA_VISIBLE_DEVICES is exactly "", we know this process is a Grain child worker
+    # (because our wrapper in data_loading.py temporarily set it to "" before spawning).
+    # We must remove JAX_PLATFORM_NAME=gpu from the child's environment so JAX doesn't
+    # crash when it gracefully falls back to the CPU.
+    if os.environ.get("CUDA_VISIBLE_DEVICES") == "":
+        os.environ.pop("JAX_PLATFORM_NAME", None)
+    
     # Ensure PYTHONPATH is inherited by child processes
-    # This ensures child processes can actually find 'movie_lens_ranker' package
     if "PYTHONPATH" not in os.environ:
         os.environ["PYTHONPATH"] = ":".join(sys.path)
 
