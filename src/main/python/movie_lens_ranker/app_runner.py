@@ -23,27 +23,38 @@ def init_multiprocessing():
     except Exception:
         pass
     
-    # If CUDA_VISIBLE_DEVICES is exactly "", we know this process is a Grain child worker
-    # (because our wrapper in data_loading.py temporarily set it to "" before spawning).
-    # We must remove JAX_PLATFORM_NAME=gpu from the child's environment so JAX doesn't
-    # crash when it gracefully falls back to the CPU.
+    # Handle JAX platform naming as you did before
     if os.environ.get("CUDA_VISIBLE_DEVICES") == "":
         os.environ.pop("JAX_PLATFORM_NAME", None)
     
-    # Ensure PYTHONPATH is inherited by child processes
-    if "PYTHONPATH" not in os.environ:
-        os.environ["PYTHONPATH"] = ":".join(sys.path)
-
-init_multiprocessing()
-
-import uuid
-from typing import Dict, Union, Any
+    current_ppath = os.environ.get("PYTHONPATH", "")
+    new_paths = ":".join(sys.path)
+    
+    if current_ppath:
+        # Avoid duplication if the path is already there
+        os.environ["PYTHONPATH"] = f"{current_ppath}:{new_paths}"
+    else:
+        os.environ["PYTHONPATH"] = new_paths
 
 import jax
-from mlflow import MlflowClient
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 def safe_jax_init():
+    """
+    cuda_val = os.environ.get("CUDA_VISIBLE_DEVICES", "UNDEFINED")
+    logging.info( f"DEBUG: safe_jax_init running in process with CUDA_VISIBLE_DEVICES='{cuda_val}'")
+    
+    if os.environ.get("CUDA_VISIBLE_DEVICES", "") == "":
+        logging.info("Skipping JAX distributed init for Grain worker process.")
+        return
+        
+        # If already initialized (by the parent process before spawn), skip it.
+    if jax.distributed.is_initialized():
+        logging.info("JAX distributed already initialized, skipping.")
+        return
+    """
+    if jax.distributed.is_initialized():
+        return
     def get_process_id():
         import re
         #print(f'POD_NAME={os.environ.get("POD_NAME", "")}', flush=True)
@@ -60,7 +71,7 @@ def safe_jax_init():
         if match:
             return int(match.group(1))
         return 0  # Fallback
-             
+        
     try:
         if "LOCAL_SIMULATION" in os.environ and os.environ.get("LOCAL_SIMULATION") == "True":
             logging.info("🛠️ Detected local simulation. Applying manual jax initialization...")
@@ -69,7 +80,7 @@ def safe_jax_init():
             num_processes = int(os.environ.get("JAX_NUM_PROCESSES", 1))
             
             logging.info(f'process_id = {process_id} coord_addr={coord_addr} num_processes={num_processes}')
-
+            
             jax.distributed.initialize(
                 coordinator_address=coord_addr,
                 num_processes=num_processes,
@@ -91,10 +102,17 @@ def safe_jax_init():
         
     logging.info(f"jax devices={jax.devices()}, jax.loca_devices={jax.local_devices()}")
 
+mp.log_to_stderr()
+logger = mp.get_logger()
+logger.setLevel(logging.DEBUG)
+
+init_multiprocessing()
 safe_jax_init()
 
+import uuid
+from typing import Dict, Union, Any
+from mlflow import MlflowClient
 import jax.numpy as jnp
-from jax.sharding import PartitionSpec as P
 
 import grpc
 from vizier._src.pyvizier.shared.trial import ParameterValue, ParameterDict
@@ -107,7 +125,7 @@ from jax.experimental import mesh_utils
 
 from movie_lens_ranker.train import train_fn, test_fn
 from movie_lens_ranker.util import define_flags, get_recognized_keys, \
-    get_canonical_mlflow_run_name, app_runner_is_missing_minimum_required_keys, \
+    app_runner_is_missing_minimum_required_keys, \
     destringify_mlflow_params
 
 FLAGS = flags.FLAGS
@@ -768,6 +786,8 @@ def main(_):
         raise ValueError('unknown phase: {config["phase"]}')
     
 if __name__ == '__main__':
+    
     define_flags()
+    
     app.run(main)
     

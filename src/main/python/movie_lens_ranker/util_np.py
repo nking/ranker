@@ -4,9 +4,8 @@ import numpy as np
 import jraph
 import jax.tree_util as tree
 
-
 def optimized_batch_and_pad(batch: Sequence[jraph.GraphsTuple], max_nodes: int, max_edges: int,
-        max_graphs: int, n_local_devices:int, drop_remainder:bool=True) -> Tuple[jraph.GraphsTuple, int]:
+        max_graphs: int) -> Tuple[jraph.GraphsTuple, int]:
     """
     Highly vectorized, single-pass replacement for jraph.batch followed by jraph.pad_with_graphs.
     Eliminates redundant memory allocations and Python loops.
@@ -15,10 +14,10 @@ def optimized_batch_and_pad(batch: Sequence[jraph.GraphsTuple], max_nodes: int, 
     
     graphs = batch
     
-    if drop_remainder:
-        remainder = len(graphs) % n_local_devices
-        if remainder != 0:
-            graphs = graphs[:-remainder]  # Drop trailing graphs to make it divisible
+    #if drop_remainder:
+    #    remainder = len(graphs) % n_local_devices
+    #    if remainder != 0:
+    #        graphs = graphs[:-remainder]  # Drop trailing graphs to make it divisible
         
     # 1. Fast, single-pass concatenations of graph metadata
     n_node_arr = np.concatenate([g.n_node for g in graphs])
@@ -58,10 +57,9 @@ def optimized_batch_and_pad(batch: Sequence[jraph.GraphsTuple], max_nodes: int, 
     # 4. Vectorized Sender/Receiver offset calculation
     # Calculate offsets using the sum of nodes PER graph tuple to cleanly handle
     # GraphTuples that might already contain multiple graphs implicitly.
-    nodes_per_tuple = np.array([np.sum(g.n_node) for g in graphs],
-        dtype=np.int32)
-    offsets = np.cumsum(
-        np.concatenate([np.array([0], dtype=np.int32), nodes_per_tuple[:-1]]))
+    nodes_per_tuple = np.array([np.sum(g.n_node) for g in graphs], dtype=np.int32)
+    
+    offsets = np.cumsum(np.concatenate([np.array([0], dtype=np.int32), nodes_per_tuple[:-1]]))
     
     edge_counts = [int(np.sum(g.n_edge)) for g in graphs]
     repeated_offsets = np.repeat(offsets, edge_counts)
@@ -81,8 +79,7 @@ def optimized_batch_and_pad(batch: Sequence[jraph.GraphsTuple], max_nodes: int, 
     # 6. Fast Tree Map for feature padding (nodes, edges, globals)
     def pad_features(pad_size, *nests):
         batched_feats = np.concatenate(nests)
-        padding = np.zeros((pad_size,) + batched_feats.shape[1:],
-            dtype=batched_feats.dtype)
+        padding = np.zeros((pad_size,) + batched_feats.shape[1:], dtype=batched_feats.dtype)
         return np.concatenate([batched_feats, padding])
     
     nodes_padded = tree.tree_map(lambda *args: pad_features(pad_n_node, *args),

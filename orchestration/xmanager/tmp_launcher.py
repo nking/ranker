@@ -198,7 +198,7 @@ def main(_):
             xm.Packageable(
                 executable_spec=xm.Dockerfile(
                     path=os.path.abspath('../../'),
-                    dockerfile='Dockerfile_offline',
+                    dockerfile='Dockerfile_offline_gpu',
                 ),
                 executor_spec=xm_local.Local.Spec()
             ),

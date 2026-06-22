@@ -180,7 +180,10 @@ def main(_):
             'PYTHONIOENCODING': 'UTF-8',
             'JAX_LOG_LEVEL': 'debug',
             'jax_distributed_debug':"True",
-            "LOCAL_SIMULATION" : "True"
+            "LOCAL_SIMULATION" : "True",
+            "grain_worker_count" : str(0),
+            "grain_read_options_num_threads": str(1),
+            "grain_read_buffer_size" : str(1)
         }
         run_config = {
             'LOGNAME': env_config.get('POSTGRES_USER'),
@@ -214,8 +217,6 @@ def main(_):
             "seed": 12345,
             "phase": "tune",
             'project_id': project_id,
-            "grain_num_threads_fetching_records": 2,
-            "grain_num_threads_computing_num_records": 2,
         }
         
         executable = experiment.package([
@@ -223,7 +224,7 @@ def main(_):
             xm.Packageable(
                 executable_spec=xm.Dockerfile(
                     path=os.path.abspath('../../'),
-                    dockerfile='Dockerfile_offline',
+                    dockerfile='Dockerfile_offline_cpu',
                 ),
                 executor_spec=xm_local.Local.Spec()
             ),
@@ -255,7 +256,8 @@ def main(_):
             '''
             resources = xm.JobRequirements(cpu=2, ram=10 * xm.GiB)
             
-            container_gateway = "0.0.0.0"
+            #container_gateway = "0.0.0.0"
+            container_gateway = "127.0.0.1"
             jax_port = 8888
             work_unit_id = 0
             
@@ -297,7 +299,6 @@ def main(_):
                             'JAX_COORDINATOR_ADDRESS': coordinator_addr,
                             # 'JAX_COORDINATOR_IP': container_ip,
                             'JAX_COORDINATOR_PORT': str(jax_port),
-                            "grain_read_options_num_threads": str(2),
                         },
                         args={
                             **run_config,
@@ -332,7 +333,6 @@ def main(_):
             _env_dict['JAX_COORDINATOR_ADDRESS'] = coordinator_addr
             _env_dict['JAX_NUM_PROCESSES'] = "1"
             _env_dict['JAX_COORDINATOR_PORT'] = str(jax_port)
-            _env_dict["grain_read_options_num_threads"] = str(2)
             
             group_jobs[f"{phase}_job_0_worker_{rank}"] = xm.Job(
                 executable=executable,
@@ -384,7 +384,6 @@ def main(_):
                         'JAX_COORDINATOR_ADDRESS': coordinator_addr,
                         # 'JAX_COORDINATOR_IP': container_ip,
                         'JAX_COORDINATOR_PORT': str(jax_port),
-                        "grain_read_options_num_threads": str(2),
                     },
                     args={
                         **run_config,
@@ -429,7 +428,6 @@ def main(_):
                         'JAX_COORDINATOR_ADDRESS': coordinator_addr,
                         # 'JAX_COORDINATOR_IP': container_ip,
                         'JAX_COORDINATOR_PORT': str(jax_port),
-                        "grain_read_options_num_threads": str(2),
                     },
                     args={
                         **run_config,

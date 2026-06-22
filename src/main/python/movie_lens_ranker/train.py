@@ -31,7 +31,7 @@ import orbax.checkpoint as ocp
 from movie_lens_ranker.data_loading import create_train_and_val_dataloaders, \
     create_test_dataloader
 from movie_lens_ranker.model import GraphRanker
-from movie_lens_ranker.util import read_embeddings, get_env_resources, \
+from movie_lens_ranker.util import read_embeddings, \
     stringify_mlflow_params, get_canonical_mlflow_run_name, \
     calc_number_jax_graph_components, get_model_mesh, get_gpu_stats
 
@@ -43,7 +43,6 @@ from movie_lens_ranker.util_np import optimized_batch_and_pad
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-env_resources, mesh = get_env_resources()
 #mesh_local = jax.sharding.Mesh(np.array(jax.local_devices()), axis_names=('local_data',))
 #data_sharding = jax.sharding.NamedSharding(mesh_local, P('local_data'))
 
@@ -223,14 +222,6 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) ->
     loss, metrics_dict = loss_fn(model, padded_graph)
     metrics_dict['loss'] = loss
     return metrics_dict
-    
-# in_specs=P() tells JAX the input is a scalar
-# out_specs=P() (empty) implies the output is a single global (replicated) value
-#  and is sharded across the 'data' axis
-@jax.jit
-@partial(shard_map, mesh=mesh, in_specs=P(), out_specs=P())
-def aggregate_metric(scalar_metric):
-    return jax.lax.pmean(scalar_metric, axis_name='data')
 
 @nnx.jit
 def vectorized_epoch_eval(model, mega_batch, top_k):
@@ -257,6 +248,15 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
     model_mesh = get_model_mesh()
     global_avg_metrics_batches = {"loss":[], "mrr":[], "ndcg":[], "recall":[]}
     n_samples_tot = 0
+    
+    # in_specs=P() tells JAX the input is a scalar
+    # out_specs=P() (empty) implies the output is a single global (replicated) value
+    #  and is sharded across the 'data' axis
+    @jax.jit
+    @partial(shard_map, mesh=data_mesh, in_specs=P(), out_specs=P())
+    def aggregate_metric(scalar_metric):
+        return jax.lax.pmean(scalar_metric, axis_name='data')
+    
     for graphs_tuple_batch in val_dataloader_iter:
         
         padded_super_graph_0, n_samples = pad_graph_tuple_batch(graphs_tuple_batch, jax_graph_comp_dict)
@@ -429,16 +429,17 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     data_pspec = jax.sharding.PartitionSpec(('data'))
     data_sharding = jax.sharding.NamedSharding(data_mesh, P("data"))
     
-    sharded_batch_size = config_dict['batch_size'] // n_local_devices
     jax_graph_comp_dict = calc_number_jax_graph_components(config_dict['batch_size'],
-        config_dict['max_history'], config_dict['num_candidates'])
+        config_dict['max_history'], config_dict['num_candidates'], n_local_devices=n_local_devices)
     
     multihost = jax.process_count() > 1
+    
+    use_debug = ("debug" in config_dict and config_dict["debug"])
         
     last_epoch = 0
     for loop_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
         
-        if "debug" in config_dict and config_dict["debug"]:
+        if use_debug:
             logging.info(f"START_BATCH_TIME: {time.time()}")
         
         batch_idx = start_batch_idx + loop_idx
@@ -447,13 +448,20 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
         last_epoch = epoch
         
-        padded_super_graph_0, n_samples = optimized_batch_and_pad(
-            batch=graphs_tuple_batch,
-            max_nodes=jax_graph_comp_dict['max_nodes'],
-            max_edges=jax_graph_comp_dict['max_edges'],
-            max_graphs=jax_graph_comp_dict['max_graphs'],
-            n_local_devices=n_local_devices,
-        )
+        try:
+            padded_super_graph_0, n_samples = optimized_batch_and_pad(
+                batch=graphs_tuple_batch,
+                max_nodes=jax_graph_comp_dict['max_nodes'],
+                max_edges=jax_graph_comp_dict['max_edges'],
+                max_graphs=jax_graph_comp_dict['max_graphs'],
+            )
+        except Exception as e:
+            logging.error(f"Exception occurred during optimized_batch_and_pad: {e}"
+                          f".\n arguments were batch={graphs_tuple_batch}, "
+                          f" max_nodes={jax_graph_comp_dict['max_nodes']}, "
+                          f"max_edges={jax_graph_comp_dict['max_edges']}, "
+                          f"max_graphs={jax_graph_comp_dict['max_graphs']},"
+                          f" n_local_devices={n_local_devices}")
         
         #grain SPMD has already partitioned the data across jax process ids, but if there is more than
         # 1 host, we further partition the data across the hosts so that the hosts aren't doing identical work.
@@ -591,13 +599,13 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                         early_stop_triggered[0] = True
                         break
                         
-        if "debug" in config_dict and config_dict["debug"]:
+        if use_debug:
             logging.info(f"END_BATCH_TIME: {time.time()}")
         
         if early_stop_triggered[0]:
             break
             
-    logging.info(f'elapsed time in sec = {time.perf_counter() - start_time}.  last_epoch={last_epoch}')
+    logging.info(f'elapsed time for _train)fn in sec = {time.perf_counter() - start_time}.  last_epoch={last_epoch}')
 
     return best_ndcg
 
@@ -687,14 +695,13 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         
         jax_graph_comp_dict = calc_number_jax_graph_components(
             batch_size=config['batch_size'], max_history=config['max_history'],
-            num_candidates=config['num_candidates'])
+            num_candidates=config['num_candidates'], n_local_devices=jax.local_device_count())
         
         padded_graph, n_samples = optimized_batch_and_pad(
             batch=fake_batch,
             max_nodes=jax_graph_comp_dict['max_nodes'],
             max_edges=jax_graph_comp_dict['max_edges'],
             max_graphs=jax_graph_comp_dict['max_graphs'],
-            n_local_devices=jax.local_device_count(),
         )
         
         model.eval()
@@ -1077,7 +1084,8 @@ def test_fn(config: dict):
             raise ValueError(
                 "test_dataloader sampler must be an instance of BatchSampler")
         
-        jax_graph_comp_dict = calc_number_jax_graph_components(batch_size, max_history, num_candidates)
+        jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
+            max_history, num_candidates, n_local_devices=jax.local_device_count())
         
         global_test_metrics, n_val_samples = _epoch_validation(model, iter(test_dataloader), config['top_k'], jax_graph_comp_dict)
     
@@ -1190,7 +1198,7 @@ def export_model(trained_model: GraphRanker, batch_size:int, max_history:int,
     from orbax import export
 
     jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
-        max_history, num_candidates)
+        max_history, num_candidates, n_local_devices=jax.local_device_count())
     
     MAX_NODES = jax_graph_comp_dict['max_nodes']
     MAX_EDGES = jax_graph_comp_dict['max_edges']
@@ -1362,8 +1370,7 @@ def export_model(trained_model: GraphRanker, batch_size:int, max_history:int,
     export_manager = export.ExportManager(jax_module, [serving_config])
     export_manager.save(output_uri)
     '''
-    pass
-
+    
 def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, global_step, top_k:int=20):
     
     logging.info(f'worker_rank={jax.process_index()}: begin _assert_checkpoints_restore')
@@ -1377,7 +1384,7 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
     jax_graph_comp_dict = calc_number_jax_graph_components(
         restore_dict['config']['batch_size'],
         restore_dict['config']['max_history'],
-        restore_dict['config']['num_candidates'])
+        restore_dict['config']['num_candidates'], n_local_devices=jax.local_device_count())
     
     import copy
     loader_current = copy.deepcopy(val_data_loader)
@@ -1535,7 +1542,7 @@ def create_dummy_super_padded_graph(batch_size: int,
         num_candidates=num_candidates, user_id_range=user_id_range, movie_id_range=movie_id_range)
     
     jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
-        max_history, num_candidates)
+        max_history, num_candidates, n_local_devices=jax.local_device_count())
     
     padded_super_graph, n_samples = pad_graph_tuple_batch(fake_graph_list,
         jax_graph_comp_dict)

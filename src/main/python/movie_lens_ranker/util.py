@@ -71,7 +71,7 @@ def app_runner_is_missing_minimum_required_keys(config: Dict[str, Any]) -> bool:
     :return: False if has minumum required keys, else returns False
     """
     for key in ("study_name", "phase",  "mlflow_tracking_uri"):
-        if config.get(key, None) == None:
+        if config.get(key, None) is None:
             logging.info(f'missing a key')
             return True
     return False
@@ -92,28 +92,6 @@ def get_model_mesh():
     model_mesh = jax.sharding.Mesh(device_grid, axis_names=('processes', 'local_devices'))
     #data_sharding = jax.sharding.NamedSharding(model_mesh, P('local_data'))
     return model_mesh
-
-def get_env_resources():
-    # 'cpu', 'gpu', or 'tpu'
-    backend = jax.extend.backend.get_backend().platform
-    num_local_devices = jax.local_device_count()
-    devices = np.array(jax.devices())
-    mesh = jax.sharding.Mesh(devices, axis_names=('data',))
-    #jax.set_mesh(mesh)
-    device_dict = {}
-    if backend == "tpu":
-        device_dict.update({"use_gpu": False, "use_tpu": True,
-            "resources_per_worker": {"TPU": num_local_devices}})
-    elif backend == "gpu":
-        # Usually, Ray handles GPU assignment automatically with use_gpu=True,
-        # but specifying 1 GPU per worker ensures strict isolation.
-        device_dict.update({"use_gpu": True, "use_tpu": False,
-            "resources_per_worker": {"GPU": 1}})
-    else:
-        # CPU path
-        device_dict.update({"use_gpu": False, "use_tpu": False,
-            "resources_per_worker": {"CPU": 1}})
-    return device_dict, mesh
 
 def set_flags_from_dict(params_dict, store_only_recognized:bool=True):
     """Sets absl FLAGS from a dictionary, ensuring they are marked as parsed."""
@@ -506,7 +484,16 @@ def build_history_lookup(ratings_uri_list: Union[str, List[str]], batch_size: in
 
 
 def calc_number_jax_graph_components(batch_size: int, max_history: int,
-        num_candidates: int) -> Dict[str, int]:
+        num_candidates: int,  n_local_devices:int) -> Dict[str, int]:
+    """
+    calculate the padding for graph components.  note that the number of local devices is considered in order
+    to make max_graphs divisible by jax.local_devices_count() to give an integer quotient.
+    :param n_local_devices:
+    :param batch_size:
+    :param max_history:
+    :param num_candidates:
+    :return:
+    """
     
     # 40->50, #123->200, #1234->2000, #12345->20000
     def next_64(x) -> int:
@@ -514,7 +501,11 @@ def calc_number_jax_graph_components(batch_size: int, max_history: int,
     
     max_nodes = next_64(batch_size * (1 + max_history + num_candidates))
     max_edges = next_64(batch_size * (max_history + num_candidates))
-    max_graphs = batch_size + 1
+    
+    #batch_size + 1 extra for every local device + padd up to integer quotient of local_devices
+    add_to = n_local_devices - (batch_size % n_local_devices)
+    max_graphs = batch_size + n_local_devices + add_to
+    
     return {'max_nodes': max_nodes, 'max_edges': max_edges,
         'max_graphs': max_graphs}
 
@@ -527,7 +518,7 @@ def is_running_on_gpu() -> bool:
 def get_gpu_stats():
     """Fetches real-time GPU utilization and VRAM usage."""
     if not is_running_on_gpu():
-        return
+        return ""
     try:
         # Queries index, compute util %, used VRAM, and total VRAM
         cmd = [

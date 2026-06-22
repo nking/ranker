@@ -730,7 +730,8 @@ class TestRanker(unittest.TestCase):
         num_candidates=100
         
         jax_graph_comp_dict = calc_number_jax_graph_components(
-            batch_size=batch_size, max_history=max_history, num_candidates=num_candidates)
+            batch_size=batch_size, max_history=max_history, num_candidates=num_candidates,
+            n_local_devices=jax.local_device_count())
         
         fake_batch = create_fake_jagged_batch(batch_size=batch_size,
             max_history=max_history,
@@ -751,7 +752,6 @@ class TestRanker(unittest.TestCase):
             max_nodes=jax_graph_comp_dict['max_nodes'],
             max_edges=jax_graph_comp_dict['max_edges'],
             max_graphs=jax_graph_comp_dict['max_graphs'],
-            n_local_devices=n_local_devices,
         )
         
         time2 = datetime.datetime.now()
