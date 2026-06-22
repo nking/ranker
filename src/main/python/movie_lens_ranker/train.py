@@ -338,9 +338,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         raise ValueError("train_dataloader sampler must be an instance of BatchSampler")
     if not isinstance(val_dataloader._sampler, BatchSampler):
         raise ValueError("val_dataloader sampler must be an instance of BatchSampler")
-    
-    logging.info(f'_train_fn config: {config_dict}')
-    
+        
     start_time = time.perf_counter()
     
     rank = jax.process_index()
@@ -437,8 +435,10 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         
     last_epoch = 0
     for loop_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
+        
         if "debug" in config_dict and config_dict["debug"]:
             logging.info(f"START_BATCH_TIME: {time.time()}")
+        
         batch_idx = start_batch_idx + loop_idx
         local_step = batch_idx * TRAIN_BATCH_SIZE
         global_step = local_step * NUM_TRAIN_SHARDS
@@ -979,6 +979,8 @@ def test_fn(config: dict):
     # fixed top_k for consistent stats with retrieval and reranker
     config['top_k'] = 20
     
+    logging.info(f'test_fn config: {config}')
+
     worker_rank = jax.process_index()
     
     if worker_rank == 0:
@@ -1100,6 +1102,8 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
     for key in req_keys:
         if key not in config:
             raise LookupError(f"config is missing {key}")
+    
+    logging.info(f'resume_train_fn config: {config}')
     
     best_val_ndcg_k = -1.0
     mlflow_run = None

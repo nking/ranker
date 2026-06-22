@@ -363,6 +363,7 @@ def run_tune(config):
         if worker_rank == 0:
             trial_suggestion = suggested_trials[i]
             hparams = {k: v for k, v in trial_suggestion.parameters.items()}
+            logging.info(f'suggested hparams: {hparams}')
         
         logging.info(f"worker_{worker_rank}: wait at barrier for trial_id={trial_id}")
         jax.experimental.multihost_utils.sync_global_devices(f"sync_barrier_for_trial_{{trial_id}}")
@@ -372,10 +373,9 @@ def run_tune(config):
         
         logging.info(f"worker_{worker_rank}: synchronized params for trial_id={trial_id}")
 
-        config2 = {
-            **config,
-            **hparams,
-        }
+        config2 = config.copy()
+        config2.update(hparams)
+        
         for k, v in config2.items():
             if k.find('?') > -1:
                 logging.info(f"problem key from trial: {k}={v}")
@@ -384,13 +384,13 @@ def run_tune(config):
         
         # NOTE: if have a comb of infeasible params or failure in which trial should not be
         # repeated, mark the trial using trial.infeasible() and continue w/o running train_fn
-        
+      
         # if worker_Rank !=0, then mlflow_run_id is ""
         best_val_ndcg_k, mlflow_run_id = train_fn(config2, trial=trial_suggestion, save_checkpoints=False)
         
         if worker_rank == 0:
             trial_suggestion.update_metadata(vz.Metadata({'mlflow_run_id': mlflow_run_id}))
-            trial_suggestion.complete(vz.Measurement(metrics={f'ndcg_{config["top_k"]}': float(best_val_ndcg_k)}))
+            trial_suggestion.complete(vz.Measurement(metrics={f'ndcg_{config2["top_k"]}': float(best_val_ndcg_k)}))
         
 def run_train(config):
    

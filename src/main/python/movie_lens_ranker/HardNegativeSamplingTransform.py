@@ -106,12 +106,12 @@ class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
         #empty values are self.pad_value which is -1
         movie_histories = self.history_lookup.get_movieids_before_timestamp(
             user_id=batch['user_id'], timestamp=batch['timestamp'],
-            max_hist=self.history_lookup.fixed_size)
+            max_hist=self.history_lookup.max_history)
         
         # empty values are -1
         movie_histories_disliked = self.history_lookup_disliked.get_movieids_before_timestamp(
             user_id=batch['user_id'], timestamp=batch['timestamp'],
-            max_hist=self.history_lookup_disliked.fixed_size)
+            max_hist=self.history_lookup_disliked.max_history)
         
         movie_recommendations = self.recommendations.get_unseen_movies(
             user_id=batch['user_id'], timestamp=batch['timestamp'], top_k=n_negs)
@@ -163,6 +163,7 @@ class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
         #shuffle so the model doesn't learn that first label is always right
         simultaneous_shuffle(candidate_ids, labels, seed=seed3)
         
+        #candidate_ids and labels shapes are (batch_size, num_candidates)
         return {
             **batch,
             "candidate_ids": candidate_ids,

@@ -8,37 +8,36 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 class UserHistory (object):
-    def __init__(self, ratings_uri_list: Union[str, List[str]], fixed_size:int = 512):
+    def __init__(self, ratings_uri_list: Union[str, List[str]], max_history:int):
         self.pad_value = -1
         self.ts_pad_value = 2524608000 #year 2050
+        self.max_history = max_history
         #each user's the movie_ids, ratings and timestamps is already sorted by timestamp
-        self.user_ids, self.movie_ids, self.ratings, self.timestamps = self._load_history(ratings_uri_list, fixed_size)
-        self.fixed_size = fixed_size
+        self.user_ids, self.movie_ids, self.ratings, self.timestamps = self._load_history(ratings_uri_list)
         
-    def _load_history(self, ratings_uri_list: Union[str, List[str]],
-            fixed_size) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        
+    def _load_history(self, ratings_uri_list: Union[str, List[str]]) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         
         #buildnumpy vectors, making padded lists of length fixed_history_length for movies, ratings, and timestamps
         # lookup is tuple of dictionary of { user_id: {ts, movie_id, rating} } in which ts, movie_id
         #     and rating values are numpy arrays sorted by timestamp
         lookup, max_history = build_history_lookup(ratings_uri_list)
-        self.max_history = max_history
-        logging.info(f'max_history found = {max_history}.  fixed_size={fixed_size}')
+        logging.info(f"max of users' histories = {max_history}.  self.max_history={self.max_history}")
         
         n_users = len(lookup)
         
         #NOTE: results are sorted by timestamp
         user_ids = []
-        movie_ids = np.full((n_users, fixed_size), self.pad_value)
-        ratings = np.full((n_users, fixed_size), self.pad_value)
-        timestamps = np.full((n_users, fixed_size), self.ts_pad_value)
+        movie_ids = np.full((n_users, self.max_history), self.pad_value)
+        ratings = np.full((n_users, self.max_history), self.pad_value)
+        timestamps = np.full((n_users, self.max_history), self.ts_pad_value)
         
         for i, user_id in enumerate(lookup.keys()):
             user_ids.append(user_id)
             #these are ordered by timestamp already:
             user_ts, user_movies, user_ratings = lookup[user_id]
             
-            length = min(len(user_ts), fixed_size)
+            length = min(len(user_ts), self.max_history)
             
             #place the values at beginnings of arrays.
             # any empty values at ends of arrays will be self.pad_value for move_id and self.ts_pad_value for timestamps

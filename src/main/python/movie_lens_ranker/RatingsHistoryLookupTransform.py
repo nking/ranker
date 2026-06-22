@@ -28,7 +28,7 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
         """
         map the input train record dictionary to a dictionary containing it and padded history entries
         :param batch: a list, that is batch, of tuples containing the user_id, movie_id, rating, and timestamp
-        :return: a dictionary containing numpy arrays
+        :return: a dictionary containing numpy arrays where the arrays are 1D of length batch_size
             'user_id'.
             'movie_id',
             'rating',
@@ -57,6 +57,7 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
         history_movies, history_ratings = self.history_lookup.get_history_before_timestamp(
             user_ids, timestamps, self.max_history)
         
+        #history_* shapes are (batch_size, max_history)
         history_lengths = np.sum(history_movies != -1, axis=1)
         
         # Convert everything to a single dictionary of NumPy arrays

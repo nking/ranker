@@ -26,6 +26,7 @@ class TestUserHistory_vec(unittest.TestCase):
         self.ratings_test_disliked_uri = ratings_uri_dict["test_disliked"]
     
     def test_user_history(self):
+        max_history = 2048
         
         #the full history:
         ratings_uri_list = [self.ratings_train_liked_uri, self.ratings_train_3_uri,
@@ -43,7 +44,7 @@ class TestUserHistory_vec(unittest.TestCase):
         
         choose  timestamps < 956705600
         '''
-        uh = UserHistory(ratings_uri_list = ratings_uri_list, fixed_size=2048)
+        uh = UserHistory(ratings_uri_list = ratings_uri_list, max_history=max_history)
         
         user_ids = np.array([6040, 6039])
         

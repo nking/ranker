@@ -54,7 +54,7 @@ class TestRanker(unittest.TestCase):
         watch_history = UserHistory(
             ratings_uri_list=[self.ratings_train_liked_uri,
                 self.ratings_train_3_uri,
-                self.ratings_train_disliked_uri], fixed_size=2048)
+                self.ratings_train_disliked_uri], max_history=max_history)
         
         transform1 = RatingsHistoryLookupTransform(
             history_lookup=watch_history, max_history=max_history)

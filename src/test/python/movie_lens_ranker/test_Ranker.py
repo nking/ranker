@@ -552,6 +552,8 @@ class TestRanker(unittest.TestCase):
     def _run_and_assert_hpo(self, config):
         print(f'BEGIN TUNING')
         
+        set_flags_from_dict(config)
+        
         # run tune HPO
         app_runner(None)
         

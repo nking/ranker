@@ -65,9 +65,9 @@ class TestRanker(unittest.TestCase):
         num_candidates = 20
         
         watch_history = UserHistory(ratings_uri_list=[self.ratings_train_liked_uri, self.ratings_train_3_uri,
-            self.ratings_train_disliked_uri], fixed_size=2048)
+            self.ratings_train_disliked_uri], max_history=max_history)
         
-        disliked_history = UserHistory(ratings_uri_list=[self.ratings_train_disliked_uri], fixed_size=2048)
+        disliked_history = UserHistory(ratings_uri_list=[self.ratings_train_disliked_uri], max_history=max_history)
 
         all_movie_ids: List[int] = read_movies_array_record(self.movie_ids_uri, batch_size=batch_size)
        
