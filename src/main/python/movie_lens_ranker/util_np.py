@@ -1,4 +1,107 @@
+from typing import List, Tuple, Sequence
+
 import numpy as np
+import jraph
+import jax.tree_util as tree
+
+
+def optimized_batch_and_pad(batch: Sequence[jraph.GraphsTuple], max_nodes: int, max_edges: int,
+        max_graphs: int, n_local_devices:int, drop_remainder:bool=True) -> Tuple[jraph.GraphsTuple, int]:
+    """
+    Highly vectorized, single-pass replacement for jraph.batch followed by jraph.pad_with_graphs.
+    Eliminates redundant memory allocations and Python loops.
+    :return the padded super graph, the number of graphs in the input
+    """
+    
+    graphs = batch
+    
+    if drop_remainder:
+        remainder = len(graphs) % n_local_devices
+        if remainder != 0:
+            graphs = graphs[:-remainder]  # Drop trailing graphs to make it divisible
+        
+    # 1. Fast, single-pass concatenations of graph metadata
+    n_node_arr = np.concatenate([g.n_node for g in graphs])
+    n_edge_arr = np.concatenate([g.n_edge for g in graphs])
+    
+    total_nodes = np.sum(n_node_arr)
+    total_edges = np.sum(n_edge_arr)
+    total_graphs = len(graphs)
+    
+    # 2. Calculate padding requirements
+    pad_n_node = int(max_nodes - total_nodes)
+    pad_n_edge = int(max_edges - total_edges)
+    pad_n_graph = int(max_graphs - total_graphs)
+    
+    if pad_n_node <= 0 or pad_n_edge < 0 or pad_n_graph <= 0:
+        raise RuntimeError(
+            f"Graph too large for padding. difference: "
+            f"n_node {pad_n_node}, n_edge {pad_n_edge}, n_graph {pad_n_graph}"
+        )
+    
+    # 3. Create padded n_node and n_edge arrays
+    # (1 dummy graph for padding, followed by empty graphs)
+    pad_n_empty_graph = pad_n_graph - 1
+    
+    n_node_padded = np.concatenate([
+        n_node_arr,
+        np.array([pad_n_node], dtype=np.int32),
+        np.zeros(pad_n_empty_graph, dtype=np.int32)
+    ])
+    
+    n_edge_padded = np.concatenate([
+        n_edge_arr,
+        np.array([pad_n_edge], dtype=np.int32),
+        np.zeros(pad_n_empty_graph, dtype=np.int32)
+    ])
+    
+    # 4. Vectorized Sender/Receiver offset calculation
+    # Calculate offsets using the sum of nodes PER graph tuple to cleanly handle
+    # GraphTuples that might already contain multiple graphs implicitly.
+    nodes_per_tuple = np.array([np.sum(g.n_node) for g in graphs],
+        dtype=np.int32)
+    offsets = np.cumsum(
+        np.concatenate([np.array([0], dtype=np.int32), nodes_per_tuple[:-1]]))
+    
+    edge_counts = [int(np.sum(g.n_edge)) for g in graphs]
+    repeated_offsets = np.repeat(offsets, edge_counts)
+    
+    # 5. Concatenate real edges, apply vector offset, then append padding edges
+    # The padding edges MUST point to the first node of the padding graph (index `total_nodes`),
+    # instead of index 0. If they point to 0, they connect to real data and corrupt node 0!
+    senders_padded = np.concatenate([
+        np.concatenate([g.senders for g in graphs]) + repeated_offsets,
+        np.full(pad_n_edge, total_nodes, dtype=np.int32)
+    ])
+    receivers_padded = np.concatenate([
+        np.concatenate([g.receivers for g in graphs]) + repeated_offsets,
+        np.full(pad_n_edge, total_nodes, dtype=np.int32)
+    ])
+    
+    # 6. Fast Tree Map for feature padding (nodes, edges, globals)
+    def pad_features(pad_size, *nests):
+        batched_feats = np.concatenate(nests)
+        padding = np.zeros((pad_size,) + batched_feats.shape[1:],
+            dtype=batched_feats.dtype)
+        return np.concatenate([batched_feats, padding])
+    
+    nodes_padded = tree.tree_map(lambda *args: pad_features(pad_n_node, *args),
+        *[g.nodes for g in graphs])
+    edges_padded = tree.tree_map(lambda *args: pad_features(pad_n_edge, *args),
+        *[g.edges for g in graphs])
+    globals_padded = tree.tree_map(
+        lambda *args: pad_features(pad_n_graph, *args),
+        *[g.globals for g in graphs])
+    
+    return jraph.GraphsTuple(
+        n_node=n_node_padded,
+        n_edge=n_edge_padded,
+        nodes=nodes_padded,
+        edges=edges_padded,
+        globals=globals_padded,
+        senders=senders_padded,
+        receivers=receivers_padded
+    ), total_graphs
 
 def shuffle_and_slice(arr:np.ndarray, pad_value:int=-1, max_take=None):
     """

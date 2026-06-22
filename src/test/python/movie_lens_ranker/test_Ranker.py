@@ -1,3 +1,4 @@
+import datetime
 import os
 import logging
 #to test for multiple devices before using on GPUs or TPUs:
@@ -7,6 +8,9 @@ import logging
 import multiprocessing as mp
 import os
 import logging
+
+from movie_lens_ranker.util_np import optimized_batch_and_pad
+
 
 def init_multiprocessing():
     if mp.get_start_method(allow_none=True) != 'spawn':
@@ -190,7 +194,7 @@ def reset_hpo_results_bucket(project_id:str, study_name:str):
         print("empty checkpoint-bucket/* successful")
     except subprocess.CalledProcessError as e:
         print(f"Error resetting database: {e.stderr}")
-        
+
 class TestRanker(unittest.TestCase):
     def setUp(self):
         
@@ -198,6 +202,9 @@ class TestRanker(unittest.TestCase):
         env_file = os.path.join(get_project_dir(), ".env_unittests")
         for k, v in dotenv_values(env_file).items():
             os.environ[k] = v
+            
+        os.environ['grain_worker_count'] = '1'
+        os.environ['grain_read_options_num_threads'] = '1'
             
         ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY)
         
@@ -717,5 +724,64 @@ class TestRanker(unittest.TestCase):
         
         self.assertIsNotNone(all_scores)
         
+        #==========
+        batch_size=256
+        max_history=200
+        num_candidates=100
+        
+        jax_graph_comp_dict = calc_number_jax_graph_components(
+            batch_size=batch_size, max_history=max_history, num_candidates=num_candidates)
+        
+        fake_batch = create_fake_jagged_batch(batch_size=batch_size,
+            max_history=max_history,
+            num_candidates=num_candidates, user_id_range=user_id_range,
+            movie_id_range=movie_id_range)
+        
+        n_local_devices = jax.local_device_count()
+        
+        time0 = datetime.datetime.now()
+        
+        padded_super_graph_0, n_samples = pad_graph_tuple_batch(fake_batch,
+            jax_graph_comp_dict)
+        
+        time1 = datetime.datetime.now()
+        
+        padded_super_graph_1, n_samples = optimized_batch_and_pad(
+            batch=fake_batch,
+            max_nodes=jax_graph_comp_dict['max_nodes'],
+            max_edges=jax_graph_comp_dict['max_edges'],
+            max_graphs=jax_graph_comp_dict['max_graphs'],
+            n_local_devices=n_local_devices,
+        )
+        
+        time2 = datetime.datetime.now()
+        
+        diff0 = time1 - time0
+        diff1 = time2 - time1
+        
+        print(f'time0={diff0}\ntime1={diff1}', flush=True)
+        
+        ## compare the graphs
+        self._dictionaries_are_same(padded_super_graph_1.edges, padded_super_graph_0.edges)
+        np.testing.assert_array_equal(padded_super_graph_1.n_edge, padded_super_graph_0.n_edge)
+        np.testing.assert_array_equal(padded_super_graph_1.n_node, padded_super_graph_0.n_node)
+        self._tuples_are_same(padded_super_graph_1._fields, padded_super_graph_0._fields)
+        self.assertIsNone(padded_super_graph_0.globals)
+        self.assertIsNone(padded_super_graph_1.globals)
+        
+        np.testing.assert_array_equal(padded_super_graph_1.receivers, padded_super_graph_0.receivers)
+        np.testing.assert_array_equal(padded_super_graph_1.senders, padded_super_graph_0.senders)
+        
+    def _dictionaries_are_same(self, d0:Dict[str, np.ndarray], d1:Dict[str, np.ndarray]):
+        self.assertEqual(len(d0), len(d1))
+        self.assertEqual(d0.keys(), d1.keys())
+        for key in d0.keys():
+            np.testing.assert_array_equal(d0[key], d1[key])
+
+    def _tuples_are_same(self, t0:Tuple[str], t1:Tuple[str]):
+        self.assertEqual(len(t0), len(t1))
+        for i, v in enumerate(t0):
+            self.assertEqual(v, t1[i])
+
 if __name__ == '__main__':
     unittest.main()

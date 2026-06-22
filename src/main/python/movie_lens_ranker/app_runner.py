@@ -12,8 +12,8 @@ abilities.
 # Force Python to spawn clean workers instead of cloning the GPU context.
 import multiprocessing as mp
 import os
+import sys
 import logging
-
 
 def init_multiprocessing():
     if mp.get_start_method(allow_none=True) != 'spawn':
@@ -116,7 +116,6 @@ from absl import app
 
 import urllib.request
 import time
-import sys
 
 import fsspec
 #load this globally:

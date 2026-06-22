@@ -38,6 +38,9 @@ from movie_lens_ranker.util import read_embeddings, get_env_resources, \
 from jax.experimental import multihost_utils
 
 import logging
+
+from movie_lens_ranker.util_np import optimized_batch_and_pad
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 env_resources, mesh = get_env_resources()
@@ -342,6 +345,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     start_time = time.perf_counter()
     
     rank = jax.process_index()
+    n_local_devices = jax.local_device_count()
     
     #tracked_fn_1 = chex.assert_max_traces(train_step, n=1)
     #tracked_fn_2 = chex.assert_max_traces(eval_step, n=1)
@@ -421,8 +425,6 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     global_data_pspec = P(('processes', 'local_devices'))
     model_mesh = get_model_mesh()
     
-    n_local_devices = jax.local_device_count()
-    
     data_mesh = jax.sharding.Mesh(jax.devices(), axis_names=('data',))
     data_pspec = jax.sharding.PartitionSpec(('data'))
     data_sharding = jax.sharding.NamedSharding(data_mesh, P("data"))
@@ -445,7 +447,13 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
         last_epoch = epoch
         
-        padded_super_graph_0, n_samples = pad_graph_tuple_batch(graphs_tuple_batch, jax_graph_comp_dict)
+        padded_super_graph_0, n_samples = optimized_batch_and_pad(
+            batch=graphs_tuple_batch,
+            max_nodes=jax_graph_comp_dict['max_nodes'],
+            max_edges=jax_graph_comp_dict['max_edges'],
+            max_graphs=jax_graph_comp_dict['max_graphs'],
+            n_local_devices=n_local_devices,
+        )
         
         #grain SPMD has already partitioned the data across jax process ids, but if there is more than
         # 1 host, we further partition the data across the hosts so that the hosts aren't doing identical work.
@@ -671,13 +679,26 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         #initialize the layers with same fake data
         user_id_range = (1, num_users)
         movie_id_range = (num_users + 1, num_users + num_movies)
-        fake_data = create_dummy_super_padded_graph(batch_size=config['batch_size'],
+        
+        fake_batch = create_fake_jagged_batch(batch_size=config['batch_size'],
             max_history=config['max_history'],
-            num_candidates=config['num_candidates'],
-            user_id_range=user_id_range,
+            num_candidates=config['num_candidates'], user_id_range=user_id_range,
             movie_id_range=movie_id_range)
+        
+        jax_graph_comp_dict = calc_number_jax_graph_components(
+            batch_size=config['batch_size'], max_history=config['max_history'],
+            num_candidates=config['num_candidates'])
+        
+        padded_graph, n_samples = optimized_batch_and_pad(
+            batch=fake_batch,
+            max_nodes=jax_graph_comp_dict['max_nodes'],
+            max_edges=jax_graph_comp_dict['max_edges'],
+            max_graphs=jax_graph_comp_dict['max_graphs'],
+            n_local_devices=jax.local_device_count(),
+        )
+        
         model.eval()
-        model(fake_data)
+        model(padded_graph)
         model.train()
         
         lr_scheduler = optax.warmup_cosine_decay_schedule(
@@ -1450,17 +1471,17 @@ def check_model_state_equality(model_a, model_b, rtol=1e-5, atol=1e-8) -> bool:
     logging.info("worker_rank={jax.process_index()}: ✅ Success! Both model states are mathematically identical.")
     return True
 
-def create_dummy_super_padded_graph(batch_size: int,
+def create_fake_jagged_batch(batch_size: int,
     max_history: int, num_candidates: int, user_id_range:Tuple[int, int], movie_id_range:Tuple[int, int]):
-    
     fake_graph_list = []
     for i in range(batch_size):
-        
-        n_real_history = 4 + i
+        n_real_history = min(4 + i, max_history)
         
         node_ids = np.concatenate([
             np.array([user_id_range[0] + i], dtype=int),
-            np.array(np.arange(movie_id_range[0] + i, movie_id_range[0] + i + n_real_history + num_candidates), dtype=int),
+            np.array(np.arange(movie_id_range[0] + i,
+                movie_id_range[0] + i + n_real_history + num_candidates),
+                dtype=int),
         ], dtype=int)
         
         labels = np.zeros((num_candidates), dtype=np.float32)
@@ -1472,8 +1493,10 @@ def create_dummy_super_padded_graph(batch_size: int,
             # Candidates (Type 2) - should be size n_candidates
         ], dtype=float)
         
-        node_types = np.array([0] + [1] * n_real_history + [2] * num_candidates)
-        node_is_candidate = np.array([False] + [False] * n_real_history + [True] * num_candidates)
+        node_types = np.array(
+            [0] + [1] * n_real_history + [2] * num_candidates)
+        node_is_candidate = np.array(
+            [False] + [False] * n_real_history + [True] * num_candidates)
         
         edge_shape = (n_real_history + num_candidates,)
         senders = np.full(shape=edge_shape, fill_value=-1)
@@ -1484,7 +1507,8 @@ def create_dummy_super_padded_graph(batch_size: int,
         # Senders: [1, 2, ... H], Receiver: [0, 0, ... 0]
         senders[:n_real_history] = np.arange(1, n_real_history + 1)
         receivers[:n_real_history] = np.zeros((n_real_history,))
-        edge_features[:n_real_history] = [4]*(n_real_history//2) + [5]*(n_real_history//2) + [4]*(n_real_history%2)
+        edge_features[:n_real_history] = [4] * (n_real_history // 2) + [5] * (
+                    n_real_history // 2) + [4] * (n_real_history % 2)
         
         fake_graph_list.append(jraph.GraphsTuple(
             # nodes arrays are length 1 + num_candidates
@@ -1502,6 +1526,13 @@ def create_dummy_super_padded_graph(batch_size: int,
             n_edge=np.array([len(senders)]),
             globals=None)
         )
+    return fake_graph_list
+
+def create_dummy_super_padded_graph(batch_size: int,
+    max_history: int, num_candidates: int, user_id_range:Tuple[int, int], movie_id_range:Tuple[int, int]):
+    
+    fake_graph_list = create_fake_jagged_batch(batch_size=batch_size, max_history=max_history,
+        num_candidates=num_candidates, user_id_range=user_id_range, movie_id_range=movie_id_range)
     
     jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
         max_history, num_candidates)
