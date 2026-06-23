@@ -550,7 +550,7 @@ def get_gpu_stats() -> str:
     """Fetches real-time GPU utilization and VRAM usage."""
     if not is_running_on_gpu():
         return ""
-    if os.environ['NO_NVIDIA-SMI']:
+    if os.environ.get('NO_NVIDIA-SMI'):
         return ""
     try:
         nvidia_path = find_executable_path('nvidia-smi')
