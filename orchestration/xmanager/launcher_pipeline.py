@@ -35,6 +35,10 @@ from absl import logging as absl_logging, app
 absl_logging.set_verbosity(absl_logging.DEBUG)
 logging.basicConfig(level=logging.DEBUG)
 
+import psycopg2
+
+from dotenv import dotenv_values
+
 """
 launcher for simulating a multi-host, multi-process environment for running the
 GraphRanker pipeline tune, train, and test
@@ -84,40 +88,11 @@ train_fn sees:
 """
 study_name = 'GraphRanker_tuning_xmngr_2'
 project_id = 'tune-xmngr-01'
+docker_bridge_gateway = "172.17.0.1"
 
-import subprocess
-def reset_checkpoint_buckets(study_name:str):
-    for subdir in ("latest", "best"):
-        command = [
-            "docker", "exec", "gcs_emulator",
-            "sh", "-c", f"rm -rf /storage/checkpoint-bucket/{subdir}/{study_name}"
-        ]
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            print("empty checkpoint-bucket/* successful")
-        except subprocess.CalledProcessError as e:
-            print(f"Error resetting database: {e.stderr}")
+env_unittests_config = dotenv_values("../../.env_unittests")
 
-def reset_hpo_results_bucket(project_id:str, study_name:str):
-    command = [
-        "docker", "exec", "gcs_emulator",
-        "sh", "-c", f"rm -rf /storage/hpo-results-bucket/{project_id}/{study_name}"
-    ]
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        print("empty checkpoint-bucket/* successful")
-    except subprocess.CalledProcessError as e:
-        print(f"Error resetting database: {e.stderr}")
+mlflow_experiment_tracking_uri = f"postgresql://{env_unittests_config.get('POSTGRES_USER')}:{env_unittests_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db"
 
 async def check_await_status(handle):
     try:
@@ -131,19 +106,35 @@ async def check_await_status(handle):
             await handle.cancel()
             # Re-raise the exception to officially crash the xmanager script
         raise e
-   
+
 #TODO: switch to coding for a GCS Secret Manager instead of embedding
 #passwords in uris. see todo.txt for API details
 def main(_):
-    from dotenv import dotenv_values
+    import sys
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from launcher_helper import reset_mlflow_records, reset_vizier_records
+    from launcher_helper import reset_checkpoint_buckets, \
+        reset_hpo_results_bucket
     
     ## reset all of orbax checkpoint-bucket and hpo results bucket
     try:
         reset_checkpoint_buckets(study_name)
     except Exception as ex:
         pass
+    
     try:
         reset_hpo_results_bucket(project_id, study_name)
+    except Exception as ex:
+        pass
+    
+    try:
+        reset_vizier_records(project_id=project_id, study_name=study_name)
+    except Exception as ex:
+        logging.info(f"vizier clean failed: {ex}")
+
+    try:
+        reset_mlflow_records(experiment_name=study_name,
+            mlflow_experiment_tracking_uri=mlflow_experiment_tracking_uri)
     except Exception as ex:
         pass
     
@@ -167,9 +158,8 @@ def main(_):
         #  worker process 1: creates 2 local virtual CPU devices.
         # though producetion code in cloud is usally configured to 1 GPU per container so set the xla flag above to 1.
         
-        docker_bridge_gateway = "172.17.0.1"
         env_config = {
-            **dotenv_values("../../.env_unittests"),
+            **env_unittests_config,
             # relative to based dir where xmanager invoked
             'PYTHONUNBUFFERED': '1',
             # 'JAX_COORDINATOR_ADDRESS': f'{docker_bridge_gateway}:8888',
@@ -194,7 +184,7 @@ def main(_):
             'USER': env_config.get('POSTGRES_USER'),
             "study_name": study_name,
             "mlflow_experiment_name": study_name,
-            "mlflow_tracking_uri": f"postgresql://{env_config.get('POSTGRES_USER')}:{env_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db",
+            "mlflow_tracking_uri": mlflow_experiment_tracking_uri,
             "vizier_endpoint": f"{docker_bridge_gateway}:8000",
             "latest_checkpoint_uri": "gs://checkpoint-bucket/latest",
             "best_checkpoint_uri": "gs://checkpoint-bucket/best",

@@ -82,8 +82,8 @@ from movie_lens_ranker.util import set_flags_from_dict, \
 from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
     get_mlflow_metrics_by_exp_name
 
-from movie_lens_ranker.app_runner import main as app_runner, \
-    extract_correct_vizier_param_types_dict, \
+from movie_lens_ranker.app_runner_inner import main as app_runner
+from movie_lens_ranker.app_runner_inner import extract_correct_vizier_param_types_dict, \
     get_best_checkpoint_uri_for_testing, get_best_parameters_for_training
 
 import unittest

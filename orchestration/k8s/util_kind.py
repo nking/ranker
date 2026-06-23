@@ -124,12 +124,12 @@ def find_executable_path(binary_name:str):
     for path in fallback_locations:
         # os.path.exists checks if it's there, kindos.access checks if it is executable
         if os.path.exists(path) and os.access(path, os.X_OK):
-            logging.info(f"⚠️ Found 'kind' via fallback path: {path}")
+            logging.info(f"⚠️ Found {binary_name} via fallback path: {path}")
             return path
     
     # If we exhaust all options, raise a clear error
     raise FileNotFoundError(
-        "Could not find the 'kind' executable in PATH or fallback directories.")
+        f"Could not find the {binary_name} executable in PATH or fallback directories.")
 
 def run_cmd(cmd, check=True, timeout: float = None, max_retries: int = 0,
         base_delay: float = 3.0, backoff_factor: float = 2.0):

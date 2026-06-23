@@ -21,6 +21,10 @@ from absl import logging as absl_logging, app
 
 import time
 
+import psycopg2
+
+from dotenv import dotenv_values
+
 absl_logging.set_verbosity(absl_logging.DEBUG)
 logging.basicConfig(level=logging.DEBUG)
 
@@ -29,73 +33,9 @@ start db services using the docker-compose-dbs.yaml instructions in project root
 """
 study_name = 'GraphRanker_tuning_xmngr_0'
 project_id = 'tune-xmngr-00'
-
-import subprocess
-
-def reset_hpo_results_bucket(project_id:str, study_name:str):
-    command = [
-        "docker", "exec", "gcs_emulator",
-        "sh", "-c", f"rm -rf /storage/hpo-results-bucket/{project_id}/{study_name}"
-    ]
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        print("empty checkpoint-bucket/* successful")
-    except subprocess.CalledProcessError as e:
-        print(f"Error resetting database: {e.stderr}")
-
-
-import subprocess
-import logging
-
-
-def reset_vizier_database():
-    """Wipes all data from the Vizier SQLite database inside the docker container."""
-    
-    # Python script to run INSIDE the vizier-server container
-    python_script = """
-import sqlite3
-try:
-    conn = sqlite3.connect('/app/data/vizier.db')
-    cursor = conn.cursor()
-
-    # Get all tables, ignoring internal sqlite tables
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
-    tables = cursor.fetchall()
-
-    # Delete all rows from each table
-    for table in tables:
-        cursor.execute(f"DELETE FROM {table[0]};")
-
-    conn.commit()
-    print("Vizier database tables successfully cleared.")
-except Exception as e:
-    print(f"Error wiping Vizier DB: {e}")
-finally:
-    if 'conn' in locals():
-        conn.close()
-"""
-    
-    command = [
-        "docker", "exec", "vizier-server",
-        "python3", "-c", python_script
-    ]
-    
-    try:
-        logging.info("Attempting to reset Vizier database...")
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        logging.info(result.stdout.strip())
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Failed to reset Vizier database: {e.stderr}")
+docker_bridge_gateway = "172.17.0.1"
+env_unittests_config = dotenv_values("../../.env_unittests")
+mlflow_experiment_tracking_uri = f"postgresql://{env_unittests_config.get('POSTGRES_USER')}:{env_unittests_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db"
 
 async def check_await_status(handle):
     try:
@@ -112,15 +52,30 @@ async def check_await_status(handle):
    
 #passwords in uris. see todo.txt for API details
 def main(_):
-    from dotenv import dotenv_values
-   
+    import sys
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from launcher_helper import reset_mlflow_records, reset_vizier_records
+    from launcher_helper import reset_checkpoint_buckets, reset_hpo_results_bucket
+    
+    ## reset all of orbax checkpoint-bucket and hpo results bucket
+    try:
+        reset_checkpoint_buckets(study_name)
+    except Exception as ex:
+        pass
+    
     try:
         reset_hpo_results_bucket(project_id, study_name)
     except Exception as ex:
         pass
     
     try:
-        reset_vizier_database()
+        reset_vizier_records(project_id=project_id, study_name=study_name)
+    except Exception as ex:
+        logging.info(f"vizier clean failed: {ex}")
+    
+    try:
+        reset_mlflow_records(experiment_name=study_name,
+            mlflow_experiment_tracking_uri=mlflow_experiment_tracking_uri)
     except Exception as ex:
         pass
     
@@ -146,9 +101,8 @@ def main(_):
         #  worker process 1: creates 2 local virtual CPU devices.
         # though producetion code in cloud is usally configured to 1 GPU per container so set the xla flag above to 1.
         
-        docker_bridge_gateway = "172.17.0.1"
         env_config = {
-            **dotenv_values("../../.env_unittests"),
+            **env_unittests_config,
             # relative to based dir where xmanager invoked
             'PYTHONUNBUFFERED': '1',
             # 'JAX_COORDINATOR_ADDRESS': f'{docker_bridge_gateway}:8888',
@@ -156,7 +110,10 @@ def main(_):
             'PYTHONIOENCODING': 'UTF-8',
             'JAX_LOG_LEVEL': 'debug',
             'jax_distributed_debug':"True",
-            "LOCAL_SIMULATION" : "True"
+            "LOCAL_SIMULATION" : "True",
+            "grain_worker_count": str(0),
+            "grain_read_options_num_threads": str(1),
+            "grain_read_buffer_size": str(1)
         }
         run_config = {
             'LOGNAME': env_config.get('POSTGRES_USER'),
@@ -272,13 +229,11 @@ def main(_):
                             'JAX_COORDINATOR_ADDRESS': coordinator_addr,
                             # 'JAX_COORDINATOR_IP': container_ip,
                             'JAX_COORDINATOR_PORT': str(jax_port),
-                            "grain_read_options_num_threads": str(2),
                         },
                         args={
                             **run_config,
                             'trial_ids': dumps(list(trial_ids)),
                             "debug": False,
-                            #"connections_check" : str(1)
                         },
                     )
                 
@@ -308,7 +263,6 @@ def main(_):
             _env_dict['JAX_COORDINATOR_ADDRESS'] = coordinator_addr
             _env_dict['JAX_NUM_PROCESSES'] = "1"
             _env_dict['JAX_COORDINATOR_PORT'] = str(jax_port)
-            _env_dict["grain_read_options_num_threads"] = str(2)
             
             group_jobs[f"{phase}_job_0_worker_{rank}"] = xm.Job(
                 executable=executable,

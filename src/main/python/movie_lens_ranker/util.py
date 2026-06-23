@@ -1,4 +1,6 @@
 import json
+import os
+import shutil
 from collections import defaultdict
 from typing import Tuple, Dict, List, Union, Any
 import jax
@@ -515,14 +517,50 @@ def is_running_on_gpu() -> bool:
             return True
     return False
 
-def get_gpu_stats():
+def find_executable_path(binary_name: str):
+    """Run a shell command and print output.
+    :param binary_name: name of binary path to resolve
+    """
+    path = shutil.which(binary_name)
+    if path:
+        return path
+    
+    # If not found, explicitly check common installation locations
+    home = os.path.expanduser("~")
+    fallback_locations = [
+        f"/usr/bin/{binary_name}",  # Alternate Linux path
+        f"/usr/local/bin/{binary_name}",  # Standard Linux path
+        f"/opt/{binary_name}",
+        f"/bin/{binary_name}",
+        f"/snap/bin/{binary_name}",
+        os.path.join(home, ".local", "bin", binary_name)  # Local user bin
+    ]
+    
+    for path in fallback_locations:
+        # os.path.exists checks if it's there, kindos.access checks if it is executable
+        if os.path.exists(path) and os.access(path, os.X_OK):
+            logging.info(f"⚠️ Found {binary_name} via fallback path: {path}")
+            return path
+    
+    # If we exhaust all options, raise a clear error
+    raise FileNotFoundError(
+        f"Could not find the {binary_name} executable in PATH or fallback directories.")
+
+def get_gpu_stats() -> str:
     """Fetches real-time GPU utilization and VRAM usage."""
     if not is_running_on_gpu():
+        return ""
+    if os.environ['NO_NVIDIA-SMI']:
+        return ""
+    try:
+        nvidia_path = find_executable_path('nvidia-smi')
+    except Exception as e:
+        os.environ['NO_NVIDIA-SMI'] = "1"
         return ""
     try:
         # Queries index, compute util %, used VRAM, and total VRAM
         cmd = [
-            '/usr/bin/nvidia-smi',
+            nvidia_path,
             '--query-gpu=index,utilization.gpu,memory.used,memory.total',
             '--format=csv,noheader'
         ]

@@ -27,7 +27,7 @@ from vizier.service import clients as vz_clients
 from jax.experimental import mesh_utils
 
 from movie_lens_ranker.train import train_fn, test_fn
-from movie_lens_ranker.util import define_flags, get_recognized_keys, \
+from movie_lens_ranker.util import get_recognized_keys, \
     app_runner_is_missing_minimum_required_keys, \
     destringify_mlflow_params
 
@@ -256,7 +256,8 @@ def run_tune(config):
                     mlflow.end_run()
         config['mlflow_experiment_id'] = experiment.experiment_id
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
-        logging.info(f"worker_{worker_rank}: done creating MLFlow parent run")
+        logging.info(f"worker_{worker_rank}: done creating MLFlow parent run.  "
+                     f"mlflow_parent_run_id={mlflow_parent_run_id}, experiment_id={experiment.experiment_id}")
         
     trial_ids = json.loads(config['trial_ids'])
     n_large = len(trial_ids) > 10
@@ -309,6 +310,7 @@ def run_tune(config):
         if worker_rank == 0:
             trial_suggestion.update_metadata(vz.Metadata({'mlflow_run_id': mlflow_run_id}))
             trial_suggestion.complete(vz.Measurement(metrics={f'ndcg_{config2["top_k"]}': float(best_val_ndcg_k)}))
+            logging.info(f'wrote to vizier trial: mlflow_run_id={mlflow_run_id}, and metrics')
         
 def run_train(config):
    
@@ -519,6 +521,11 @@ def run_export_results(config: Dict[str, Any]):
         
         study = vz_clients.Study.from_owner_and_id(owner=project_id, study_id=STUDY_NAME)
         
+        #for case of sloppy book-keeping, that is having run HPO phase with same project_id and experiment_name
+        #as a previous run, the mlflow_run_id can refer to a stale mlflow_run_id if the MLFlow database has been
+        # cleaned, that is, older files removed.  so mlflow.get_run(mlflow_run_id) is allowed to fail here,
+        # but one could decide instead to iterate over optimal_trials until found and mlflow_run  which does not
+        # throw an exception
         optimal_trials = study.optimal_trials()
         best_trial = next(iter(optimal_trials), None)
         best_trial_data = best_trial.materialize()
@@ -531,17 +538,20 @@ def run_export_results(config: Dict[str, Any]):
     
         logging.info(f"Loaded Best Objective: {best_value}")
         logging.info(f"Loaded Best Parameters: {best_params}")
-        
+
         # run_uuid is this:
         mlflow_run_id = best_trial_data.metadata.get('mlflow_run_id')
         if "debug" in config and config["debug"]:
             logging.info(f"mlflow_run_id={mlflow_run_id}")
+        logging.info(f'vizier best trial metadata has mlflow_run_id={mlflow_run_id}')
         mlflow_run = mlflow.get_run(mlflow_run_id)
+        
         hparams = destringify_mlflow_params(mlflow_run.data.params)
-        hparams_json = json.dumps(hparams, indent=4, sort_keys=True)
+        hparams_json = json.dumps(hparams, sort_keys=True)
         try:
             with fsspec.open(config['output_hyperparams_uri'], mode="w") as f:
                 f.write(hparams_json)
+            logging.info(f"Wrote to {config['output_hyperparams_uri']}")
         except Exception as e:
             logging.exception(
                 f'ERROR while trying to write to {config["output_hyperparams_uri"]}: {e}.  Check for permission errors')
@@ -575,10 +585,11 @@ def run_export_results(config: Dict[str, Any]):
                     metrics_dict[key_t]['x'].append(int(m.step))
                     metrics_dict[key_t]['y'].append(float(m.value))
     
-    metrics_json = json.dumps(metrics_dict, indent=4, sort_keys=True)
+    metrics_json = json.dumps(metrics_dict, sort_keys=True)
     try:
         with fsspec.open(config['output_metrics_uri'], mode="w") as f:
             f.write(metrics_json)
+        logging.info(f"Wrote to {config['output_metrics_uri']}")
     except Exception as e:
         logging.exception(f'ERROR while trying to write to {config["output_metrics_uri"]}: {e}.  Check for permission errors')
         raise e
@@ -596,10 +607,18 @@ def _jax_sees_gpus() -> bool:
                     gpus_expected = 1
     return (gpu_count > 0 and gpus_expected == gpu_count)
     
+def delete_vizier_study(vizier_endpoint:str, project_id:str, study_name:str):
+    vz_clients.environment_variables.server_endpoint = vizier_endpoint
+    try:
+        study = vz_clients.Study.from_owner_and_id(owner=project_id, study_id=study_name)
+        study.delete()
+    except Exception as e:
+        pass
+    
 def _vizier_connection(vizier_endpoint:str) -> bool:
     """
     check the vizier connection by creating a deleting a study
-    :param config:
+    :param vizier_endpoint uri for vizier server
     :return: True if no exception raised
     """
     vz_clients.environment_variables.server_endpoint = vizier_endpoint
@@ -621,7 +640,7 @@ def _mlflow_connection(mlflow_tracking_uri:str) -> bool:
     client.search_experiments(view_type = ViewType.ACTIVE_ONLY, max_results=1)
     return True
 
-def _fake_gcs_server_connection(config) -> bool:
+def _fake_gcs_server_connection(config):
     """
     check the fake gcs server connection
     :param config:
@@ -630,13 +649,29 @@ def _fake_gcs_server_connection(config) -> bool:
     from movie_lens_ranker.util import read_movies_array_record
     gs_uri = "gs://data/movies-00000-of-00001.array_record"
     emb = read_movies_array_record(gs_uri, batch_size=1024)
-    return emb is not None and len(emb) > 0
-    
+    if emb is None or len(emb) == 0:
+        raise ConnectionError(f"could not read from gcs server: {gs_uri}")
+    #check can write:
+    hparams_json = json.dumps({"a":[1,2,3]}, sort_keys=True)
+    bucket_uri = "gs://hpo-results-bucket/test-write/hparams.json"
+    try:
+        with fsspec.open(bucket_uri, mode="w") as f:
+            f.write(hparams_json)
+        with fsspec.open(bucket_uri, mode="r") as f:
+            lines = f.readlines()
+            assert(len(lines) == 1)
+    except Exception as e:
+        logging.exception(
+            f'ERROR while trying to write to {bucket_uri}: {e}.  Check for permission errors')
+        raise ConnectionError(f'ERROR while trying to write to {bucket_uri}: {e}.  Check for permission errors')
+
 def connections_check(config):
     
     if os.environ.get('JAX_PLATFORM_NAME', '').lower().find('gpu') > -1:
         if not _jax_sees_gpus():
             raise EnvironmentError(f"could not find expected GPUs: {jax.devices()}")
+        from movie_lens_ranker.util import get_gpu_stats
+        logging.info(f'gpu_stats={get_gpu_stats()}')
     
     if jax.process_index() == 0:
         _vizier_connection(config['vizier_endpoint'])

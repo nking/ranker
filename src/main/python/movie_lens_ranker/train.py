@@ -435,6 +435,10 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     multihost = jax.process_count() > 1
     
     use_debug = ("debug" in config_dict and config_dict["debug"])
+    
+    log_interval = 10
+    if (TOTAL_RECORDS // n_local_devices)//TRAIN_BATCH_SIZE > 100:
+        log_interval = 100
         
     last_epoch = 0
     for loop_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
@@ -484,7 +488,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         
         epoch_avg_train_loss.append(loss)
         
-        if batch_idx % 10 == 0:# and rank==0:
+        if batch_idx % log_interval == 0:# and rank==0:
             logging.info(f"batch {batch_idx}, loop_idx={loop_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}")
             logging.info(get_gpu_stats())
             
@@ -854,6 +858,7 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
         if worker_rank==0 and mlflow_run is not None:
             mlflow.log_metric(f"final_ndcg_{config['top_k']}", float(best_val_ndcg_k))
             mlflow.end_run()
+            logging.info(f"end mlflow_run_id={mlflow_run.info.run_id}")
     
 def stack_val_batches(dataloader, num_steps):
     batches = []
