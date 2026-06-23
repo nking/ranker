@@ -1,0 +1,11 @@
+# Use local already-built image as the base
+#FROM ranker-app:local
+FROM ranker-app-gpu:local
+
+#previously while developing, was mounting the src tree and building image with editable install, can remove this next step now:
+COPY ./src /app/src
+
+# Do NOT run pip install
+# Do NOT run apt-get
+# Just set the environment variables we need
+ENV PYTHONUNBUFFERED=1

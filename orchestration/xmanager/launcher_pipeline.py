@@ -185,6 +185,10 @@ def main(_):
             "grain_read_options_num_threads": str(1),
             "grain_read_buffer_size" : str(1)
         }
+        #for this multihost config, if grain_worker_count!= 0 and grain_read_options_num_threads != 1 and grain_read_buffer_size !=1,
+        #   the code can crash with OSError of too many open files
+        #   so if needed multi-host training (e.g. very large model needing model sharding) and GPU
+        #   one might want to replace the grain data loading
         run_config = {
             'LOGNAME': env_config.get('POSTGRES_USER'),
             'USER': env_config.get('POSTGRES_USER'),
