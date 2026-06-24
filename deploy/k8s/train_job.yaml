@@ -43,8 +43,6 @@ spec:
       - "--seed=12345"
       - "--phase=tune"
       - "--project_id=tune-kind-01"
-      - "--grain_num_threads_fetching_records=2"
-      - "--grain_num_threads_computing_num_records=2"
       - "--trial_ids=${TRIAL_IDS}"
       - "--debug=True"
     #not allowed, so manually entering them in env
@@ -164,7 +162,21 @@ spec:
           configMapKeyRef:
             name: app-runner-env
             key: TENSORSTORE_GCS_REQUEST_CONCURRENCY
-
+      - name: grain_worker_count
+        valueFrom:
+          configMapKeyRef:
+            name: app-runner-env
+            key: grain_worker_count
+      - name: grain_read_options_num_threads
+        valueFrom:
+          configMapKeyRef:
+            name: app-runner-env
+            key: grain_read_options_num_threads
+      - name: grain_read_buffer_size
+        valueFrom:
+          configMapKeyRef:
+            name: app-runner-env
+            key: grain_read_buffer_size
   runtimePatches:
     - manager: "app-runner.patch/trainer" #domain-prefixed path such as acme.io/foo
       trainingRuntimeSpec:

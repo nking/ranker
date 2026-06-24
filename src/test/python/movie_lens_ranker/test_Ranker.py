@@ -202,10 +202,7 @@ class TestRanker(unittest.TestCase):
         env_file = os.path.join(get_project_dir(), ".env_unittests")
         for k, v in dotenv_values(env_file).items():
             os.environ[k] = v
-            
-        os.environ['grain_worker_count'] = '1'
-        os.environ['grain_read_options_num_threads'] = '1'
-            
+        
         ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY)
         
         self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]

@@ -171,14 +171,11 @@ def main(_):
             'JAX_LOG_LEVEL': 'debug',
             'jax_distributed_debug':"True",
             "LOCAL_SIMULATION" : "True",
-            "grain_worker_count" : str(0),
-            "grain_read_options_num_threads": str(1),
-            "grain_read_buffer_size" : str(1)
         }
-        #for this multihost config, if grain_worker_count!= 0 and grain_read_options_num_threads != 1 and grain_read_buffer_size !=1,
+        #for this multihost config on a single CPU emulating 2 hosts, if grain_worker_count!= 0 and grain_read_options_num_threads != 1 and grain_read_buffer_size !=1,
         #   the code can crash with OSError of too many open files
         #   so if needed multi-host training (e.g. very large model needing model sharding) and GPU
-        #   one might want to replace the grain data loading
+        #   one might want to replace the grain data loading or follow-up more deeply on a fix for this.
         run_config = {
             'LOGNAME': env_config.get('POSTGRES_USER'),
             'USER': env_config.get('POSTGRES_USER'),
