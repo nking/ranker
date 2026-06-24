@@ -1,0 +1,17 @@
+databricks-sdk==0.118.0
+equinox==0.13.2
+flax==0.12.6
+google-cloud-storage-control==1.12.0
+google-vizier==0.1.24
+jaxopt==0.8.5
+jaxtyping==0.3.9
+jraph @ git+https://github.com/deepmind/jraph.git@51f5990104f7374492f8f3ea1cbc47feb411c69c
+jraphx==0.0.4
+mlflow-skinny==3.11.1
+jax-ai-stack==2025.10.28
+orbax-export==0.0.8
+pycparser==3.0
+rax==0.4.0
+tfp-nightly==0.26.0.dev20260618
+typing_extensions==4.15.0
+wadler_lindig==0.1.7

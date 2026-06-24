@@ -652,6 +652,7 @@ def _fake_gcs_server_connection(config):
     if emb is None or len(emb) == 0:
         raise ConnectionError(f"could not read from gcs server: {gs_uri}")
     #check can write:
+    logging.info(f"read from fake_gcs_server succeeded")
     hparams_json = json.dumps({"a":[1,2,3]}, sort_keys=True)
     bucket_uri = "gs://hpo-results-bucket/test-write/hparams.json"
     try:
@@ -664,7 +665,7 @@ def _fake_gcs_server_connection(config):
         logging.exception(
             f'ERROR while trying to write to {bucket_uri}: {e}.  Check for permission errors')
         raise ConnectionError(f'ERROR while trying to write to {bucket_uri}: {e}.  Check for permission errors')
-
+    logging.info(f"write to fake_gcs_server succeeded")
 def connections_check(config):
     
     if os.environ.get('JAX_PLATFORM_NAME', '').lower().find('gpu') > -1:

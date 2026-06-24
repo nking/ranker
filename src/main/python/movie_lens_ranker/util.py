@@ -530,7 +530,7 @@ def find_executable_path(binary_name: str):
     fallback_locations = [
         f"/usr/bin/{binary_name}",  # Alternate Linux path
         f"/usr/local/bin/{binary_name}",  # Standard Linux path
-        f"/opt/{binary_name}",
+        f"/opt/bin/{binary_name}",
         f"/bin/{binary_name}",
         f"/snap/bin/{binary_name}",
         os.path.join(home, ".local", "bin", binary_name)  # Local user bin

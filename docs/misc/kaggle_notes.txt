@@ -1,0 +1,38 @@
+to run the code on kaggle:
+
+(1) upload local data to kaggle notebook as input datasets
+ - make tarballs of the 3 db container images and the main app image
+    docker export $(docker create ranker-app:local) -o ranker-app.tar
+       unpack into a tmp directory and cd into it
+       find . -name "*[*" -o -name "*]*"
+       rm usr/bin/'['
+       tar -czvf ranker-app.tar .
+       zip ranker-app.zip ranker-app.tar
+       then on right-hand side of kaggle notebook, select input and upload
+       the file browser to select the zip file.  give it a name, submit 'create'
+    docker export $(docker create fsouza/fake-gcs-server:1.54.0) -o fake-gcs-server.tar
+    docker export $(docker create postgres:12-alpine) -o pg-db.tar
+    docker export $(docker create vizier-server:local) -o vizier-server.tar
+       and do the same with each of them to remove the usr/bin/'[' and usr/bin/'[[' files
+ - zip and upload the array_records datasets needed
+
+(2) install proot on kaggle
+
+!apt-get update -y && apt-get install -y proot curl ca-certificates
+
+export TMP=/tmp
+
+then see the notebook for how to use:
+https://www.kaggle.com/code/nicholeasuniquename/ranker-cross-encoder-w-gatv2/
+
+
+(3) choose the T4x2 accelerator on kaggle
+
+   GPU (Tesla T4/P100) : 16 GB RAN
+   TPU v3-8             127 GB RAM
+   TPU v5e-8            optimized for serving/train
+                        has better performance per watt
+                        and faster matrix ops than v3
+
+   for compute bound: use TPU v5e-8 if possible
+
