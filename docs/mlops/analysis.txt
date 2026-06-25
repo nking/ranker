@@ -4,6 +4,11 @@ The prototype is done now, so this lacks the software design analysis.
      saves and restores were correct.
    - getting the datasets correct for contrastive learning.
    - coding for the k8s, and kfp runs using kubeflow trainer v2
+   - improving the reading of data from CPU onto GPUs:
+     - required use of multiprocesisng library,
+       configuration of grain workers, threads, and prefetch,
+       proper inclusion of nvidia libraries and NCCL flags to make sure NCCL
+       moves data between both GPUs
 
 Here are empirically measured runtimes used afterwards for 
 estimating full train times with and without accelerators.

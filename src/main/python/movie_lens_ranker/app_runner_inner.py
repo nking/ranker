@@ -491,7 +491,7 @@ def run_export_results(config: Dict[str, Any]):
     :param output_metrics_uri: uri to write the metrics dictionary from the best-hyper parameters run.
     """
     
-    for key in ("study_name", "project_id", "vizier_endpoint", "mlflow_tracking_uri", "output_hyperparams_uri", "output_metrics_uri"):
+    for key in ("study_name", "project_id", "vizier_endpoint", "mlflow_tracking_uri", "output_metrics_uri"):
         if key not in config:
             raise ValueError(f"Missing key {key} in config in run_export_results")
     
@@ -515,6 +515,9 @@ def run_export_results(config: Dict[str, Any]):
     metrics_dict = {}
     
     if phase == "export-hpo-results":
+        if "output_hyperparams_uri" not in config:
+            raise ValueError(
+                f"Missing key 'output_hyperparams_uri' in config in run_export_results")
         vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
         logging.info(f'looking for study_name {STUDY_NAME} at endpoint {config["vizier_endpoint"]} for phase={phase}')
         # resource_name = f"owners/{project_id}/studies/{STUDY_NAME}"

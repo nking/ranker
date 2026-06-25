@@ -84,7 +84,7 @@ def main(_):
         num_trials = 1  # 4
         num_trials_per_worker = num_trials
         num_processes = 1
-        num_epochs = 1
+        num_epochs = 4
         batch_size = 256
         num_hosts = 1
         print(f'JAX_NUM_PROCESSES={num_processes}', flush=True)
@@ -144,7 +144,6 @@ def main(_):
             "seed": 23456,
             "phase": "tune",
             'project_id': project_id,
-            "grain_num_threads_fetching_records": 2,
         }
         
         executable = experiment.package([

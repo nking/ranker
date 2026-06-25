@@ -342,6 +342,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     if not isinstance(val_dataloader._sampler, BatchSampler):
         raise ValueError("val_dataloader sampler must be an instance of BatchSampler")
         
+    logging.info(f'_train_fn config_dict={config_dict}')
+    
     start_time = time.perf_counter()
     
     rank = jax.process_index()
@@ -609,7 +611,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         if early_stop_triggered[0]:
             break
             
-    logging.info(f'elapsed time for _train)fn in sec = {time.perf_counter() - start_time}.  last_epoch={last_epoch}')
+    logging.info(f'elapsed time for _train_fn in sec = {time.perf_counter() - start_time}.  last_epoch={last_epoch}')
 
     return best_ndcg
 

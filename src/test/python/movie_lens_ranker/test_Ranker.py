@@ -302,6 +302,58 @@ class TestRanker(unittest.TestCase):
             'mlflow_tracking_uri': mlflow_uri,
             'mlflow_experiment_name': STUDY_NAME,
         }
+        
+        # check that docker fake gcs server is running
+        try:
+            response = requests.get(
+                f"http://{base_url}:4443/storage/v1/b/data/o")
+            if response.status_code == 200:
+                data = response.json()
+                print(data)
+                self.assertTrue(len(data['items']) > 0)
+            else:
+                print(f"Failed with status code: {response.status_code}")
+                print(f"Response: {response.text}")
+                print(f'is the fake-gcs-server container not running?')
+                return
+            wait_for_postgres_vizier_mlflow_dbs()
+        except requests.exceptions.RequestException as e:
+            print(f"An error occurred: {e}")
+            return
+        
+        config = self.config
+        
+        set_flags_from_dict(config)
+        
+        # reset oss vizier db
+        try:
+            vz_clients.environment_variables.server_endpoint = config[
+                'vizier_endpoint']
+            resource_name = f"owners/{config['project_id']}/studies/{config['study_name']}"
+            study = vz_clients.Study.from_owner_and_id(
+                owner=config['project_id'],
+                study_id=config['study_name'])
+            study.delete()
+        except Exception as ex:
+            pass
+        
+        # reset mlflow db
+        try:
+            reset_mlflow_db()
+        except Exception as ex:
+            pass
+        
+        # reset orbax checkpoint-bucket
+        try:
+            reset_checkpoint_buckets()
+        except Exception as ex:
+            pass
+        
+        try:
+            reset_hpo_results_bucket(config['project_id'],
+                config['study_name'])
+        except Exception as ex:
+            pass
     
     def transform_to_gs_uri(self, file_path:str):
         idx = file_path.find("/data/")
@@ -334,58 +386,17 @@ class TestRanker(unittest.TestCase):
             docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d
         """
         
-        # check that docker fake gcs server is running
-        try:
-            response = requests.get(f"http://{base_url}:4443/storage/v1/b/data/o")
-            if response.status_code == 200:
-                data = response.json()
-                print(data)
-                self.assertTrue(len(data['items']) > 0)
-            else:
-                print(f"Failed with status code: {response.status_code}")
-                print(f"Response: {response.text}")
-                print(f'is the fake-gcs-server container not running?')
-                return
-            wait_for_postgres_vizier_mlflow_dbs()
-        except requests.exceptions.RequestException as e:
-            print(f"An error occurred: {e}")
-            return
-      
-        config = self.config
-        
-        set_flags_from_dict(config)
-        
-        #reset oss vizier db
-        try:
-            vz_clients.environment_variables.server_endpoint = config['vizier_endpoint']
-            resource_name = f"owners/{config['project_id']}/studies/{config['study_name']}"
-            study = vz_clients.Study.from_owner_and_id(owner=config['project_id'],
-                study_id=config['study_name'])
-            study.delete()
-        except Exception as ex:
-            pass
-        
-        #reset mlflow db
-        try:
-            reset_mlflow_db()
-        except Exception as ex:
-            pass
-        
-        #reset orbax checkpoint-bucket
-        try:
-            reset_checkpoint_buckets()
-        except Exception as ex:
-            pass
-        
-        try:
-            reset_hpo_results_bucket(config['project_id'], config['study_name'])
-        except Exception as ex:
-            pass
-      
         self._run_and_assert_hpo(config)
         
-        restore_dict, train_run = self.run_train_and_restore_chkpoint_and_assert(config)
+        config['phase'] = 'train-best'
+        config['train_id'] = 1234567
+        config['validate_checkpoint_restores'] = True
         
+        restore_dict, train_run = self._run_train_and_restore_chkpoint_and_assert(config)
+        
+        config['phase'] = 'test-best'
+        test_id = 234567
+        config['test_id'] = test_id
         self._run_test_and_assert(config, restore_dict)
         
         ##====== load train_ for use in stats =======
@@ -484,6 +495,32 @@ class TestRanker(unittest.TestCase):
             
         self._assert_export_methods(config)
     
+    def test_run_train_test_given(self):
+        config = self.config.copy()
+        
+        config['study_name'] = "GraphRanker_tuning_unittest4"
+        config['project_id'] =  'tune-unittest-04'
+        config['mlflow_experiment_name'] = config['study_name']
+        
+        hparams = {'top_k': 20, 'num_layers': 2, 'num_heads': 4, 'hidden_dim': 128,
+            'max_history': 70, 'num_candidates': 70, 'learning_rate': 0.001,
+            'weight_decay': 0.001, 'out_dim': 32, 'edge_embed_dim': 16, 'dropout_rate': 0.2}
+        config.update(hparams)
+        
+        config['phase'] = 'train-given'
+        config['train_id'] = 2345
+        config['validate_checkpoint_restores'] = True
+        
+        restore_dict, train_run = self._run_train_and_restore_chkpoint_and_assert(config)
+        
+        config['phase'] = 'test-best'
+        test_id = 234567
+        config['test_id'] = test_id
+        self._run_test_and_assert(config, restore_dict)
+        
+        self._assert_export_train_results(config)
+        self._assert_export_test_results(config)
+    
     def _assert_export_methods(self, config:Dict[str, Any]):
         
         # use the method and assert results
@@ -514,6 +551,11 @@ class TestRanker(unittest.TestCase):
             key2 = f'val_{key}'
             self.assertTrue(key1 in output_metrics_dict)
             self.assertTrue(key2 in output_metrics_dict)
+            
+        self._assert_export_train_results(config)
+        self._assert_export_test_results(config)
+        
+    def _assert_export_train_results(self, config: Dict[str, Any]):
         
         # ===================================================
         output_metrics_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/train/metrics.json"
@@ -535,6 +577,7 @@ class TestRanker(unittest.TestCase):
             self.assertTrue(key1 in output_metrics_dict)
             self.assertTrue(key2 in output_metrics_dict)
         
+    def _assert_export_test_results(self, config: Dict[str, Any]):
         # ===================================================
         output_metrics_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/test/metrics.json"
         config['output_metrics_uri'] = output_metrics_path
@@ -605,13 +648,9 @@ class TestRanker(unittest.TestCase):
             else:
                 self.assertEqual(v, config[k])
     
-    def run_train_and_restore_chkpoint_and_assert(self, config):
+    def _run_train_and_restore_chkpoint_and_assert(self, config):
         #### ====================================================== ####
         print(f'BEGIN TRAINING')
-        
-        config['phase'] = 'train-best'
-        config['train_id'] = 1234567
-        config['validate_checkpoint_restores'] = True
         
         set_flags_from_dict(config)
        
@@ -665,9 +704,7 @@ class TestRanker(unittest.TestCase):
         
         #config['test_checkpoint_uri'] = best_checkpoint_uri_tag  #for use when phase is 'test-given'
         #config['best_checkpoint_uri'] = best_checkpoint_uri_tag #the method now looks this up in mlflow records
-        config['phase'] = 'test-best'
-        test_id = 234567
-        config['test_id'] = test_id
+        
         set_flags_from_dict(config)
         app_runner(None)
         
