@@ -1,0 +1,49 @@
+running on kaggle and trying to increase the use of GPUs
+to decrease the overall runtime.
+
+kaggle doesn't have Direct P2P nore NVLink/PCIe so GPU 
+communication between one another on the T4x2 uses shared 
+memory SHM.
+
+For my iniital test of times on laptop, then Kaggle, I
+used the elapsed time for a batch, and scaled those time
+for estimates.  The problem with that approach is that 
+the time estimates don't include dataloading backlog.
+A better approach is to bootstrap from start to finish of
+an HPO tune phas of 1 trial, but using num_epochs >= 4 to
+get a more realistic use of memory.
+
+Here are details of the first tune trial on Kaggle, showing
+that the grain configuration I used may be using too many 
+threads, leading to thread thrashing.  The GPUs are mostly
+waiting for data.
+
+kaggle times:
+   batch _size 256, 473,000 train, 70,000 val
+   10 epochs, 1 trial
+   took 9.6 hours
+
+   100 batches took 5 sec => 0.05 sec/batch
+   0.05 sec/batch * (463000/256) batches  = 90 sec per epoch
+
+epoch 0 : 1 = 36+16 = 52 min
+      1 : 2 = 29+14 = 43 min
+      2 : 3 = 25+31 = 56 min
+      3 : 4 = 22+35 = 57 min
+      4 : 5 = 22+38 = 60 min
+      5 : 6 = 21+38 = 59 min
+      6 : 7 = 27+39 = 66 min
+      7 : 8 = 25+33 = 58 min
+      8 : 9 = 22+35 = 57 min
+
+NEXT attempt with a single train phase will use
+
+grain_worker_count=2 \
+grain_read_options_num_threads=4 \
+grain_read_buffer_size=10 \
+
+where before I had used 6, 8, and 50, respectively.
+
+
+
+
