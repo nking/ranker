@@ -27,7 +27,7 @@ data_params_nontrainable_keys = {
     'seed',
 }
 model_params_nontrainable_keys = {
-    'latest_checkpoint_uri', 'best_checkpoint_uri',
+    'latest_checkpoint_uri', 'best_checkpoint_uri', 'test_checkpoint_uri',
     'movie_embeddings_uri', 'user_embeddings_uri', 'validate_checkpoint_restores'
 }
 mlflow_config_keys = {

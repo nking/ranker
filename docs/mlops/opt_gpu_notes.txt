@@ -36,13 +36,20 @@ epoch 0 : 1 = 36+16 = 52 min
       7 : 8 = 25+33 = 58 min
       8 : 9 = 22+35 = 57 min
 
-NEXT attempt with a single train phase will use
-
-grain_worker_count=2 \
-grain_read_options_num_threads=4 \
-grain_read_buffer_size=10 \
-
+NEXT attempt with a single train phase will use:
+    grain_worker_count=2 \
+    grain_read_options_num_threads=4 \
+    grain_read_buffer_size=10 \
 where before I had used 6, 8, and 50, respectively.
+The long epoch runtimes might be from thread thrashing.
+
+Note that the "elapsed time" in the logs is best to use for estimating times
+for other runs rather than the batch to batch times.
+
+Before running again on Kaggle,
+  - have added prefetching put onto GPU of grain dataloader super padded graphs.
+  - have added CPU logging.
+  - have switched to faster gpu stats for logging.
 
 
 

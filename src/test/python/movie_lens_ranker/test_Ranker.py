@@ -400,7 +400,7 @@ class TestRanker(unittest.TestCase):
         config['phase'] = 'test-best'
         test_id = 234567
         config['test_id'] = test_id
-        self._run_test_and_assert(config, restore_dict)
+        self._run_test_and_assert(config)
         
         ##====== load train_ for use in stats =======
         TRAIN_BATCH_SIZE = restore_dict['train_dataloader']._sampler.batch_size
@@ -516,10 +516,16 @@ class TestRanker(unittest.TestCase):
         
         restore_dict, train_run = self._run_train_and_restore_chkpoint_and_assert(config)
         
-        config['phase'] = 'test-best'
+        sfx = f"{config['study_name']}/train_{config['train_id']}"
+        #or could use restore_dict['config']['best_checkpoint_uri']
+        config['test_checkpoint_uri'] = f"{config['best_checkpoint_uri']}/{sfx}"
+        
         test_id = 234567
         config['test_id'] = test_id
-        self._run_test_and_assert(config, restore_dict)
+        
+        config['phase'] = 'test-given'
+        
+        self._run_test_and_assert(config)
         
         self._assert_export_train_results(config)
         self._assert_export_test_results(config)
@@ -699,7 +705,7 @@ class TestRanker(unittest.TestCase):
         
         return restore_dict, runs[0]
     
-    def _run_test_and_assert(self, config, restore_dict):
+    def _run_test_and_assert(self, config):
         #=== operate test from entrypoint
         print(f'BEGIN TESTING')
         

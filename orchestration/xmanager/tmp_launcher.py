@@ -125,9 +125,6 @@ def main(_):
             'JAX_LOG_LEVEL': 'debug',
             'jax_distributed_debug':"True",
             "LOCAL_SIMULATION" : "True",
-            "grain_worker_count" : "0",
-            "grain_read_options_num_threads" : "1",
-            "grain_read_buffer_size" : "5",
         }
         run_config = {
             'LOGNAME': env_config.get('POSTGRES_USER'),
