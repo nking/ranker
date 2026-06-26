@@ -8,64 +8,8 @@ The prototype is done now, so this lacks the software design analysis.
      - required use of multiprocesisng library,
        configuration of grain workers, threads, and prefetch,
        proper inclusion of nvidia libraries and NCCL flags to make sure NCCL
-       moves data between both GPUs
+       moves data between both GPUs.  then using asynchronous prefetching of
+       dataloader unot GPU.
 
-Here are empirically measured runtimes used afterwards for 
-estimating full train times with and without accelerators.
-
-Running on a laptop w/ 32 GB RAM and 2.8 GHZ processor with 4 cores.
-num train samples=1000, num validation samples=1000, 1 jax proccess,
-num_trials=4 and num_trials_per_worker=num_trials.
-num_epochs=2.
-
-The first trial is always longer than the subsequent trials so they
-are listed separately in the measurements.
-
-batch_size=64:
-   168 sec + 3*97 sec = 7.65 min
-
-batch_size=128:
-   140 sec + 3 * 80 sec = 6.3 min
-
-batch_size=256:
-   same times as for batch_size=128 = 6.3 min
-
-batch_Size=512:
-   swap use (disk thrashing) begins to occur when 80% RAM is used
-   so times are longer = 7.7 min
-
-running for num_epochs=4 now:
-batch_size=256
-   305 sec + 3*220 sec = 16 min
-   so it didn't scale linearly
-
------
-
-scaling up to 470,000 train samples and 70,000 validation samples:
-
-Total samples per epoch measured = 2,000
-New total samples per epoch = 540,000 (470k train + 70k val)
-Scale factor = 270x more data per epoch.
-
-on CPU: 3 days for 4 trials.  18 h per trial.
-
-GPU P100: 30-50 min per trial 
-   if expect a 20 x incr in GFLOPS:
-      less than 1 hour per trial
-   if expect an 8 x incr in GFLOPS (memory bound):
-      2.25 hr per trial
-      
-T4x2 GPU: 30-50 min per trial
-  using both GPUs: half of the GPU runtime estimate
-
-the RAM used for training:
-   if using Kaggle CPU:
-      system RAM holds model weights, activations, and gradients
-      system RAM holds dataloader
-   if using Kaggle GPU:
-      GPU VRAM holds model weights, activations, and gradients
-      system RAM holds dataloader
-  
-   so will use batch_size=256 and if memory used is <= 50%, will
-   increase it to batch_size=512
-
+see file opt_gpu_notes.txt for the gradual improvements in reducing runtime.
+the file is a work in progress.

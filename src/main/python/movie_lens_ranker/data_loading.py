@@ -10,11 +10,12 @@ from movie_lens_ranker.HardNegativeSamplingTransform import \
     HardNegativeSamplingTransform
 from movie_lens_ranker.RandomAccessArrayRecordDataSource import \
     RandomAccessArrayRecordDataSource
-from movie_lens_ranker.RatingsHistoryLookupTransform import \
-    RatingsHistoryLookupTransform
+from movie_lens_ranker.RatingsHistoryTransform import RatingsHistoryLookupTransform
 from movie_lens_ranker.RecommendedMovies import RecommendedMovies
 from movie_lens_ranker.SparseLocalSubgraphTransform import \
     SparseLocalSubgraphTransform
+from movie_lens_ranker.SuperGraphPaddingTransform import \
+    SuperGraphPaddingTransform
 from movie_lens_ranker.UserHistory import UserHistory
 from movie_lens_ranker.util import read_movies_array_record
 import logging
@@ -169,9 +170,9 @@ def _create_dataloader(
                 recommendations=recommendations,
                 num_candidates=num_candidates),
             SparseLocalSubgraphTransform(),
-            #moving this logic to the train loop to allow for multi-host partition of graphs
-            #JraphPaddedGraphTupleTransform(batch_size=batch_size,
-            #    max_history=max_history, num_candidates=num_candidates),
+            SuperGraphPaddingTransform(batch_size=batch_size,
+                max_history=max_history, num_candidates=num_candidates,
+                n_local_devices=len(jax.local_devices())),
         ],
         worker_count=worker_count,
         shard_options=shard_opts,

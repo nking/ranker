@@ -1,16 +1,20 @@
 import os.path
 import unittest
 
+import jax
+import jraph
 import numpy as np
 from array_record.python import array_record_module
 from helper import *
 
-from movie_lens_ranker.RatingsHistoryTransform import RatingsHistoryLookupTransform
+from movie_lens_ranker.RatingsHistoryTransform import *
 from movie_lens_ranker.UserHistory import UserHistory
 from movie_lens_ranker.data_loading import *
-from movie_lens_ranker.util import read_embeddings
+from movie_lens_ranker.util import read_embeddings, \
+    calc_number_jax_graph_components
 
-class TestRanker(unittest.TestCase):
+
+class TestSuperGraphPadding(unittest.TestCase):
     
     def setUp(self):
         
@@ -61,10 +65,14 @@ class TestRanker(unittest.TestCase):
             num_users=self.num_users, movie_rec_file_uri=self.recommendations_uri,
             movie_rec_ts_file_uri=self.recommendations_ts_uri)
         
-    def test_HardNegativesTransform(self):
+    def test_transform(self):
         batch_size = 1024
         max_history = 20
         num_candidates = 20
+        
+        jax_graph_comp_dict = calc_number_jax_graph_components(
+            batch_size, max_history, num_candidates,
+            n_local_devices=len(jax.local_devices()))
         
         watch_history = UserHistory(ratings_uri_list=[self.ratings_train_liked_uri, self.ratings_train_3_uri,
             self.ratings_train_disliked_uri], max_history=max_history)
@@ -76,11 +84,11 @@ class TestRanker(unittest.TestCase):
         batch = [(1875, 1101, 4, 975768800), (635, 2068, 4, 975768823),
             (635, 2357, 4, 975768823)]
         
-        transform1 = RatingsHistoryLookupTransform(history_lookup=watch_history, max_history=max_history)
+        transform1 = RatingsHistoryLookupTransform(
+            history_lookup=watch_history, max_history=max_history)
         
-        result1:Dict[str, np.ndarray] = transform1.map(batch)
-        
-        results_dict = {}
+        result1: Dict[str, np.ndarray] = transform1.map(batch)
+        results = []
         
         for i, seed in enumerate((0, 0, 123)):
             
@@ -92,36 +100,76 @@ class TestRanker(unittest.TestCase):
                 all_movie_ids= all_movie_ids,
                 recommendations=self.recommended_movies_getter,
                 num_candidates = num_candidates)
-                
+            
+            transform3 = SparseLocalSubgraphTransform()
+            
+            transform4 = SuperGraphPaddingTransform(
+                batch_size=batch_size, max_history=max_history,
+                num_candidates=num_candidates,
+                n_local_devices=len(jax.local_devices()), )
+            
             result2:Dict[str, np.ndarray] = transform2.random_map(result1, rng=rng)
+            result3:List[jraph.GraphsTuple] = transform3.map(result2)
+            result4:jraph.GraphsTuple = transform4.map(result3)
             
-            self.assertTrue(isinstance(result2, dict))
+            results.append(result4)
             
-            results_dict[i] = result2
+            self.assertTrue(len(result4.edges['rating']), jax_graph_comp_dict['max_edges'])
+            self.assertTrue(len(result4.receivers), jax_graph_comp_dict['max_edges'])
+            self.assertTrue(len(result4.senders), jax_graph_comp_dict['max_edges'])
+            self.assertTrue(len(result4.n_edge), jax_graph_comp_dict['max_graphs'])
+            self.assertTrue(len(result4.n_node), jax_graph_comp_dict['max_graphs'])
+            for key in result4.nodes.keys():
+                self.assertTrue(len(result4.nodes[key]), jax_graph_comp_dict['max_nodes'])
             
-            expected_keys = {"user_id", "movie_id", "rating", "timestamp",
-                "history_movie_ids", "history_ratings", "history_length",
-                "candidate_ids", "labels"}
-            for expected_key in expected_keys:
-                self.assertTrue(expected_key in result2.keys())
-                self.assertTrue(isinstance(result2[expected_key], np.ndarray))
-            
-            for i, user_id in enumerate(result2["user_id"]):
-                self.assertEqual(batch[i][0], user_id)
+            """
+            n_node=n_node_padded,
+                n_edge=n_edge_padded,
+                nodes=nodes_padded,
+                edges=edges_padded,
+                globals=globals_padded,
+                senders=senders_padded,
+                receivers=receivers_padded
+            """
         
-        dict0 = results_dict[0]
-        dict1 = results_dict[1]
-        dict2 = results_dict[2]
+        #results[0] and results[1] should be same
+        np.testing.assert_array_equal(results[0].edges['rating'], results[1].edges['rating'], strict=True)
+        np.testing.assert_array_equal(results[0].receivers, results[1].receivers, strict=True)
+        np.testing.assert_array_equal(results[0].senders, results[1].senders, strict=True)
+        np.testing.assert_array_equal(results[0].n_edge, results[1].n_edge, strict=True)
+        np.testing.assert_array_equal(results[0].n_node, results[1].n_node, strict=True)
+        for key in results[0].nodes.keys():
+            a = results[0].nodes[key]
+            b = results[1].nodes[key]
+            np.testing.assert_array_equal(a, b, strict=True)
         
-        a = dict0['candidate_ids']
-        b = dict1['candidate_ids']
-        np.testing.assert_array_equal(a, b, strict=True)
-        np.testing.assert_raises(
-            AssertionError,
-            np.testing.assert_array_equal,
-            dict1['candidate_ids'],
-            dict2['candidate_ids']
+        a = results[0]
+        b = results[2]
+        
+        # results[0] and results[2] should be different for nodes['ids'] and nodes['label']
+        np.testing.assert_array_equal(a.edges['rating'], b.edges['rating'], strict=True)
+        
+        np.testing.assert_array_equal(a.receivers,
+                b.receivers, strict=True)
+        np.testing.assert_array_equal(a.senders,
+                b.senders, strict=True
         )
+        np.testing.assert_array_equal( a.n_edge, b.n_edge,
+                strict=True
+        )
+        np.testing.assert_array_equal(a.n_node, b.n_node,
+                strict=True
+        )
+        for key in a.nodes.keys():
+            aa = a.nodes[key]
+            bb = b.nodes[key]
+            if key == "ids" or key == "label":
+                np.testing.assert_raises(
+                    AssertionError,
+                    np.testing.assert_array_equal,aa, bb, strict=True
+                )
+            else:
+                np.testing.assert_array_equal(aa, bb, strict=True)
         
     if __name__ == '__main__':
         unittest.main()

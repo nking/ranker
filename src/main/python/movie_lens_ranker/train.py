@@ -33,7 +33,8 @@ from movie_lens_ranker.data_loading import create_train_and_val_dataloaders, \
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.util import read_embeddings, \
     stringify_mlflow_params, get_canonical_mlflow_run_name, \
-    calc_number_jax_graph_components, get_model_mesh, get_gpu_stats
+    calc_number_jax_graph_components, get_model_mesh, get_gpu_stats, \
+    get_cpu_stats, is_running_on_gpu
 
 from jax.experimental import multihost_utils
 
@@ -257,10 +258,10 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
     def aggregate_metric(scalar_metric):
         return jax.lax.pmean(scalar_metric, axis_name='data')
     
-    for graphs_tuple_batch in val_dataloader_iter:
+    for padded_super_graph_0 in val_dataloader_iter:
         
-        padded_super_graph_0, n_samples = pad_graph_tuple_batch(graphs_tuple_batch, jax_graph_comp_dict)
-        n_samples_tot += n_samples
+        #actually is max_graphs which includes padding:
+        n_samples_tot += len(padded_super_graph_0.n_node)
         
         #shard the data to local devices:
         #padded_super_graph = jax.device_put(padded_super_graph_0, data_sharding)
@@ -288,8 +289,7 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
     
     return out, n_samples_tot
 
-def pad_graph_tuple_batch(graph_tuple_batch: jraph.GraphsTuple, jax_graph_comp_dict:Dict[str, int],
-    drop_remainder:bool=True) -> Tuple[jraph.GraphsTuple, int]:
+def pad_graph_tuple_batch(graph_tuple_batch: jraph.GraphsTuple, jax_graph_comp_dict:Dict[str, int]) -> jraph.GraphsTuple:
     """
     pad a batch from the grain data loaders for use in sharding over local devices
     :param graph_tuple_batch:
@@ -299,12 +299,10 @@ def pad_graph_tuple_batch(graph_tuple_batch: jraph.GraphsTuple, jax_graph_comp_d
     n_local_devices = jax.local_device_count()
     batch = graph_tuple_batch
     
-    if drop_remainder:
-        remainder = len(batch) % n_local_devices
-        if remainder != 0:
-            batch = batch[:-remainder]  # Drop trailing graphs to make it divisible
-        
-    n_samples = len(batch)
+    batch_size = len(batch)
+    
+    add_to = n_local_devices - (batch_size % n_local_devices)
+    max_graphs = batch_size + n_local_devices + add_to
     
     #logging.info(f"pad_graph_tuple_batch: n_samples={n_samples}")
     
@@ -314,9 +312,9 @@ def pad_graph_tuple_batch(graph_tuple_batch: jraph.GraphsTuple, jax_graph_comp_d
         batch,
         n_node=jax_graph_comp_dict['max_nodes'],
         n_edge=jax_graph_comp_dict['max_edges'],
-        n_graph=n_local_devices + n_samples
+        n_graph=max_graphs
     )
-    return padded_super_graph_0, n_samples
+    return padded_super_graph_0
 
 def _train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
@@ -435,15 +433,78 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         config_dict['max_history'], config_dict['num_candidates'], n_local_devices=n_local_devices)
     
     multihost = jax.process_count() > 1
+    is_on_gpu = is_running_on_gpu()
     
     use_debug = ("debug" in config_dict and config_dict["debug"])
     
     log_interval = 10
     if (TOTAL_RECORDS // n_local_devices)//TRAIN_BATCH_SIZE > 100:
         log_interval = 100
+    
+    if is_on_gpu:
+        from flax.jax_utils import prefetch_to_device
+        device_iterator = prefetch_to_device(train_dataloader_iter, size=2)
+    else:
+        device_iterator = train_dataloader_iter
+    
+    import threading
+    import queue
+    
+    def build_sharded_prefetcher(iterator, is_gpu, multihost, data_mesh,
+            data_pspec, data_sharding, prefetch_size=2):
+        """
+        Asynchronously pulls padded batches from Grain, applies NamedSharding,
+        and pushes them to device VRAM in a background thread.
+        """
+        batch_queue = queue.Queue(maxsize=prefetch_size)
         
+        def prefetch_worker():
+            try:
+                for loop_idx, padded_super_graph_0 in enumerate(iterator):
+                    # Apply the sharding/transfer logic in the background thread!
+                    if is_gpu:
+                        if multihost:
+                            padded_super_graph = jax.tree_util.tree_map(
+                                lambda x: multihost_utils.host_local_array_to_global_array(
+                                    x, data_mesh, data_pspec),
+                                padded_super_graph_0
+                            )
+                        else:
+                            padded_super_graph = jax.tree_util.tree_map(
+                                lambda x: jax.device_put(x, data_sharding),
+                                padded_super_graph_0
+                            )
+                    else:
+                        padded_super_graph = padded_super_graph_0
+                    batch_queue.put((loop_idx, padded_super_graph))
+            except Exception as e:
+                batch_queue.put(e)
+            finally:
+                batch_queue.put(None)
+        # Start the worker thread
+        threading.Thread(target=prefetch_worker, daemon=True).start()
+        # Yield the batches to the main training loop
+        while True:
+            item = batch_queue.get()
+            if item is None:
+                break
+            if isinstance(item, Exception):
+                raise item
+            yield item
+            
+    #an atempt to keep the gpu busier:
+    device_iterator = build_sharded_prefetcher(
+        iterator=train_dataloader_iter,
+        is_gpu=is_on_gpu,
+        multihost=multihost,
+        data_mesh=data_mesh,
+        data_pspec=data_pspec,
+        data_sharding=data_sharding,
+        prefetch_size=2
+    )
+    
     last_epoch = 0
-    for loop_idx, graphs_tuple_batch in enumerate(train_dataloader_iter):
+    for loop_idx, padded_super_graph in device_iterator:
         
         if use_debug:
             logging.info(f"START_BATCH_TIME: {time.time()}")
@@ -454,46 +515,16 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
         last_epoch = epoch
         
-        try:
-            padded_super_graph_0, n_samples = optimized_batch_and_pad(
-                batch=graphs_tuple_batch,
-                max_nodes=jax_graph_comp_dict['max_nodes'],
-                max_edges=jax_graph_comp_dict['max_edges'],
-                max_graphs=jax_graph_comp_dict['max_graphs'],
-            )
-        except Exception as e:
-            logging.error(f"Exception occurred during optimized_batch_and_pad: {e}"
-                          f".\n arguments were batch={graphs_tuple_batch}, "
-                          f" max_nodes={jax_graph_comp_dict['max_nodes']}, "
-                          f"max_edges={jax_graph_comp_dict['max_edges']}, "
-                          f"max_graphs={jax_graph_comp_dict['max_graphs']},"
-                          f" n_local_devices={n_local_devices}")
-        
-        #grain SPMD has already partitioned the data across jax process ids, but if there is more than
-        # 1 host, we further partition the data across the hosts so that the hosts aren't doing identical work.
-        # Map the function over the entire GraphsTuple PyTree.
-        # Note that this is a shard across local interconnect, not a shard over global network even
-        # though the mesh includes "global info"
-        if multihost:
-            padded_super_graph = jax.tree_util.tree_map(
-                lambda x: multihost_utils.host_local_array_to_global_array(
-                    x, data_mesh, data_pspec),
-                padded_super_graph_0
-            )
-        else:
-            padded_super_graph = jax.tree_util.tree_map(
-                lambda x: jax.device_put(x, data_sharding),
-                padded_super_graph_0
-            )
-        
         loss = train_step(model, padded_super_graph, optimizer)
         
         epoch_avg_train_loss.append(loss)
         
         if batch_idx % log_interval == 0:# and rank==0:
             logging.info(f"batch {batch_idx}, loop_idx={loop_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}")
-            logging.info(get_gpu_stats())
-            
+            if is_on_gpu:
+                logging.info(get_gpu_stats())
+            logging.info(get_cpu_stats())
+
         if (batch_idx + 1) % STEPS_PER_EPOCH_LOCAL == 0:
             logging.info(f"*batch {batch_idx}, local step {local_step}, global_step {global_step}, (Epoch {epoch}): Train Loss {loss:.4f}")
             #finished a train epoch.  calc avg train loss and val metrics
@@ -1551,8 +1582,12 @@ def create_dummy_super_padded_graph(batch_size: int,
     jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
         max_history, num_candidates, n_local_devices=jax.local_device_count())
     
-    padded_super_graph, n_samples = pad_graph_tuple_batch(fake_graph_list,
-        jax_graph_comp_dict)
+    padded_super_graph = optimized_batch_and_pad(
+        batch=fake_graph_list,
+        max_nodes=jax_graph_comp_dict['max_nodes'],
+        max_edges=jax_graph_comp_dict['max_edges'],
+        max_graphs=jax_graph_comp_dict['max_graphs'],
+    )
     
     return padded_super_graph
     

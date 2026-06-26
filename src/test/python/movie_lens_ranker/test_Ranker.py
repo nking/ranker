@@ -196,6 +196,7 @@ def reset_hpo_results_bucket(project_id:str, study_name:str):
         print(f"Error resetting database: {e.stderr}")
 
 class TestRanker(unittest.TestCase):
+    
     def setUp(self):
         
         # === these are so that grain dataloader can read data from fake gcs server running in docker ====
@@ -203,7 +204,7 @@ class TestRanker(unittest.TestCase):
         for k, v in dotenv_values(env_file).items():
             os.environ[k] = v
         
-        ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY)
+        ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY, use_gcs_uri=True)
         
         self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]
         self.ratings_val_liked_uri = ratings_uri_dict["val_liked"]
@@ -385,6 +386,8 @@ class TestRanker(unittest.TestCase):
         to start the fake gcs server and the postgres db and vizier server:
             docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d
         """
+        
+        config = self.config.copy()
         
         self._run_and_assert_hpo(config)
         
@@ -776,7 +779,7 @@ class TestRanker(unittest.TestCase):
         
         time0 = datetime.datetime.now()
         
-        padded_super_graph_0, n_samples = pad_graph_tuple_batch(fake_batch,
+        padded_super_graph_0 = pad_graph_tuple_batch(fake_batch,
             jax_graph_comp_dict)
         
         time1 = datetime.datetime.now()

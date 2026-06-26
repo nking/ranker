@@ -48,13 +48,16 @@ class DataSize(Enum):
     SMALL = 'small'
     TINY = 'tiny'
     
-def get_train_val_test_liked_uris(data_size:DataSize=DataSize.TINY) -> Dict[str, str]:
-    base_dir = os.path.join(get_project_dir(), "src/test/resources/data/")
+def get_train_val_test_liked_uris(data_size:DataSize=DataSize.TINY, use_gcs_uri:bool=False) -> Dict[str, str]:
+    if use_gcs_uri:
+        base_uri = "gs://data/"
+    else:
+        base_uri = os.path.join(get_project_dir(), "src/test/resources/data/")
     if data_size == DataSize.SMALL:
-        base_dir = os.path.join(base_dir, "small")
+        base_uri = os.path.join(base_uri, "small")
     elif data_size == DataSize.TINY:
-        base_dir = os.path.join(base_dir, "tiny")
+        base_uri = os.path.join(base_uri, "tiny")
     out = {}
     for key in ('train_3', 'val_3', 'test_3', 'train_liked', 'val_liked', 'test_liked', 'train_disliked', 'val_disliked', 'test_disliked'):
-        out[key] = os.path.join(base_dir, f"ratings_{key}.array_record")
+        out[key] = os.path.join(base_uri, f"ratings_{key}.array_record")
     return out

@@ -29,11 +29,11 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
         map the input train record dictionary to a dictionary containing it and padded history entries
         :param batch: a list, that is batch, of tuples containing the user_id, movie_id, rating, and timestamp
         :return: a dictionary containing numpy arrays where the arrays are 1D of length batch_size
-            'user_id'.
+            'user_id', shape(batch_size, )
             'movie_id',
             'rating',
             'timestamp',
-            "history_movie_ids",
+            "history_movie_ids", shape (batch_size, max_history)
             "history_ratings",
             "history_length"
         """

@@ -3,7 +3,7 @@ import unittest
 from array_record.python import array_record_module
 from helper import *
 
-from movie_lens_ranker.RatingsHistoryLookupTransform import *
+from movie_lens_ranker.RatingsHistoryTransform import RatingsHistoryLookupTransform
 from movie_lens_ranker.data_loading import *
 from movie_lens_ranker.util import read_embeddings
 

@@ -37,6 +37,8 @@ docker_bridge_gateway = "172.17.0.1"
 env_unittests_config = dotenv_values("../../.env_unittests")
 mlflow_experiment_tracking_uri = f"postgresql://{env_unittests_config.get('POSTGRES_USER')}:{env_unittests_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db"
 
+USE_FILE_URIS = False
+
 async def check_await_status(handle):
     try:
         await handle.wait_until_complete()
@@ -78,6 +80,18 @@ def main(_):
             mlflow_experiment_tracking_uri=mlflow_experiment_tracking_uri)
     except Exception as ex:
         pass
+
+    def get_project_dir() -> str:
+        cwd = os.getcwd()
+        head = cwd
+        proj_dir = ""
+        while head and head != os.sep:
+          head, tail = os.path.split(head)
+          if tail:  # Add only if not an empty string (e.g., from root or multiple separators)
+            if tail == "ranker":
+              proj_dir = os.path.join(head, tail)
+              break
+        return proj_dir
     
     with xm_local.create_experiment(experiment_title='xmngr_pipeline') as experiment:
         
@@ -111,6 +125,9 @@ def main(_):
             'JAX_LOG_LEVEL': 'debug',
             'jax_distributed_debug':"True",
             "LOCAL_SIMULATION" : "True",
+            "grain_worker_count" : "0",
+            "grain_read_options_num_threads" : "1",
+            "grain_read_buffer_size" : "5",
         }
         run_config = {
             'LOGNAME': env_config.get('POSTGRES_USER'),
@@ -121,6 +138,7 @@ def main(_):
             "vizier_endpoint": f"{docker_bridge_gateway}:8000",
             "latest_checkpoint_uri": "gs://checkpoint-bucket/latest",
             "best_checkpoint_uri": "gs://checkpoint-bucket/best",
+            
             "movies_uri": "gs://data/movies-00000-of-00001.array_record",
             "recommendations_uri": "gs://data/recommended_movies.array_record",
             "recommendations_ts_uri": "gs://data/recommended_movies_timestamps.array_record",
@@ -146,6 +164,12 @@ def main(_):
             'project_id': project_id,
         }
         
+        if USE_FILE_URIS:
+            base_uri = os.path.join(get_project_dir(), "src/test/resources/")
+            for key, value in env_config.items():
+                if value.endswith("array_record"):
+                    value.replace("gs://", base_uri)
+                    
         executable = experiment.package([
             # docker tag ranker-app:local localhost/ranker-app:local
             xm.Packageable(

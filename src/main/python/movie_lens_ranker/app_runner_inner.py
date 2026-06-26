@@ -4,7 +4,6 @@ main runner for the tuning, training, and testing of a Jax AI stack
 model with JaxAI stack dataloader under SPMD paradigm with multi-host, multi-process
 abilities.
 """
-
 import os
 import sys
 import logging
@@ -29,7 +28,7 @@ from jax.experimental import mesh_utils
 from movie_lens_ranker.train import train_fn, test_fn
 from movie_lens_ranker.util import get_recognized_keys, \
     app_runner_is_missing_minimum_required_keys, \
-    destringify_mlflow_params
+    destringify_mlflow_params, get_cpu_stats, is_running_on_gpu
 
 FLAGS = flags.FLAGS
 
@@ -669,13 +668,21 @@ def _fake_gcs_server_connection(config):
             f'ERROR while trying to write to {bucket_uri}: {e}.  Check for permission errors')
         raise ConnectionError(f'ERROR while trying to write to {bucket_uri}: {e}.  Check for permission errors')
     logging.info(f"write to fake_gcs_server succeeded")
+    
 def connections_check(config):
     
-    if os.environ.get('JAX_PLATFORM_NAME', '').lower().find('gpu') > -1:
+    if os.environ.get('JAX_PLATFORM_NAME', '').lower().find('gpu') > -1 or is_running_on_gpu():
         if not _jax_sees_gpus():
             raise EnvironmentError(f"could not find expected GPUs: {jax.devices()}")
         from movie_lens_ranker.util import get_gpu_stats
-        logging.info(f'gpu_stats={get_gpu_stats()}')
+        gpu_stats = get_gpu_stats()
+        if gpu_stats is None or gpu_stats == "":
+            raise EnvironmentError("could not get gpu stats")
+        cpu_stats = get_cpu_stats()
+        if cpu_stats is None or cpu_stats == "":
+            raise EnvironmentError("could not get cpu stats")
+        logging.info(f'gpu_stats={gpu_stats}')
+        logging.info(f'cpu stats={cpu_stats}')
     
     if jax.process_index() == 0:
         _vizier_connection(config['vizier_endpoint'])
@@ -684,6 +691,7 @@ def connections_check(config):
         logging.info('passed connections check')
 
 def main(_):
+    
     config = FLAGS.flag_values_dict()
     
     if "debug" in config and config['debug']:
@@ -691,36 +699,46 @@ def main(_):
     
     config = {k:v for k, v in config.items() if k in get_recognized_keys()}
     
-    if "connections_check" in config and int(config["connections_check"])==1:
-        connections_check(config)
-        return
-    
-    if app_runner_is_missing_minimum_required_keys(config):
-        logging.info(f'warning: missing the minimum required flags')
-        return
-    
-    # work-around for xmanager encapsulating the json dumps string of array with extra quotes
-    if "trial_ids" in config:
-        # idempotent if doesn't have additional quotes:
-        config['trial_ids'] = config['trial_ids'].strip("'").strip('"')
-    
-    if "debug" in config and config['debug']:
-        logging.info(f'recognized args: {config}')
+    try:
         
-    # static top_k is throughout code
-    config['top_k'] = 20
+        if is_running_on_gpu():
+            from movie_lens_ranker.util import init_pynvmal
+            init_pynvmal()
+        
+        if "connections_check" in config and int(config["connections_check"])==1:
+            connections_check(config)
+            return
+        
+        # static top_k is throughout code
+        config['top_k'] = 20
+        
+        if app_runner_is_missing_minimum_required_keys(config):
+            logging.info(f'warning: missing the minimum required flags')
+            return
     
-    logging.info(f'jax_process_index={jax.process_index()}; '
-          f'jax.local_devices={jax.local_devices()}; '
-          f'jax.devices={jax.devices()}, phase={config["phase"]}')
+        # work-around for xmanager encapsulating the json dumps string of array with extra quotes
+        if "trial_ids" in config:
+            # idempotent if doesn't have additional quotes:
+            config['trial_ids'] = config['trial_ids'].strip("'").strip('"')
+        
+        if "debug" in config and config['debug']:
+            logging.info(f'recognized args: {config}')
+            
+        logging.info(f'jax_process_index={jax.process_index()}; '
+              f'jax.local_devices={jax.local_devices()}; '
+              f'jax.devices={jax.devices()}, phase={config["phase"]}')
 
-    if config['phase'] == 'tune':
-        run_tune(config)
-    elif config['phase'].find('test') == 0:
-        run_test(config)
-    elif config['phase'].find('train') == 0:
-        run_train(config)
-    elif config['phase'].find('export') == 0:
-        run_export_results(config)
-    else:
-        raise ValueError('unknown phase: {config["phase"]}')
+        if config['phase'] == 'tune':
+            run_tune(config)
+        elif config['phase'].find('test') == 0:
+            run_test(config)
+        elif config['phase'].find('train') == 0:
+            run_train(config)
+        elif config['phase'].find('export') == 0:
+            run_export_results(config)
+        else:
+            raise ValueError('unknown phase: {config["phase"]}')
+    finally:
+        if is_running_on_gpu():
+            from movie_lens_ranker.util import shutdown_pynvmal
+            shutdown_pynvmal()

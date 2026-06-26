@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import Tuple, Dict, List, Union, Any
 import jax
 import jax.numpy as jnp
+import psutil
 from array_record.python import array_record_module
 import msgpack
 import numpy as np
@@ -494,7 +495,7 @@ def calc_number_jax_graph_components(batch_size: int, max_history: int,
     :param batch_size:
     :param max_history:
     :param num_candidates:
-    :return:
+    :return: dictionary with keys 'max_nodes', 'max_edges', and 'max_graphs'
     """
     
     # 40->50, #123->200, #1234->2000, #12345->20000
@@ -546,7 +547,52 @@ def find_executable_path(binary_name: str):
     raise FileNotFoundError(
         f"Could not find the {binary_name} executable in PATH or fallback directories.")
 
+def init_pynvmal():
+    if is_running_on_gpu():
+        import pynvml
+        try:
+            pynvml.nvmlInit()
+            os.environ['NVML_AVAILABLE'] = '1'
+        except pynvml.NVMLError:
+            pass
+    
+def shutdown_pynvmal():
+    if os.environ.get('NVML_AVAILABLE') == '1':
+        import pynvml
+        try:
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
+    
 def get_gpu_stats() -> str:
+    if not is_running_on_gpu():
+        return ""
+    if os.environ.get('NVML_AVAILABLE') != "1":
+        return get_gpu_stats_slow()
+    else:
+        import pynvml
+        device_count = pynvml.nvmlDeviceGetCount()
+        stats_list = []
+        
+        for i in range(device_count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            
+            # Get memory info (returned in bytes, so convert to MiB)
+            mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            used_mib = mem_info.used // (1024 ** 2)
+            total_mib = mem_info.total // (1024 ** 2)
+            
+            # Get utilization info
+            util_info = pynvml.nvmlDeviceGetUtilizationRates(handle)
+            gpu_util = util_info.gpu
+            
+            # Format identically to your previous nvidia-smi output
+            stats_list.append(
+                f"{i}, {gpu_util} %, {used_mib} MiB, {total_mib} MiB")
+        
+        return " | ".join(stats_list)
+    
+def get_gpu_stats_slow() -> str:
     """Fetches real-time GPU utilization and VRAM usage."""
     if not is_running_on_gpu():
         return ""
@@ -570,3 +616,40 @@ def get_gpu_stats() -> str:
         return f"Hardware Stats [ID, Util%, Used, Total]: {stats}"
     except Exception as e:
         return f"Could not fetch GPU stats: {e}"
+
+def get_cpu_stats() -> str:
+    """
+    get cpu stats.
+    If the Load(1m) value is larger than the number of cores on your CPU, then thread thrashing is occuring, that is,
+    there are more threads than the number of cores waiting to use the cores.
+    :return: string of the cpu stats for Load, RAM, and SWAP.
+    """
+    #  RAM Metrics (Convert bytes to GB)
+    vm = psutil.virtual_memory()
+    ram_used = vm.used / (1024 ** 3)
+    ram_total = vm.total / (1024 ** 3)
+    
+    # Swap Metrics (Convert bytes to GB)
+    swap = psutil.swap_memory()
+    swap_used = swap.used / (1024 ** 3)
+    swap_total = swap.total / (1024 ** 3)
+    
+    # CPU Metrics
+    # interval=None makes this completely non-blocking. It instantly calculates
+    # CPU utilization since the last time this function was called.
+    cpu_pct = psutil.cpu_percent(interval=None)
+    
+    # System Load Average (1-minute queue depth)
+    # Excellent indicator of thread over-scheduling/thrashing
+    load_1min, _, _ = os.getloadavg()
+    
+    # Format a clean string that matches your current logging architecture
+    stats_msg = (
+        f"Host Stats | CPU: {cpu_pct:>5.1f}% | Load(1m): {load_1min:.2f} | "
+        f"RAM: {vm.percent:>5.1f}% ({ram_used:.1f}GB/{ram_total:.1f}GB) | "
+        f"Swap: {swap.percent:>5.1f}% ({swap_used:.1f}GB/{swap_total:.1f}GB)"
+    )
+    return stats_msg
+
+# Example of how to trigger it alongside your existing GPU logger:
+# logger.info(log_system_resource_stats())

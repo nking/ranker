@@ -32,6 +32,8 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
             "labels"
         :return: a list of a sparsely populated jraph.GraphsTuple representation of the local subgraph for
         the train user_id.  Note that this is not the padded version to give to the model being trained.
+        The node array lengths are = 1 + n_real_history + n_candidates.
+        The edge array lengths are = n_real_history + n_candidates.
         """
         
         #form the list of jraph.GraphsTuple
