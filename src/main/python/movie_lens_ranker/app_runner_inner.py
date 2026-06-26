@@ -28,7 +28,8 @@ from jax.experimental import mesh_utils
 from movie_lens_ranker.train import train_fn, test_fn
 from movie_lens_ranker.util import get_recognized_keys, \
     app_runner_is_missing_minimum_required_keys, \
-    destringify_mlflow_params, get_cpu_stats, is_running_on_gpu
+    destringify_mlflow_params, get_cpu_stats, is_running_on_gpu, \
+    create_dirs_if_is_filepath
 
 FLAGS = flags.FLAGS
 
@@ -551,6 +552,7 @@ def run_export_results(config: Dict[str, Any]):
         hparams = destringify_mlflow_params(mlflow_run.data.params)
         hparams_json = json.dumps(hparams, sort_keys=True)
         try:
+            create_dirs_if_is_filepath(config['output_hyperparams_uri'])
             with fsspec.open(config['output_hyperparams_uri'], mode="w") as f:
                 f.write(hparams_json)
             logging.info(f"Wrote to {config['output_hyperparams_uri']}")
@@ -589,6 +591,7 @@ def run_export_results(config: Dict[str, Any]):
     
     metrics_json = json.dumps(metrics_dict, sort_keys=True)
     try:
+        create_dirs_if_is_filepath(config['output_metrics_uri'])
         with fsspec.open(config['output_metrics_uri'], mode="w") as f:
             f.write(metrics_json)
         logging.info(f"Wrote to {config['output_metrics_uri']}")
@@ -648,6 +651,7 @@ def _fake_gcs_server_connection(config):
     :param config:
     :return: True if exception is not throw and a data file is successfully read
     """
+    #TODO: this could be improved to take a test read and test write uri in config
     from movie_lens_ranker.util import read_movies_array_record
     gs_uri = "gs://data/movies-00000-of-00001.array_record"
     emb = read_movies_array_record(gs_uri, batch_size=1024)
@@ -658,6 +662,7 @@ def _fake_gcs_server_connection(config):
     hparams_json = json.dumps({"a":[1,2,3]}, sort_keys=True)
     bucket_uri = "gs://hpo-results-bucket/test-write/hparams.json"
     try:
+        create_dirs_if_is_filepath(bucket_uri)
         with fsspec.open(bucket_uri, mode="w") as f:
             f.write(hparams_json)
         with fsspec.open(bucket_uri, mode="r") as f:

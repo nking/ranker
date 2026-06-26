@@ -15,6 +15,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 from jax.experimental import mesh_utils
 import subprocess
 # In JAX 0.8+, shard_map is typically in the main namespace
+from pathlib import Path
 
 FLAGS = flags.FLAGS
 
@@ -651,5 +652,8 @@ def get_cpu_stats() -> str:
     )
     return stats_msg
 
-# Example of how to trigger it alongside your existing GPU logger:
-# logger.info(log_system_resource_stats())
+def create_dirs_if_is_filepath(a_uri:str):
+    if a_uri.startswith("gs://"):
+        return
+    file_path = Path.from_uri(a_uri)
+    file_path.parent.mkdir(parents=True, exist_ok=True)

@@ -34,7 +34,8 @@ from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.util import read_embeddings, \
     stringify_mlflow_params, get_canonical_mlflow_run_name, \
     calc_number_jax_graph_components, get_model_mesh, get_gpu_stats, \
-    get_cpu_stats, is_running_on_gpu, model_params_trainable_keys
+    get_cpu_stats, is_running_on_gpu, model_params_trainable_keys, \
+    create_dirs_if_is_filepath
 
 from jax.experimental import multihost_utils
 
@@ -858,6 +859,8 @@ def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tup
             sfx = f"{config['study_name']}/{run_name}"
             config['best_checkpoint_uri'] = f"{config['best_checkpoint_uri']}/{sfx}"
             config['latest_checkpoint_uri'] = f"{config['latest_checkpoint_uri']}/{sfx}"
+            create_dirs_if_is_filepath(config['best_checkpoint_uri'])
+            create_dirs_if_is_filepath(config['latest_checkpoint_uri'])
             if worker_rank == 0:
                 # cannot update the mlflow logged param, so instead creata tag for the uris
                 mlflow.set_tag('best_checkpoint_uri',  config['best_checkpoint_uri'])
