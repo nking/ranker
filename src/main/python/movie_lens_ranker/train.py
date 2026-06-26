@@ -34,7 +34,7 @@ from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.util import read_embeddings, \
     stringify_mlflow_params, get_canonical_mlflow_run_name, \
     calc_number_jax_graph_components, get_model_mesh, get_gpu_stats, \
-    get_cpu_stats, is_running_on_gpu
+    get_cpu_stats, is_running_on_gpu, model_params_trainable_keys
 
 from jax.experimental import multihost_utils
 
@@ -1051,14 +1051,20 @@ def test_fn(config: dict):
     
     if worker_rank == 0:
         for key in {"mlflow_experiment_name", "mlflow_experiment_id",
-            "mlflow_parent_run_id"}:
+            "mlflow_parent_run_id", "mlflow_tracking_uri"}:
             if key not in config:
                 raise LookupError(f"config is missing {key}")
+    
+    req_keys = {'ratings_test_liked_uri',
+        'ratings_test_3_uri', 'ratings_test_disliked_uri'}
+    for key in req_keys:
+        if key not in config:
+            raise LookupError(f"config is missing {key}")
     
     if config['phase'] == 'test-best':
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
     else:
-        #test-given, uese given checkpoint path to restore, test_checkpoint_uri
+        #test-given, use given checkpoint path to restore, test_checkpoint_uri
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['test_checkpoint_uri'])
     
     num_users = restore_dict['num_users']
@@ -1068,8 +1074,6 @@ def test_fn(config: dict):
     
     model = restore_dict['model']
     model.eval()
-    
-    config['phase'] = 'test-best'
     
     mlflow_run = None
     run_name = get_canonical_mlflow_run_name(config)
@@ -1088,16 +1092,25 @@ def test_fn(config: dict):
             config['mlflow_run_id'] = mlflow_run.info.run_id
             mlflow.set_tag("phase", config["phase"])  # do not move this before start_run
         
-        max_history = restore_dict['config']['max_history']
-        num_candidates = restore_dict['config']['num_candidates']
-        batch_size = restore_dict['config']['batch_size']
+        #write to config from restore dict config
+        for key in {"max_history", "num_candidates", "batch_size",
+            "movies_uri", "recommendations_uri", "recommendations_ts_uri",
+            "ratings_train_liked_uri", "ratings_train_3_uri", "ratings_train_disliked_uri",
+            "ratings_val_liked_uri", "ratings_val_3_uri", "ratings_val_disliked_uri",
+            *model_params_trainable_keys}:
+            if key in restore_dict['config']:
+                config[key] = restore_dict['config'][key]
+        
+        max_history = config['max_history']
+        num_candidates = config['num_candidates']
+        batch_size = config['batch_size']
         
         #these uris are all in config too, excepting test_ratings
         test_dataloader = create_test_dataloader(
             num_users = num_users,
-            movies_uri = restore_dict['config']['movies_uri'],
-            recommendations_uri = restore_dict['config']['recommendations_uri'],
-            recommendations_ts_uri = restore_dict['config']['recommendations_ts_uri'],
+            movies_uri = config['movies_uri'],
+            recommendations_uri = config['recommendations_uri'],
+            recommendations_ts_uri = config['recommendations_ts_uri'],
             
             rattings_data_uri = config['ratings_test_liked_uri'],
             ratings_history_uris=[
