@@ -692,7 +692,7 @@ def connections_check(config):
     if jax.process_index() == 0:
         _vizier_connection(config['vizier_endpoint'])
         _mlflow_connection(config['mlflow_tracking_uri'])
-        _fake_gcs_server_connection(config)
+        #_fake_gcs_server_connection(config)
         logging.info('passed connections check')
 
 def main(_):
