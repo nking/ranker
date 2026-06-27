@@ -655,5 +655,5 @@ def get_cpu_stats() -> str:
 def create_dirs_if_is_filepath(a_uri:str):
     if a_uri.startswith("gs://"):
         return
-    file_path = Path.from_uri(a_uri)
+    file_path = Path(a_uri)
     file_path.parent.mkdir(parents=True, exist_ok=True)
