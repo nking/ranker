@@ -633,9 +633,10 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                             steps=epoch,
                             elapsed_secs=(time.perf_counter() - start_time)
                         ))
-                    if epoch >= delay and trial.check_early_stopping():
-                        early_stop_triggered[0] = True
-                        break
+                    #early stopping not currently implement in vizier study, but if it were:
+                    #if epoch >= delay and trial.check_early_stopping():
+                    #    early_stop_triggered[0] = True
+                    #    break
                         
         if use_debug:
             logging.info(f"END_BATCH_TIME: {time.time()}")

@@ -8,7 +8,7 @@ The prototype is done now, so this lacks the software design analysis.
      - required use of multiprocesisng library,
        configuration of grain workers, threads, and prefetch,
        proper inclusion of nvidia libraries and NCCL flags to make sure NCCL
-       moves data between both GPUs.  then using asynchronous prefetching of
+       moves data between both GPUs, then using asynchronous prefetching of
        dataloader unot GPU.
 
 see file opt_gpu_notes.txt for the gradual improvements in reducing runtime.

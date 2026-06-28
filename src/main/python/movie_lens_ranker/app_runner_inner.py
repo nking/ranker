@@ -131,6 +131,10 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False):
         #study_config.algorithm = 'EAGLE_STRATEGY'
         #study_config.algorithm = 'RANDOM_SEARCH'
         #study_config.algorithm = 'DEFAULT'
+    
+    ## consider implementing a Pythia class for median early stopping
+    #study_config.automated_stopping_config = vz.AutomatedStoppingConfig....
+    # see https://oss-vizier.readthedocs.io/en/latest/guides/developer/early_stopping.html#id1
     return study_config
 
 def setup_vizier_study(project_id: str, study_name: str, endpoint: str,

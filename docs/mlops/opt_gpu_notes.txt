@@ -51,6 +51,11 @@ Before running again on Kaggle,
   - have added CPU logging.
   - have switched to faster gpu stats for logging.
 
+Update after running on Kaggle with those changes:
+   - the prefetching onto GPU helped tremendously, a factor of about 24
+     10 epochs of training plus validation at each epoch took 25 minutes for the 463,000 sample dataset.
+     1 epoch = 2.5 min
+
 
 
 
