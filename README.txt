@@ -80,6 +80,7 @@ project directory hierarchy:
 ├── src/       
 │   ├──main/   
 │   │   ├── python/movie_lens_ranker  # Core JAX/AI Application Code 
+│   │   ├── rust/src                  # rust code used for creating input graph
 │   ├──test/   
 │   │   ├── python/movie_lens_ranker  # Tests for Main Branch   
 │   │   ├── resoures/                 # data for tests   
@@ -108,6 +109,18 @@ project directory hierarchy:
 ├── requirements*.txt               # Python application dependencies   
 └── README.md   
 
+
+--------------------------------------------------
+to install rust:
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# Source the cargo environment (makes 'cargo' available in current shell)
+source $HOME/.cargo/env
+
+to compile the rust code while developing (editable install will pick up the compiled changes):
+maturin develop
+
+-TODO: make an changes to orchestrators to include rust
 
 --------------------------------------------------
 Note that some of the software stack requires the OS to be linux.

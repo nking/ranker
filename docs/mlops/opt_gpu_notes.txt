@@ -56,6 +56,11 @@ Update after running on Kaggle with those changes:
      10 epochs of training plus validation at each epoch took 25 minutes for the 463,000 sample dataset.
      1 epoch = 2.5 min
 
+a pipeline run of 10 HPO trials with num_epochs=15, followed by train for 15 epochs and test
+    took 3 hrs, 45 min
+
+
+
 
 
 

@@ -1,3 +1,8 @@
+- make chnages to use rust code for data preparation
+  taking input ratings and other array_reords 
+  to form enriched graph as arrays of fixed size c++ raw memory
+  pointers
+
 - consider using a CliffordNet layer instead of the GATv2.
   - requires a change in the bi-encoder to make embeddings
     that are multivectors and replaces the dot product

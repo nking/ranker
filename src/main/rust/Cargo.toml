@@ -1,0 +1,15 @@
+[package]
+name = "graph_prep"
+version = "0.1.0"
+edition = "2026"
+
+[lib]
+name = "graph_prep"
+crate-type = ["cdylib"]
+
+[dependencies]
+# PyO3 for the Python bindings, numpy for zero-copy array handling
+pyo3 = { version = "0.23", features = ["extension-module"] }
+numpy = "0.23"
+serde = { version = "1.0", features = ["derive"] }
+rmp-serde = "1.3"
