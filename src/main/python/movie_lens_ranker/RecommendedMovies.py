@@ -8,7 +8,7 @@ class RecommendedMovies (object):
     def __init__(self, num_users:int, movie_rec_file_uri:str, movie_rec_ts_file_uri:str):
         """
         read in the recommended movies.  assumes that each list of recommended movies has the same length, and
-        that a user_id netry in movie_rec_file_path is complemented by a user_id entry in
+        that a user_id entry in movie_rec_file_path is complemented by a user_id entry in
         movie_rec_ts_file_path.
         :param num_users:  number of users in the entire user catalog
         :param movie_rec_file_uri: file of movies recommended for each user in format such that each row is
@@ -29,7 +29,7 @@ class RecommendedMovies (object):
         """
         read the recommended movies or recommended movies' timestamps file.   note that the array_records
         have been written such that the movies decrease in score and such that the
-        timestamps are for the movie_ids at same index in orther file.
+        timestamps are for the movie_ids at same index in other file.
         :param num_users: total number of users in the user catalog.  this is probably the same as
         the length of the file at file_uri
         :param file_uri:
@@ -70,7 +70,7 @@ class RecommendedMovies (object):
         :return: top k of movie recommendations unseen by user_id.  shape returned is (len(user_id_, top_k)
         """
         if top_k > self.row_length:
-            raise ValueError(f"top_k must be smaller than the number of recommendations per suer = {self.row_length}")
+            raise ValueError(f"top_k must be smaller than the number of recommendations per user = {self.row_length}")
         
         user_idx = self.user_ids[user_id]
         
