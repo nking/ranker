@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.0"]
+requires = ["maturin>=1.14,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -10,15 +10,18 @@ authors = [
     { name = "Nichole King" },
 ]
 requires-python = ">=3.12.0,<3.13"
+#see requirements-[c|g]pu.txt for dependencies
 dependencies = [
-    "numpy",
-    "msgpack",
 ]
-readme = "README.md"
+readme = "README.txt"
 license = { text = "MIT" }
 
 classifiers = [
-  "Development Status :: 1 - development",
+    "Development Status :: 1 - development",
+    "Programming Language :: Python",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy","
 ]
 
 [project.urls]

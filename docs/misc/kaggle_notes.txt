@@ -15,6 +15,9 @@ to run the code on kaggle:
     docker export $(docker create vizier-server:local) -o vizier-server.tar
        and do the same with each of them to remove the usr/bin/'[' and usr/bin/'[[' files
  - zip and upload the array_records datasets needed
+   NOTE: those upload errors for file names are possibly the outcome from kaggle 
+   Path semantics for rust LocalFileSystem struct,
+   so can be worked around by renaming the zipped archive with a suffix like .bin
 
 (2) install proot on kaggle
 

@@ -80,11 +80,14 @@ project directory hierarchy:
 ├── src/       
 │   ├──main/   
 │   │   ├── python/movie_lens_ranker  # Core JAX/AI Application Code 
-│   │   ├── rust/src                  # rust code used for creating input graph
+│   |   └── rust                      #rust src code for input graph
+│   |        └── Cargo.toml
+│   |        └── src
 │   ├──test/   
-│   │   ├── python/movie_lens_ranker  # Tests for Main Branch   
-│   │   ├── resoures/                 # data for tests   
-│   
+│   │   ├── python/movie_lens_ranker  # Tests for Main Branch
+│   |   └── resources                 #data for tests
+│   |   └── rust                      #rust test code
+│   |        └── test
 ├── deploy/                         # Yaml Files (No executable code)   
 │   ├── compose/                    # Local Docker Compose configurations   
 │   │   ├── docker-compose.yaml     # Combines app + dbs   
@@ -108,6 +111,8 @@ project directory hierarchy:
 ├── Dockerfile_*                    # Image Dockerfiles   
 ├── requirements*.txt               # Python application dependencies   
 └── README.md   
+└── pyproject.toml   
+└── pyproject.toml   
 
 
 --------------------------------------------------
