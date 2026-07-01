@@ -23,6 +23,7 @@ arrow-array = "59.0.0"
 futures = "0.3"
 tokio = { version = "1.52.3", features = ["full"] }
 url = "2.5.8"
+arrow-schema = "59.0.0"
 
 # Force Cargo to look outside its project root for the test file
 [[test]]
@@ -32,3 +33,7 @@ path="../../test/rust/test/integration_test.rs"
 [[test]]
 name = "user_history_tests"
 path="../../test/rust/test/user_history_test.rs"
+
+[[test]]
+name = "recommended_movies_tests"
+path="../../test/rust/test/recommended_movies_test.rs"

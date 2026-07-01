@@ -1141,6 +1141,7 @@ name = "prep_inputs_for_graphranker"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
+ "arrow-schema",
  "futures",
  "ndarray",
  "numpy",

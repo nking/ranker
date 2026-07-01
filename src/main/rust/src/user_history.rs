@@ -2,13 +2,14 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::runtime::Runtime;
-use object_store::{ObjectStore, ObjectStoreExt, local::LocalFileSystem, gcp::GoogleCloudStorageBuilder};
-use arrow_array::{Int32Array, Int64Array, RecordBatch};
+use object_store::ObjectStoreExt;
+use arrow_array::{Int32Array, Int64Array};
 use futures::stream::StreamExt;
 use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::arrow::async_reader::ParquetRecordBatchStreamBuilder;
 use std::cmp::min;
 use futures::future::join_all;
+use crate::util;
 
 pub struct UserMapEntry {
     pub movie_ids: Vec<i32>,
@@ -92,28 +93,6 @@ impl UserHistory {
 }
 
 
-/// Helper to split URI into ObjectStore backend and ObjectStore Path
-/// # Arguments
-/// * `uri_string` - The uri of the file to read
-fn parse_uri(uri_string: &str) -> (Arc<dyn ObjectStore>, object_store::path::Path) {
-    if uri_string.starts_with("gs://") {
-        let trimmed = uri_string.trim_start_matches("gs://");
-        let parts: Vec<&str> = trimmed.splitn(2, '/').collect();
-        let bucket_name = parts[0];
-        let file_path = if parts.len() > 1 { parts[1] } else { "" };
-        let gcs = GoogleCloudStorageBuilder::new()
-            .with_bucket_name(bucket_name)
-            .build()
-            .expect("Failed to build GCS backend");
-        (Arc::new(gcs), object_store::path::Path::from(file_path))
-    } else {
-        // Local file system
-        // Strip file:// if present, otherwise assume absolute/relative path
-        let path = uri_string.trim_start_matches("file://");
-        (Arc::new(LocalFileSystem::new()), object_store::path::Path::from(path))
-    }
-}
-
 pub fn _testable_build_map_async(ratings_uris: &[&String]) -> (FxHashMap<i32, UserMapEntry>, usize) {
     let rt = Runtime::new().unwrap();
 
@@ -143,7 +122,7 @@ async fn build_map_async(ratings_uris: &[&String]) -> (FxHashMap<i32, UserMapEnt
             // Each task gets its own independent HashMap (no locking needed!)
             let mut local_map: FxHashMap<i32, UserMapEntry> = FxHashMap::default();
 
-            let (storage, path) = parse_uri(&uri);
+            let (storage, path) = util::parse_uri(&uri);
             let meta = storage.head(&path).await.expect("Failed to get file metadata");
             let reader = ParquetObjectReader::new(storage, meta.location).with_file_size(meta.size);
 
