@@ -18,13 +18,13 @@ pub struct UserMapEntry {
 }
 
 pub struct UserHistory {
-    user_ids : Vec<i32>,
-    movie_ids : Vec<i32>,
-    ratings : Vec<i32>,
-    timestamps : Vec<i64>,
-    max_history : usize,
-    pad_value : i32,
-    ts_pad_value : i64
+    pub user_ids : Vec<i32>,
+    pub movie_ids : Vec<i32>,
+    pub ratings : Vec<i32>,
+    pub timestamps : Vec<i64>,
+    pub max_history : usize,
+    pub pad_value : i32,
+    pub ts_pad_value : i64
 }
 
 impl UserHistory {
@@ -32,12 +32,13 @@ impl UserHistory {
      * Retrieves up to `requested_max_hist` movies and ratings for given users where
      * the movie's timestamp is strictly less than the provided target timestamp.
      * Shape of returned data is conceptually (user_ids.len(), requested_max_hist),
-     * but flattened into a 1D Vec for performance.   so resulting vector lengths are user_ids.len() * requested_max_history
+     * but flattened into a 1D Vec for performance.
+     * resulting vector lengths are user_ids.len() * requested_max_history
      */
     pub fn get_history_before_timestamp(
         &self,
-        user_ids: Vec<i32>,
-        timestamps: Vec<i64>,
+        user_ids: &Vec<i32>,
+        timestamps: &Vec<i64>,
         requested_max_hist: usize
     ) -> (Vec<i32>, Vec<i32>) {
 
@@ -46,7 +47,7 @@ impl UserHistory {
         // Pre-allocate the output arrays filled entirely with the pad_value.
         // This instantly replaces the need for np.full(...)
         let mut ret_movie_ids = vec![self.pad_value; n_requests * requested_max_hist];
-        let mut ret_ratings = vec![self.pad_value; n_requests * requested_max_hist];
+        let mut ret_ratings : Vec<i32> = vec![self.pad_value; n_requests * requested_max_hist];
 
         // Iterate through each requested user and their target timestamp
         for (i, (&target_uid, &target_ts)) in user_ids.iter().zip(timestamps.iter()).enumerate() {
@@ -90,6 +91,7 @@ impl UserHistory {
 
         (ret_movie_ids, ret_ratings)
     }
+    
 }
 
 
@@ -101,14 +103,30 @@ pub fn _testable_build_map_async(ratings_uris: &[&String]) -> (FxHashMap<i32, Us
     (map, longest_history)
 }
 
+/// given the uris for the ratings files, creates a hashmap with keys of user ids
+/// and values of UserMapEntry where the vectors in UserMapEntry are sorted
+/// by timestamps.
+///
+/// # Arguments
+///
+/// * `ratings_uris`: uris to the parquet files containing the user_id, movie_id, rating, timestamp entries
+///
+/// returns: (hashmap, max_history_length) as (HashMap<i32, UserMapEntry, FxBuildHasher, Global>, usize)  where
+/// the  vectors in UserMapEntry are sorted by timestamps
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
 async fn build_map_async(ratings_uris: &[&String]) -> (FxHashMap<i32, UserMapEntry>, usize) {
 
-    // use semaphore to provent memore swap thrashing from too may threads
+    // use semaphore to prevent memory swap thrashing from too many threads
     let semaphore = Arc::new(Semaphore::new(4));
 
     let mut tasks = Vec::new();
 
-    // 2. The Map Phase: Spawn a concurrent task for each file
+    // The Map Phase: Spawn a concurrent task for each file
     for file_uri in ratings_uris {
         // We must clone the string so the background task owns the data
         let uri = file_uri.to_string();
@@ -162,17 +180,17 @@ async fn build_map_async(ratings_uris: &[&String]) -> (FxHashMap<i32, UserMapEnt
         tasks.push(task);
     }
 
-    // 3. Wait for all files to be downloaded and parsed CONCURRENTLY
+    //  Wait for all files to be downloaded and parsed CONCURRENTLY
     let results = join_all(tasks).await;
 
-    // 4. The Reduce Phase: Merge all local maps into the master map
-    let mut master_map: FxHashMap<i32, UserMapEntry> = FxHashMap::default();
+    // The Reduce Phase: Merge all local maps into the user_history map
+    let mut user_history_map: FxHashMap<i32, UserMapEntry> = FxHashMap::default();
 
     for res in results {
         let local_map = res.expect("A background task panicked");
 
         for (uid, mut local_entry) in local_map {
-            let master_entry = master_map.entry(uid).or_insert_with(|| UserMapEntry {
+            let master_entry = user_history_map.entry(uid).or_insert_with(|| UserMapEntry {
                 movie_ids: Vec::new(),
                 ratings: Vec::new(),
                 timestamps: Vec::new(),
@@ -185,10 +203,10 @@ async fn build_map_async(ratings_uris: &[&String]) -> (FxHashMap<i32, UserMapEnt
         }
     }
 
-    // 5. Post-Processing: Sort parallel arrays by timestamp
+    // Sort parallel arrays by timestamp
     let mut max_len: usize = 0;
 
-    for entry in master_map.values_mut() {
+    for entry in user_history_map.values_mut() {
         let mut indices: Vec<usize> = (0..entry.timestamps.len()).collect();
         indices.sort_unstable_by_key(|&i| entry.timestamps[i]);
 
@@ -202,9 +220,36 @@ async fn build_map_async(ratings_uris: &[&String]) -> (FxHashMap<i32, UserMapEnt
         }
     }
 
-    (master_map, max_len)
+    (user_history_map, max_len)
 }
 
+/// given the hashmap of user histories and a max history to extract,
+/// creates arrays of length max_history ordered by timestamps
+///
+/// # Arguments
+///
+/// * `lookup`: the hashmap of user histories
+/// * `max_history`:the length of most recent histories to extract per user.
+/// * `pad_value`:  value for an empty movie_id element which happens when the user's true history
+///                 is less than max_history
+/// * `ts_pad_value`: value for an empty timestamp element.  ideally, this should be far into
+///                 the future
+///
+/// returns:     (user_ids, movie_ids, ratings, timestamps)
+///               as (Vec<i32, Global>, Vec<i32, Global>, Vec<i32, Global>, Vec<i64, Global>)
+///               where user_ids is length num_users,
+///               movie_ids, ratings, and timestamps are all length  n_users * max_history,
+///
+///               each user's range of movie_ids, ratings, and timestamps are ordered by
+///               timestamp are the max_history most recent of the user's history
+///               and when user's history is shorted than max_history the Vectors are
+///               padded with given pad_value or ts_pad_value.
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
 fn prepare_user_data(
     lookup: &FxHashMap<i32, UserMapEntry>,
     max_history: usize,

@@ -318,7 +318,7 @@ np.ndarray, np.ndarray, np.ndarray, int, int]:
     :param labels: length is num_candidates
          Note that candidate_ids and labels have been shuffled so that the target positive movie_id is not always
          at index 0.
-        labels are all 0.0 with exception of being 1.0 at the index where candidate_ids has the target positive movie_id.
+        labels are all 0 with exception of being 1 at the index where candidate_ids has the target positive movie_id.
     :return:
     """
     
@@ -329,7 +329,7 @@ np.ndarray, np.ndarray, np.ndarray, int, int]:
     # Pre-allocate output arrays to avoid concatenation overhead where possible
     senders = np.empty(total_edges, dtype=np.int32)
     receivers = np.empty(total_edges, dtype=np.int32)
-    edge_features = np.empty(total_edges, dtype=np.float64)
+    edge_features = np.empty(total_edges, dtype=np.int32)
     
     # History -> User (Inward)
     for i in range(n_real_history):
@@ -341,9 +341,9 @@ np.ndarray, np.ndarray, np.ndarray, int, int]:
     for i in range(n_candidates):
         idx = n_real_history + i
         receivers[idx] = 1 + n_real_history + i
-    edge_features[n_real_history:n_real_history + n_candidates] = 0.0
+    edge_features[n_real_history:n_real_history + n_candidates] = 0
     senders[n_real_history:n_real_history + n_candidates] = 0
-    
+
     # Nodes (User + History + Candidates)
     node_ids = np.empty(total_nodes, dtype=np.int64)
     node_ids[0] = user_id
@@ -351,9 +351,9 @@ np.ndarray, np.ndarray, np.ndarray, int, int]:
     node_ids[1 + n_real_history:] = candidate_ids
     
     # Labels
-    node_labels = np.empty(total_nodes, dtype=np.float64)
-    node_labels[0] = 0.0
-    node_labels[1:1 + n_real_history] = 0.0
+    node_labels = np.empty(total_nodes, dtype=np.int32)
+    node_labels[0] = 0
+    node_labels[1:1 + n_real_history] = 0
     node_labels[1 + n_real_history:] = labels
     
     # Types & Masks.  0=target positive, 1=real_history, 2=candidate or negative

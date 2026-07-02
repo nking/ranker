@@ -3,7 +3,7 @@ use numpy::{PyArrayDyn};
 
 pub mod user_history;
 pub mod recommended_movies;
-mod transforms;
+pub mod graph_builder;
 mod util;
 /*
 #[pyfunction]

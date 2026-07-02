@@ -37,3 +37,8 @@ path="../../test/rust/test/user_history_test.rs"
 [[test]]
 name = "recommended_movies_tests"
 path="../../test/rust/test/recommended_movies_test.rs"
+
+
+[[test]]
+name = "graph_builder_tests"
+path="../../test/rust/test/graph_builder_test.rs"

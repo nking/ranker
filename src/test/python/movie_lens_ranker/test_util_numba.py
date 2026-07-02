@@ -139,13 +139,17 @@ class NumbaOpsTest(TestCase):
         pool_row = np.full((num_negatives), -1, dtype=source_row.dtype)
         
         buff1 = np.empty(len(source_row), dtype=source_row.dtype)
-        
+
         write_to_idx = 0
         
-        write_to_idx = _extract_shuffle_and_append(source_row=source_row,
-            max_take=max_take, pool_row=pool_row, write_idx=write_to_idx,
-            num_negatives=num_negatives, pad_value=pad_value, buffer_row=buff1,
-            seed = None)
+        write_to_idx = _extract_shuffle_and_append(
+            source_row=source_row,
+            max_take=max_take,
+            pool_row=pool_row,
+            write_idx=write_to_idx,
+            num_negatives=num_negatives,
+            pad_value=pad_value,
+            buffer_row=buff1,)
         
         self.assertEqual(write_to_idx, max_take)
         cond0 = set(source_row.tolist())
@@ -157,8 +161,7 @@ class NumbaOpsTest(TestCase):
         max_take2 = num_negatives
         write_to_idx2 = _extract_shuffle_and_append(source_row=source_row,
             max_take=max_take2, pool_row=pool_row2, write_idx=write_to_idx,
-            num_negatives=num_negatives, pad_value=pad_value, buffer_row=buff1,
-            seed=None)
+            num_negatives=num_negatives, pad_value=pad_value, buffer_row=buff1)
         #[-1, -1, -1, _, _, _, _]
         self.assertEqual(write_to_idx2, max_take2)
         np.testing.assert_array_equal(pool_row2[0:write_to_idx], -1)

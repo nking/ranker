@@ -211,6 +211,17 @@ class TestRanker(unittest.TestCase):
                 raise Exception(f"expected docker service {container} needs to be running for these tests."
                                 f" from command line, use: docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d")
 
+    def delete_vizier_project(self, endpoint:str, project_id:str, study_name:str):
+        try:
+            vz_clients.environment_variables.server_endpoint = endpoint
+            resource_name = f"owners/{project_id}/studies/{study_name}"
+            study = vz_clients.Study.from_owner_and_id(
+                owner=project_id,
+                study_id=study_name)
+            study.delete()
+        except Exception as ex:
+            pass
+
     def setUp(self):
 
         self.check_docker_services()
@@ -342,18 +353,6 @@ class TestRanker(unittest.TestCase):
         
         set_flags_from_dict(config)
         
-        # reset oss vizier db
-        try:
-            vz_clients.environment_variables.server_endpoint = config[
-                'vizier_endpoint']
-            resource_name = f"owners/{config['project_id']}/studies/{config['study_name']}"
-            study = vz_clients.Study.from_owner_and_id(
-                owner=config['project_id'],
-                study_id=config['study_name'])
-            study.delete()
-        except Exception as ex:
-            pass
-        
         # reset mlflow db
         try:
             reset_mlflow_db()
@@ -391,7 +390,7 @@ class TestRanker(unittest.TestCase):
         app_runner(None)
         pass
     
-    def test_run_tune_train_test(self):
+    def test_run_tune_train_test_best(self):
         """
         this uses the docker container fake-gcs-server
         and so all uris are gs:// and are transformed by the local google software to
@@ -404,19 +403,26 @@ class TestRanker(unittest.TestCase):
         """
         
         config = self.config.copy()
-        
+
+        config['study_name'] = "GraphRanker_tuning_unittest10"
+        config['project_id'] =  'tune-unittest-010'
+        config['mlflow_experiment_name'] = config['study_name']
+        config['connections_check'] = 0
+
+        self.delete_vizier_project(config['vizier_endpoint'], config['project_id'], config['study_name'])
+
         self._run_and_assert_hpo(config)
         
         config['phase'] = 'train-best'
         config['train_id'] = 1234567
         config['validate_checkpoint_restores'] = True
-        
+
         restore_dict, train_run = self._run_train_and_restore_chkpoint_and_assert(config)
         
         config['phase'] = 'test-best'
         test_id = 234567
         config['test_id'] = test_id
-        self._run_test_and_assert(config)
+        self._run_tst_and_assert(config)
         
         ##====== load train_ for use in stats =======
         TRAIN_BATCH_SIZE = restore_dict['train_dataloader']._sampler.batch_size
@@ -520,7 +526,10 @@ class TestRanker(unittest.TestCase):
         config['study_name'] = "GraphRanker_tuning_unittest4"
         config['project_id'] =  'tune-unittest-04'
         config['mlflow_experiment_name'] = config['study_name']
-        
+
+        self.delete_vizier_project(config['vizier_endpoint'], config['project_id'], config['study_name'])
+
+
         hparams = {'top_k': 20, 'num_layers': 2, 'num_heads': 4, 'hidden_dim': 128,
             'max_history': 70, 'num_candidates': 70, 'learning_rate': 0.001,
             'weight_decay': 0.001, 'out_dim': 32, 'edge_embed_dim': 16, 'dropout_rate': 0.2}
@@ -529,19 +538,20 @@ class TestRanker(unittest.TestCase):
         config['phase'] = 'train-given'
         config['train_id'] = 2345
         config['validate_checkpoint_restores'] = True
-        
+        config['connections_check'] = 0
+
         restore_dict, train_run = self._run_train_and_restore_chkpoint_and_assert(config)
-        
+
         sfx = f"{config['study_name']}/train_{config['train_id']}"
         #or could use restore_dict['config']['best_checkpoint_uri']
         config['test_checkpoint_uri'] = f"{config['best_checkpoint_uri']}/{sfx}"
-        
+
         test_id = 234567
         config['test_id'] = test_id
         
         config['phase'] = 'test-given'
         
-        self._run_test_and_assert(config)
+        self._run_tst_and_assert(config)
         
         self._assert_export_train_results(config)
         self._assert_export_test_results(config)
@@ -676,16 +686,19 @@ class TestRanker(unittest.TestCase):
     def _run_train_and_restore_chkpoint_and_assert(self, config):
         #### ====================================================== ####
         print(f'BEGIN TRAINING')
-        
+
         set_flags_from_dict(config)
        
         # run train using best found in HPO
         app_runner(None)
         
         #results are asserted in _assert_export_methods
+
+        experiment_name = config.get('mlflow_experiment_name', config['study_name'])
         
         mlflow.set_tracking_uri(config['mlflow_tracking_uri'])
-        experiment = mlflow.get_experiment_by_name(name=config['mlflow_experiment_name'])
+        experiment = mlflow.get_experiment_by_name(name=experiment_name)
+        self.assertIsNotNone(experiment)
         runs = mlflow.search_runs(
             experiment_ids=[experiment.experiment_id],
             filter_string="attributes.run_name LIKE 'train_%'",
@@ -721,7 +734,7 @@ class TestRanker(unittest.TestCase):
         
         return restore_dict, runs[0]
     
-    def _run_test_and_assert(self, config):
+    def _run_tst_and_assert(self, config):
         #=== operate test from entrypoint
         print(f'BEGIN TESTING')
         
@@ -734,7 +747,7 @@ class TestRanker(unittest.TestCase):
         app_runner(None)
         
         #results are asserted in _assert_export_methods
-    
+
     def test_feed_fake_data(self):
         
         config = self.config

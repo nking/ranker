@@ -28,9 +28,9 @@ class UserHistory (object):
         
         #NOTE: results are sorted by timestamp
         user_ids = []
-        movie_ids = np.full((n_users, self.max_history), self.pad_value)
-        ratings = np.full((n_users, self.max_history), self.pad_value)
-        timestamps = np.full((n_users, self.max_history), self.ts_pad_value)
+        movie_ids = np.full((n_users, self.max_history), self.pad_value, dtype=np.int32)
+        ratings = np.full((n_users, self.max_history), self.pad_value, dtype=np.int32)
+        timestamps = np.full((n_users, self.max_history), self.ts_pad_value, dtype=np.int64)
         
         for i, user_id in enumerate(lookup.keys()):
             user_ids.append(user_id)

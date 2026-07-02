@@ -36,11 +36,10 @@ mod user_history_tests {
 
         let ts : Vec<i64> = vec![956705600, 956705600];
 
-        let (movie_hist, ratings_hist) = user_history.get_history_before_timestamp(user_ids.clone(), ts.clone(), max_history);
+        let (movie_hist, ratings_hist) = user_history.get_history_before_timestamp(
+            &user_ids, &ts, max_history);
 
         assert_eq!(movie_hist.len(), user_ids.len() * max_history);
-
-
 
         let (lookup, max_history_found) = _testable_build_map_async(&ratings_uris);
 

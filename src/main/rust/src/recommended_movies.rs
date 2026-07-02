@@ -202,7 +202,10 @@ fn read_num_movies(movies_uri: &String) -> usize {
 
 /// build the RecommendedMovies from the given list of uris for the movie recommendation parquet files
 /// # Arguments
-/// * `ratings_uris` -  vector of uris for ratings parquet files for building UserHistory hashmap
+/// * `movie_rec_file_uri` -  uri to parquet file holding user_id and movie_ids recommended to them.
+///    the movies are in descending order of highest recommendation scores.
+/// * 'movire_rec_ts_file_uri' - uri to parquet file holding user_id and timestamps of the movie_ids from
+///     movie_rec_file
 pub fn build_recommended_movies(num_users:usize, movie_rec_file_uri:&String, movie_rec_ts_file_uri:&String) -> RecommendedMovies {
 
     let pad_value : i32 = -1;

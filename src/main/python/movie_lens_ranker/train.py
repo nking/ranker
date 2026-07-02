@@ -226,14 +226,8 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) ->
     metrics_dict['loss'] = loss
     return metrics_dict
 
-@nnx.jit
-def vectorized_epoch_eval(model, mega_batch, top_k):
-    # mega_batch here is a chunk of N batches stacked
-    v_eval = nnx.vmap(eval_step, in_axes=(None, 0, None))
-    return v_eval(model, mega_batch, top_k)
-
 def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterator,
-        top_k: int, jax_graph_comp_dict:Dict[str, int]) -> Tuple[jax.tree.map, int]:
+        top_k: int, jax_graph_comp_dict:Dict[str, int]) -> Tuple[Dict, int]:
     """
     calc metrics for val dataset. Note, if this method consumes too much memory, use the
     _epoch_validation_chunked instead.   Note that the method uses SPMD paradigm.
@@ -783,7 +777,7 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader,
         'num_users': num_users, 'num_movies': num_movies}
 
-def train_fn(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tuple[float, str]:
+def run_train_phase(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tuple[float, str]:
     """
     train the model given data and params specified in config dict and return best validation set ndcg@20 metric and
     return the mlflow_run_id
@@ -1035,7 +1029,7 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
         'config': config
     }
 
-def test_fn(config: dict):
+def run_test_phase(config: dict):
     
     if "phase" not in config:
         raise LookupError("config requires a 'phase' parameter")
@@ -1251,7 +1245,6 @@ def export_model(trained_model: GraphRanker, batch_size:int, max_history:int,
     :param num_candidates: num_candidates used for model training
     :return:
     """
-    from orbax import export
 
     jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
         max_history, num_candidates, n_local_devices=jax.local_device_count())
@@ -1261,171 +1254,6 @@ def export_model(trained_model: GraphRanker, batch_size:int, max_history:int,
     MAX_GRAPHS = 1  # Usually 1 if doing single-request real-time ranking
 
     raise Exception("not yet implemented")
-    
-    """
-    serving_config = export.ServingConfig(
-        signature_key="serving_default",
-        input_signature=[
-            {
-                # Nodes attributes
-                "node_candidate_mask": tf.TensorSpec(shape=(MAX_NODES,),
-                    dtype=tf.bool, name="node_candidate_mask"),
-                "node_ids": tf.TensorSpec(shape=(MAX_NODES,), dtype=tf.int32,
-                    name="node_ids"),
-                "node_label": tf.TensorSpec(shape=(MAX_NODES,),
-                    dtype=tf.float32, name="node_label"),
-                "node_type": tf.TensorSpec(shape=(MAX_NODES,), dtype=tf.int32,
-                    name="node_type"),
-                
-                # Edges attributes
-                "edge_rating": tf.TensorSpec(shape=(MAX_EDGES,),
-                    dtype=tf.int32, name="edge_rating"),
-                
-                # Core Graph Topology
-                "receivers": tf.TensorSpec(shape=(MAX_EDGES,), dtype=tf.int32,
-                    name="receivers"),
-                "senders": tf.TensorSpec(shape=(MAX_EDGES,), dtype=tf.int32,
-                    name="senders"),
-                
-                # Metadata
-                "n_node": tf.TensorSpec(shape=(MAX_GRAPHS,), dtype=tf.int32,
-                    name="n_node"),
-                "n_edge": tf.TensorSpec(shape=(MAX_GRAPHS,), dtype=tf.int32,
-                    name="n_edge"),
-            }
-        ])
-    """
-    '''
-    train_dataloader operations stack receives as inputs:
-        batch is a tuple of lists of the 4 datums: ([user_ids],[movie_ids],[ratings],[timestamps])
-    then output of last operation is:
-        batch is a padded graph tuple:
-            GraphsTuple(
-              nodes={'candidate_mask': array([False, False, False, ..., False, False, False], shape=(67584,)),
-                     'ids': array([6035, 7217, 8600, ...,    0,    0,    0], shape=(67584,), dtype=int32),
-                     'label': array([0., 0., 0., ..., 0., 0., 0.], shape=(67584,), dtype=float32),
-                     'type': array([0, 1, 1, ..., 0, 0, 0], shape=(67584,), dtype=int32)},
-              edges={'rating': array([5, 5, 5, ..., 0, 0, 0], shape=(67520,), dtype=int32)},
-              receivers=array([    0,     0,     0, ..., 25233, 25233, 25233], shape=(67520,)),
-              senders=array([    1,     2,     3, ..., 25233, 25233, 25233], shape=(67520,)),
-              globals=None,
-              n_node=array([  333,   342,   337,   455,   273,   468,   338,   467,   468,
-                     464,   484,   344,   484,   458,   458,   476,   273,   332,
-                     480,   476,   339,   458,   484,   474,   457,   335,   339,
-                     284,   342,   472,   331,   284,   468,   347,   474,   341,
-                     280,   458,   464,   468,   273,   476,   273,   273,   484,
-                     336,   280,   464,   280,   480,   458,   345,   280,   333,
-                     480,   476,   484,   472,   273,   348,   345,   480,   273,
-                     458, 42351], dtype=int32),
-               n_edge=array([  332,   341,   336,   454,   272,   467,   337,   466,   467,
-                     463,   483,   343,   483,   457,   457,   475,   272,   331,
-                     479,   475,   338,   457,   483,   473,   456,   334,   338,
-                     283,   341,   471,   330,   283,   467,   346,   473,   340,
-                     279,   457,   463,   467,   272,   475,   272,   272,   483,
-                     335,   279,   463,   279,   479,   457,   344,   279,   332,
-                     479,   475,   483,   471,   272,   347,   344,   479,   272,
-                     457, 42351], dtype=int32))
-            where len(n_nodes) = len(n_edges)=65
-            
-            GraphsTuple(
-              nodes={'candidate_mask': array( shape=(max_nodes,), dtype=bool),
-                     'ids': array( shape=(max_nodes,), dtype=int32),
-                     'label': array( shape=(max_nodes,), dtype=float32),
-                     'type': array( shape=(max_nodes,), dtype=int32)},
-              edges={'rating': array( shape=(max_edges,), dtype=int32)},
-              receivers=array( shape=(max_edges,), dtype=int32),
-              senders=array( shape=(max_edges,), dtype=int32),
-              globals=None,
-              n_node=array( shape=(max_graphs,), dtype=int32),
-              n_edge=array( shape=(max_graphs,), dtype=int32))
-               
-    TODO: still need to write a NumPy or C++ method to replace the grain DataLoader transformations
-    for production environment.  The data it needs should be placed in a graph database
-    and the method reads from that to construct a padded graph input for the tf SavedModel.
-    '''
-    '''
-    #import tensorflow as tf
-    from orbax import export
-    
-    graphdef, model_state = nnx.split(trained_model)
-    
-    #'max_nodes', 'max_edges', 'max_graphs'
-    # 67584,       67520,       65
-    #batch_Size=64, max_history=784, num_candidates=270
-    jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
-        max_history, num_candidates)
-    
-    MAX_NODES = jax_graph_comp_dict['max_nodes']
-    MAX_EDGES = jax_graph_comp_dict['max_edges']
-    MAX_GRAPHS = 1  # Usually 1 if doing single-request real-time ranking
-    
-    serving_config = export.ServingConfig(
-        signature_key="serving_default",
-        input_signature=[
-            {
-                # Nodes attributes
-                "node_candidate_mask": tf.TensorSpec(shape=(MAX_NODES,),
-                    dtype=tf.bool, name="node_candidate_mask"),
-                "node_ids": tf.TensorSpec(shape=(MAX_NODES,), dtype=tf.int32,
-                    name="node_ids"),
-                "node_label": tf.TensorSpec(shape=(MAX_NODES,),
-                    dtype=tf.float32, name="node_label"),
-                "node_type": tf.TensorSpec(shape=(MAX_NODES,), dtype=tf.int32,
-                    name="node_type"),
-                
-                # Edges attributes
-                "edge_rating": tf.TensorSpec(shape=(MAX_EDGES,),
-                    dtype=tf.int32, name="edge_rating"),
-                
-                # Core Graph Topology
-                "receivers": tf.TensorSpec(shape=(MAX_EDGES,), dtype=tf.int32,
-                    name="receivers"),
-                "senders": tf.TensorSpec(shape=(MAX_EDGES,), dtype=tf.int32,
-                    name="senders"),
-                
-                # Metadata
-                "n_node": tf.TensorSpec(shape=(MAX_GRAPHS,), dtype=tf.int32,
-                    name="n_node"),
-                "n_edge": tf.TensorSpec(shape=(MAX_GRAPHS,), dtype=tf.int32,
-                    name="n_edge"),
-            }
-        ]
-    )
-    
-    # The first argument MUST receive the model state (weights)
-    def pure_apply_fn(state, inputs):
-        # This recombines your architecture blueprint with the weights dynamically in RAM
-        functional_model = nnx.merge(graphdef, state)
-        
-        # Reconstruct your exact library GraphsTuple inside the pure function boundaries
-        graph_batch = GraphsTuple(
-            nodes={
-                'candidate_mask': inputs["node_candidate_mask"],
-                'ids': inputs["node_ids"],
-                'label': inputs["node_label"],
-                'type': inputs["node_type"]
-            },
-            edges={'rating': inputs["edge_rating"]},
-            receivers=inputs["receivers"],
-            senders=inputs["senders"],
-            globals=None,
-            n_node=inputs["n_node"],
-            n_edge=inputs["n_edge"]
-        )
-        
-        # Call your GraphRanker's __call__ method natively
-        return functional_model(graph_batch)
-    
-    # Wrap your NNX State and the pure function into a JaxModule
-    jax_module = export.JaxModule(
-        params=model_state,
-        apply_fn=pure_apply_fn,
-        trainable=False
-    )
-    
-    export_manager = export.ExportManager(jax_module, [serving_config])
-    export_manager.save(output_uri)
-    '''
     
 def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, global_step, top_k:int=20):
     
@@ -1558,7 +1386,7 @@ def create_fake_jagged_batch(batch_size: int,
     history_movie_ids = np.full((batch_size, max_history), -1,dtype=np.int32)
     history_ratings = np.full((batch_size, max_history), -1, dtype=np.int32)
     candidate_ids = np.ndarray((batch_size, num_candidates), dtype=np.int32)
-    labels = np.full((batch_size,  num_candidates), 0.0, dtype=np.float32)
+    labels = np.full((batch_size,  num_candidates), 0, dtype=np.int32)
 
     for i in range(batch_size):
         user_id[i] = user_id_range[0] + i

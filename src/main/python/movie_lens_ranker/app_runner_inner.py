@@ -25,7 +25,7 @@ from vizier.service import pyvizier as vz
 from vizier.service import clients as vz_clients
 from jax.experimental import mesh_utils
 
-from movie_lens_ranker.train import train_fn, test_fn
+from movie_lens_ranker.train import run_train_phase, run_test_phase
 from movie_lens_ranker.util import get_recognized_keys, \
     app_runner_is_missing_minimum_required_keys, \
     destringify_mlflow_params, get_cpu_stats, is_running_on_gpu, \
@@ -309,7 +309,7 @@ def run_tune(config):
         # repeated, mark the trial using trial.infeasible() and continue w/o running train_fn
       
         # if worker_Rank !=0, then mlflow_run_id is ""
-        best_val_ndcg_k, mlflow_run_id = train_fn(config2, trial=trial_suggestion, save_checkpoints=False)
+        best_val_ndcg_k, mlflow_run_id = run_train_phase(config2, trial=trial_suggestion, save_checkpoints=False)
         
         if worker_rank == 0:
             trial_suggestion.update_metadata(vz.Metadata({'mlflow_run_id': mlflow_run_id}))
@@ -380,7 +380,7 @@ def run_train(config):
         best_params = sync_hyperparams(best_params)
         config.update(**best_params)
         
-    best_val_ndcg_k, mlflow_run_id = train_fn(config, trial=None, save_checkpoints=True)
+    best_val_ndcg_k, mlflow_run_id = run_train_phase(config, trial=None, save_checkpoints=True)
 
 def get_best_parameters_for_training(config:Dict[str, Any]) -> Dict[str, Union[float, int]]:
     """
@@ -479,7 +479,7 @@ def run_test(config):
         config['mlflow_experiment_id'] = experiment.experiment_id
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
     
-    test_metrics = test_fn(config=config)
+    test_metrics = run_test_phase(config=config)
         
     logging.info(f'TEST METRICS: {test_metrics}')
    

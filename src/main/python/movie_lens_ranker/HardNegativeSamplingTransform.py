@@ -88,7 +88,7 @@ class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
             "labels"  has shape (batch_size, num_candidates)
         Note that candidate_ids is guaranteed to not have padding values, they're all real movie_ids'.
         The order of candidate_ds and labels has been shuffled so that the target positive movie_id is not always at index 0.
-        Labels are all 0.0 except being 1.0 where the target positive movie_id is.
+        Labels are all 0 except being 1 where the target positive movie_id is.
         """
         
         # we want to form the list of positive and negatives for ranking and their labels as 1 and 0 respectively.
@@ -159,8 +159,8 @@ class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
             
         # TODO: consider removing labels.  they're useful for debugging, but not used anywhere
         # LABELS
-        labels = np.zeros((n_users, self.num_candidates), dtype=np.float32)
-        labels[:, 0] = 1.0  # Positive is at index 0
+        labels = np.zeros((n_users, self.num_candidates), dtype=np.int32)
+        labels[:, 0] = 1  # Positive is at index 0
        
         seed3 = int(rng.integers(0, 2 ** 31 - 1))
         #shuffle so the model doesn't learn that first label is always right

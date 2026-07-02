@@ -50,7 +50,7 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
             
         user_ids = np.array(user_ids, dtype=np.int32)
         movie_ids = np.array(movie_ids, dtype=np.int32)
-        ratings = np.array(ratings, dtype=np.float32)
+        ratings = np.array(ratings, dtype=np.int32)
         timestamps = np.array(timestamps, dtype=np.int64)
         
         #history_n=movies is shape(len(user_ids, self.max_history) with any empty values being

@@ -31,7 +31,7 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
             "candidate_ids"  has shape (batch_size, num_candidates)
             "labels"  has shape (batch_size, num_candidates)
                 Note that candidate_ids is guaranteed to not have padding values, they're all real movie_ids'.
-                labels are all 0.0 with exception of being 1.0 at the index where candidate_ids has the target positive movie_id.
+                labels are all 0 with exception of being 1 at the index where candidate_ids has the target positive movie_id.
         :return: a list of a sparsely populated jraph.GraphsTuple representation of the local subgraph for
         the train user_id.  Note that this is not the padded version to give to the model being trained.
         The node array lengths are = 1 + n_real_history + n_candidates.

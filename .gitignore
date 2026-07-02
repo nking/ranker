@@ -5,6 +5,11 @@ __pycache__/
 *logs*txt
 hpo_results.txt
 
+TMP?/
+mlruns/
+*.bak
+*.sw?
+
 tmp_mounts/
 .env
 .env_db

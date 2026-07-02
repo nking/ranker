@@ -77,6 +77,9 @@ class TestMisc(unittest.TestCase):
             max_graphs=jax_graph_comp_dict['max_graphs'],
         )
 
+        print(f"padded_super_graph_1=\n{padded_super_graph_1}")
+
+
         ## compare the graphs
         self._dictionaries_are_same(padded_super_graph_1.edges, padded_super_graph_0.edges)
         np.testing.assert_array_equal(padded_super_graph_1.n_edge, padded_super_graph_0.n_edge)
