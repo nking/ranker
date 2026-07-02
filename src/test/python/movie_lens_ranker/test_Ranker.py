@@ -12,6 +12,12 @@ import multiprocessing as mp
 import os
 import logging
 
+import msgpack
+
+from movie_lens_ranker.CandidateIdTransform import CandidateIdTransform
+from movie_lens_ranker.RatingsHistoryTransform import RatingsHistoryLookupTransform
+from movie_lens_ranker.SuperGraphPaddingTransform import SuperGraphPaddingTransform
+from movie_lens_ranker.UserHistory import UserHistory
 from movie_lens_ranker.util_np import optimized_batch_and_pad
 
 def init_multiprocessing():
@@ -854,6 +860,60 @@ class TestRanker(unittest.TestCase):
         self.assertEqual(len(t0), len(t1))
         for i, v in enumerate(t0):
             self.assertEqual(v, t1[i])
+
+    def test_inference_inputs(self):
+        """
+        making a graph for inference to compare to ruse code graph
+        """
+        max_history = 4
+        batch_size = 2
+        num_candidates = 5
+
+        ratings_uri_dict = get_train_val_test_liked_uris(DataSize.TINY, use_gcs_uri=False)
+
+        #there are only 2 users in tiny dataset, 6040 and 6039.  6040 is the only within batch_size records
+        #6040::6888::4::956703932
+        #6040::6630::5::956703954
+        #6040::8356::4::956703954
+        #6040::7933::4::956703977   <== 3
+        #6040::7991::5::956703977   <== 4
+        #6040::6610::4::956704056
+        #6040::6252::5::956704056
+        #6040::9083::5::956704056
+        #6040::9477::4::956704056
+        #6040::6941::5::956704191
+        #6040::6948::5::956704191
+        #6040::8475::5::956704191
+
+        reader = array_record_module.ArrayRecordReader(ratings_uri_dict['train_liked'])
+        batch_bytes = reader.read([x for x in range(3, 3+batch_size)])  # a single list of encodings, each being a list of 4 integers
+        batch = np.array([msgpack.unpackb(b, use_list=False) for b in batch_bytes])  # list of tuples of 4 integers
+        reader.close()
+
+        #lengths are num_candidates - 1 each.  leaving room for the positive, target in the batch
+        candidate_ids = np.array([
+            [6610, 6252, 9083, 6564, 6584],
+            [9477, 6941, 6948, 8475, 6356]
+        ])
+
+        user_history = UserHistory(ratings_uri_list=[ratings_uri_dict['train_liked']], max_history=2048)
+
+        tr1 = RatingsHistoryLookupTransform(
+            history_lookup=user_history,
+            max_history=max_history)
+        tr2 = CandidateIdTransform(num_candidates=num_candidates)
+        tr3 = SparseLocalSubgraphTransform()
+        tr4 = SuperGraphPaddingTransform(batch_size=batch_size,
+             max_history=max_history, num_candidates=num_candidates,
+            n_local_devices=len(jax.local_devices()))
+
+        r1 = tr1.map(batch)
+        r2 = tr2.map(r1, candidate_ids)
+        r3 = tr3.map(r2)
+        r4 = tr4.map(r3)
+
+        print(f'demo batch:\n {r4}')
+
 
 if __name__ == '__main__':
     unittest.main()

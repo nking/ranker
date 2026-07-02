@@ -172,4 +172,5 @@ class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
             "candidate_ids": candidate_ids,
             "labels": labels
         }
+
     
