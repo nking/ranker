@@ -20,6 +20,8 @@ mod graph_builder_tests {
     #[test]
     pub fn test_create_fake_batch() {
 
+        // and is a test of build_padded_super_graph
+
         let batch_size = 3;
         let max_history = 4;
         let num_candidates = 5;
@@ -76,11 +78,11 @@ mod graph_builder_tests {
         assert_eq!(padded_super_graph.node_labels, expected_node_labels);
         assert_eq!(padded_super_graph.node_types, expected_node_types);
         assert_eq!(padded_super_graph.candidate_mask, expected_candidate_mask);
-        
+
         /*
         EXPECTED from python:
         padded_super_graph_1=
-GraphsTuple(nodes={'candidate_mask': array([False, False,  True,  True,  True,  True,  True, False, False,
+G       raphsTuple(nodes={'candidate_mask': array([False, False,  True,  True,  True,  True,  True, False, False,
        False,  True,  True,  True,  True,  True, False, False, False,
        False,  True,  True,  True,  True,  True, False, False, False,
        False, False, False, False, False, False, False, False, False,

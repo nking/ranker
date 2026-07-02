@@ -35,8 +35,8 @@ impl RecommendedMovies {
      */
     pub fn get_unseen_movies(
         &self,
-        user_ids: Vec<i32>,
-        timestamps: Vec<i64>,
+        user_ids: &[i32],
+        timestamps: &[i64],
         top_k: usize
     ) -> Vec<i32> {
         // Derive num_movies dynamically from the flat array length

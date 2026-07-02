@@ -137,7 +137,7 @@ pub struct JraphGraph {
 }
 
 pub fn build_padded_super_graph(
-    user_ids: &Vec<i32>,
+    user_ids: &[i32],
     history_movie_ids: &[i32],
     history_ratings: &[i32],
     history_lengths: &[usize],
@@ -317,8 +317,8 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
 
         padded_super_graph
     }
-    pub fn build_enriched_padded_supergraph(user_ids: &Vec<i32>, timestamps: &Vec<i64>,
-        candidate_ids: &Vec<i32>, user_history: &crate::user_history::UserHistory, max_history: usize,
+    pub fn build_enriched_padded_supergraph(user_ids: &[i32], timestamps: &[i64],
+        candidate_ids: &[i32], user_history: &crate::user_history::UserHistory, max_history: usize,
         n_local_devices: usize) -> JraphGraph {
 
         let num_users = user_ids.len();

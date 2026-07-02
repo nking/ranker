@@ -37,8 +37,8 @@ impl UserHistory {
      */
     pub fn get_history_before_timestamp(
         &self,
-        user_ids: &Vec<i32>,
-        timestamps: &Vec<i64>,
+        user_ids: &[i32],
+        timestamps: &[i64],
         requested_max_hist: usize
     ) -> (Vec<i32>, Vec<i32>) {
 

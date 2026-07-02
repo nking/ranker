@@ -36,7 +36,7 @@ mod recommended_movies_tests {
         let user_ids = vec![1, 3];
         let timestamps : Vec<i64> = vec![978300760, 978298147];
 
-        let movies = recommended_movies.get_unseen_movies(user_ids.clone(), timestamps.clone(), top_k);
+        let movies = recommended_movies.get_unseen_movies(&user_ids, &timestamps, top_k);
 
         assert_eq!(movies.len(), user_ids.len() * top_k);
 
