@@ -33,8 +33,8 @@ mod graph_builder_tests {
 
         print!("padded_super_graph={:?}", padded_super_graph);
 
-        let expected_n_node : Vec<i32> = vec![7,  8,  9, 40,  0];
-        let expected_n_edge : Vec<i32> = vec![6,  7,  8, 43,  0];
+        let expected_n_node : Vec<usize> = vec![7,  8,  9, 40,  0];
+        let expected_n_edge : Vec<usize> = vec![6,  7,  8, 43,  0];
 
         let expected_senders : Vec<i32> = vec![1,  0,  0,  0,  0,  0,  8,  9,  7,  7,  7,  7,  7, 16, 17, 18, 15,
             15, 15, 15, 15, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
@@ -50,10 +50,9 @@ mod graph_builder_tests {
         let expected_node_ids : Vec<i32> = vec![1, 2, 1, 6, 7, 8, 9, 2, 3, 4, 2, 6, 7, 8, 9, 3, 4, 5, 6, 3, 6, 7,
             8, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let expected_node_labels : Vec<f32> = vec![0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0.,
-            0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-            0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-            0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.];
+        let expected_node_labels : Vec<i32> = vec![0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let expected_node_types : Vec<i32> = vec![0, 1, 2, 2, 2, 2, 2, 0, 1, 1, 2, 2, 2, 2, 2, 0, 1, 1, 1, 2, 2, 2,
             2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -68,24 +67,16 @@ mod graph_builder_tests {
             false];
 
 
-        assert_eq!(padded_super_graph.n_node.len(), expected_n_node.len());
-        assert_eq!(padded_super_graph.n_edge.len(), expected_n_edge.len());
-
-
-
-
-        let zz = 2;
-        /*
-        padded_super_graph=JraphGraph { n_node: [7, 8, 9, 40, 0], n_edge: [6, 7, 8, 43, 0],
-        senders: [1, 0, 0, 0, 0, 0, 8, 9, 7, 7, 7, 7, 7, 16, 17, 18, 15, 15, 15, 15, 15, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24],
-        receivers: [0, 2, 3, 4, 5, 6, 7, 7, 10, 11, 12, 13, 14, 15, 15, 15, 19, 20, 21, 22, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24],
-        edge_features: [3, 0, 0, 0, 0, 0, 4, 5, 0, 0, 0, 0, 0, 3, 4, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        node_ids: [1, 2, 1, 6, 7, 8, 9, 2, 3, 4, 2, 6, 7, 8, 9, 3, 4, 5, 6, 3, 6, 7, 8, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        node_labels: [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        node_types: [0, 1, 2, 2, 2, 2, 2, 0, 1, 1, 2, 2, 2, 2, 2, 0, 1, 1, 1, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        candidate_mask: [false, false, true, true, true, true, true, false, false, false, true, true, true, true, true, false, false, false, false, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false] }
-
-         */
+        assert_eq!(padded_super_graph.n_node, expected_n_node);
+        assert_eq!(padded_super_graph.n_edge, expected_n_edge);
+        assert_eq!(padded_super_graph.senders, expected_senders);
+        assert_eq!(padded_super_graph.receivers, expected_receivers);
+        assert_eq!(padded_super_graph.edge_features, expected_edge_features);
+        assert_eq!(padded_super_graph.node_ids, expected_node_ids);
+        assert_eq!(padded_super_graph.node_labels, expected_node_labels);
+        assert_eq!(padded_super_graph.node_types, expected_node_types);
+        assert_eq!(padded_super_graph.candidate_mask, expected_candidate_mask);
+        
         /*
         EXPECTED from python:
         padded_super_graph_1=
@@ -99,10 +90,9 @@ GraphsTuple(nodes={'candidate_mask': array([False, False,  True,  True,  True,  
        False]), 'ids': array([1, 2, 1, 6, 7, 8, 9, 2, 3, 4, 2, 6, 7, 8, 9, 3, 4, 5, 6, 3, 6, 7,
        8, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-       'label': array([0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0.,
-       0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]),
+       'label': array([0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
        'type': array([0, 1, 2, 2, 2, 2, 2, 0, 1, 1, 2, 2, 2, 2, 2, 0, 1, 1, 1, 2, 2, 2,
        2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
