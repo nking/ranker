@@ -48,7 +48,7 @@ class SuperGraphPaddingTransform(pgrain.MapTransform):
             )
             where dimensions are max_nodes, max_edges, and max_graphs
         """
-        padded_super_graph, n_samples = optimized_batch_and_pad(
+        padded_super_graph, _ = optimized_batch_and_pad(
             batch=batch,
             max_nodes=self.jax_graph_comp_dict['max_nodes'],
             max_edges=self.jax_graph_comp_dict['max_edges'],

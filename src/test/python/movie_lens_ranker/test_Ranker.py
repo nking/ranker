@@ -1,8 +1,11 @@
 import datetime
 import os
 import logging
+import sys
 #to test for multiple devices before using on GPUs or TPUs:
 #os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=4'
+
+##NOTE: this class now requires the docker dbs to be up and running
 
 # Force Python to spawn clean workers instead of cloning the GPU context.
 import multiprocessing as mp
@@ -10,7 +13,6 @@ import os
 import logging
 
 from movie_lens_ranker.util_np import optimized_batch_and_pad
-
 
 def init_multiprocessing():
     if mp.get_start_method(allow_none=True) != 'spawn':
@@ -196,8 +198,22 @@ def reset_hpo_results_bucket(project_id:str, study_name:str):
         print(f"Error resetting database: {e.stderr}")
 
 class TestRanker(unittest.TestCase):
-    
+
+    def check_docker_services(self):
+        required_containers = ["local_db_store", "vizier-server", "gcs_emulator"]
+        for container in required_containers:
+            cmd = ["docker", "ps", "-q", "--filter", f"name={container}", "--filter", "status=running"]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if not result.stdout.strip():
+                # Fast fail: Print a clear message and abort the class tests immediately
+                print(f"\n[ERROR] Required Docker container '{container}' is not running.")
+                # Skip the rest of the tests in this class
+                raise Exception(f"expected docker service {container} needs to be running for these tests."
+                                f" from command line, use: docker compose --project-directory . -f deploy/compose/docker-compose-dbs.yaml up -d")
+
     def setUp(self):
+
+        self.check_docker_services()
         
         # === these are so that grain dataloader can read data from fake gcs server running in docker ====
         env_file = os.path.join(get_project_dir(), ".env_unittests")
@@ -790,7 +806,7 @@ class TestRanker(unittest.TestCase):
         
         time1 = datetime.datetime.now()
         
-        padded_super_graph_1, n_samples = optimized_batch_and_pad(
+        padded_super_graph_1, _ = optimized_batch_and_pad(
             batch=fake_batch,
             max_nodes=jax_graph_comp_dict['max_nodes'],
             max_edges=jax_graph_comp_dict['max_edges'],

@@ -24,6 +24,7 @@ import grain
 from flax.typing import Array
 from grain._src.python.data_loader import DataLoaderIterator
 
+from movie_lens_ranker.SparseLocalSubgraphTransform import *
 from movie_lens_ranker.BatchSampler import BatchSampler
 
 import orbax.checkpoint as ocp
@@ -736,7 +737,7 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
             batch_size=config['batch_size'], max_history=config['max_history'],
             num_candidates=config['num_candidates'], n_local_devices=jax.local_device_count())
         
-        padded_graph, n_samples = optimized_batch_and_pad(
+        padded_graph, _ = optimized_batch_and_pad(
             batch=fake_batch,
             max_nodes=jax_graph_comp_dict['max_nodes'],
             max_edges=jax_graph_comp_dict['max_edges'],
@@ -1535,60 +1536,59 @@ def check_model_state_equality(model_a, model_b, rtol=1e-5, atol=1e-8) -> bool:
 
 def create_fake_jagged_batch(batch_size: int,
     max_history: int, num_candidates: int, user_id_range:Tuple[int, int], movie_id_range:Tuple[int, int]):
-    fake_graph_list = []
+    """
+
+    :param batch_size:
+    :param max_history:
+    :param num_candidates:
+    :param user_id_range: a tuple of (start_user_id, end_user_id) where the range should be as large as
+        batch_size
+    :param movie_id_range: a tuple of (start_movie_id, end_movie_id) where the range should be as large as
+        batch_size + max_history + 1 + num_candidates
+    :return:
+    """
+
+    if (movie_id_range[1] - movie_id_range[0] + 1) < (num_candidates + max_history + 1):
+        raise ValueError("the range of movie_id_range must be >= (num_history + num_candidates + 1)")
+
+    user_id = np.ndarray((batch_size,), dtype=np.int32)
+    movie_id = np.ndarray((batch_size,), dtype=np.int32)
+    rating = np.ndarray((batch_size,), dtype=np.int32)
+    history_length = np.ndarray((batch_size,), dtype=np.int32)
+    history_movie_ids = np.full((batch_size, max_history), -1,dtype=np.int32)
+    history_ratings = np.full((batch_size, max_history), -1, dtype=np.int32)
+    candidate_ids = np.ndarray((batch_size, num_candidates), dtype=np.int32)
+    labels = np.full((batch_size,  num_candidates), 0.0, dtype=np.float32)
+
     for i in range(batch_size):
-        n_real_history = min(4 + i, max_history)
-        
-        node_ids = np.concatenate([
-            np.array([user_id_range[0] + i], dtype=int),
-            np.array(np.arange(movie_id_range[0] + i,
-                movie_id_range[0] + i + n_real_history + num_candidates),
-                dtype=int),
-        ], dtype=int)
-        
-        labels = np.zeros((num_candidates), dtype=np.float32)
-        labels[0] = 1.0  # Positive is at index 0
-        node_labels = np.concatenate([
-            np.array([0.0]),  # User (Type 0)
-            np.zeros(n_real_history),  # History (Type 1)
-            labels,  # numpy array
-            # Candidates (Type 2) - should be size n_candidates
-        ], dtype=float)
-        
-        node_types = np.array(
-            [0] + [1] * n_real_history + [2] * num_candidates)
-        node_is_candidate = np.array(
-            [False] + [False] * n_real_history + [True] * num_candidates)
-        
-        edge_shape = (n_real_history + num_candidates,)
-        senders = np.full(shape=edge_shape, fill_value=-1)
-        receivers = np.full(shape=edge_shape, fill_value=-1)
-        edge_features = np.full(shape=edge_shape, fill_value=-1)
-        
-        # History -> User (Inward)
-        # Senders: [1, 2, ... H], Receiver: [0, 0, ... 0]
-        senders[:n_real_history] = np.arange(1, n_real_history + 1)
-        receivers[:n_real_history] = np.zeros((n_real_history,))
-        edge_features[:n_real_history] = [4] * (n_real_history // 2) + [5] * (
-                    n_real_history // 2) + [4] * (n_real_history % 2)
-        
-        fake_graph_list.append(jraph.GraphsTuple(
-            # nodes arrays are length 1 + num_candidates
-            nodes={
-                "ids": node_ids,
-                "label": node_labels,
-                "type": node_types,
-                "candidate_mask": node_is_candidate
-            },
-            # edges, senders, receivers are length  n_real_history + self.num_candidates
-            edges={"rating": edge_features},
-            senders=senders,
-            receivers=receivers,
-            n_node=np.array([1 + n_real_history + num_candidates]),
-            n_edge=np.array([len(senders)]),
-            globals=None)
-        )
-    return fake_graph_list
+        user_id[i] = user_id_range[0] + i
+        movie_id[i] = movie_id_range[0] + i
+        rating[i] = 4 + i%2
+        history_length[i] = min(i + 1, max_history)
+        for j in range(history_length[i] ):
+            history_movie_ids[i][j] = movie_id_range[0] + i + 1 + j
+            history_ratings[i][j] = 3 + i%2 + j%2
+        for j in range(num_candidates):
+            candidate_ids[i][j] = movie_id_range[0] + max_history + j
+        #choose 1 to be the target positive and rewrite it
+        candidate_ids[i][0] = movie_id[i]
+        labels[i][0] = 1.0
+
+    inputs = {
+        "user_id" : user_id,
+        "movie_id" : movie_id,
+        "rating" : rating,
+        "history_length" : history_length,
+        "history_movie_ids" : history_movie_ids,
+        "history_ratings" : history_ratings,
+        "candidate_ids" : candidate_ids,
+        "labels" : labels
+    }
+
+    transform = SparseLocalSubgraphTransform()
+    graphs : List[jraph.GraphsTuple] = transform.map(inputs)
+
+    return graphs
 
 def create_dummy_super_padded_graph(batch_size: int,
     max_history: int, num_candidates: int, user_id_range:Tuple[int, int], movie_id_range:Tuple[int, int]):
@@ -1599,7 +1599,7 @@ def create_dummy_super_padded_graph(batch_size: int,
     jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
         max_history, num_candidates, n_local_devices=jax.local_device_count())
     
-    padded_super_graph = optimized_batch_and_pad(
+    padded_super_graph, _ = optimized_batch_and_pad(
         batch=fake_graph_list,
         max_nodes=jax_graph_comp_dict['max_nodes'],
         max_edges=jax_graph_comp_dict['max_edges'],

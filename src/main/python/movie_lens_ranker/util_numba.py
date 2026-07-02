@@ -305,6 +305,22 @@ def build_graph_arrays(
         labels: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray,
 np.ndarray, np.ndarray, np.ndarray, int, int]:
+    """
+    
+    :param user_id:
+    :param n_real_history:
+    :param candidate_ids: length is num_candidates
+         Note that candidate_ids is guaranteed to have all read movie_ids.
+         Note that candidate_ids and labels have been shuffled so that the target positive movie_id is not always
+         at index 0.
+    :param history_ratings: length is max_history
+    :param history_movie_ids: length is max_history
+    :param labels: length is num_candidates
+         Note that candidate_ids and labels have been shuffled so that the target positive movie_id is not always
+         at index 0.
+        labels are all 0.0 with exception of being 1.0 at the index where candidate_ids has the target positive movie_id.
+    :return:
+    """
     
     n_candidates = len(candidate_ids)
     total_nodes = 1 + n_real_history + n_candidates
@@ -340,7 +356,7 @@ np.ndarray, np.ndarray, np.ndarray, int, int]:
     node_labels[1:1 + n_real_history] = 0.0
     node_labels[1 + n_real_history:] = labels
     
-    # Types & Masks
+    # Types & Masks.  0=target positive, 1=real_history, 2=candidate or negative
     node_types = np.empty(total_nodes, dtype=np.int32)
     node_types[0] = 0
     node_types[1:1 + n_real_history] = 1

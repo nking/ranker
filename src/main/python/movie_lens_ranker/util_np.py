@@ -19,7 +19,7 @@ def optimized_batch_and_pad(batch: Sequence[jraph.GraphsTuple], max_nodes: int, 
     #    if remainder != 0:
     #        graphs = graphs[:-remainder]  # Drop trailing graphs to make it divisible
         
-    # 1. Fast, single-pass concatenations of graph metadata
+    # Fast, single-pass concatenations of graph metadata
     n_node_arr = np.concatenate([g.n_node for g in graphs])
     n_edge_arr = np.concatenate([g.n_edge for g in graphs])
     
@@ -76,7 +76,7 @@ def optimized_batch_and_pad(batch: Sequence[jraph.GraphsTuple], max_nodes: int, 
         np.full(pad_n_edge, total_nodes, dtype=np.int32)
     ])
     
-    # 6. Fast Tree Map for feature padding (nodes, edges, globals)
+    # Fast Tree Map for feature padding (nodes, edges, globals)
     def pad_features(pad_size, *nests):
         batched_feats = np.concatenate(nests)
         padding = np.zeros((pad_size,) + batched_feats.shape[1:], dtype=batched_feats.dtype)

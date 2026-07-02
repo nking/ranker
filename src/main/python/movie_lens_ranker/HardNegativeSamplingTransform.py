@@ -77,16 +77,18 @@ class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
             "history_ratings" of shape (batch_size, max_history)
             "history_length" of length batch_size,
         :return: dictionary of np.ndarrays:
-            'user_id',
-            'movie_id',
-            'rating',
-            'timestamp',
-            "history_movie_ids",
-            "history_ratings",
-            "history_length",
-            "candidate_ids",
-            "labels"
-        Note that candidate_ids is guaranteed to not have padding values, they're all real movie_ids
+            'user_id' has shape (batch_size,)
+            'movie_id'  has shape (batch_size,)
+            'rating'  has shape (batch_size,)
+            'timestamp'  has shape (batch_size,)
+            "history_movie_ids"  has shape (batch_size, max_history)
+            "history_ratings"  has shape (batch_size, max_history)
+            "history_length"  has shape (batch_size,)
+            "candidate_ids"  has shape (batch_size, num_candidates)
+            "labels"  has shape (batch_size, num_candidates)
+        Note that candidate_ids is guaranteed to not have padding values, they're all real movie_ids'.
+        The order of candidate_ds and labels has been shuffled so that the target positive movie_id is not always at index 0.
+        Labels are all 0.0 except being 1.0 where the target positive movie_id is.
         """
         
         # we want to form the list of positive and negatives for ranking and their labels as 1 and 0 respectively.
@@ -155,6 +157,7 @@ class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
             mask = (candidate_ids == self.pad_value)
             candidate_ids[mask] = rng.choice(self.all_movie_ids, size=np.sum(mask))
             
+        # TODO: consider removing labels.  they're useful for debugging, but not used anywhere
         # LABELS
         labels = np.zeros((n_users, self.num_candidates), dtype=np.float32)
         labels[:, 0] = 1.0  # Positive is at index 0

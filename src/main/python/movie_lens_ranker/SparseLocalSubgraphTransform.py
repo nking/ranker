@@ -20,16 +20,18 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
         Nodes 1 to H: History Movies (H = max_history).
         Nodes H+1 to H+C: Candidate Movies (C = num_candidates)
         Edges are the user ratings for the movie.
-        :param batch : dictionary containing ndarrays with following keys
-            'user_id',
-            'movie_id',
-            'rating',
-            'timestamp',
-            "history_movie_ids",
-            "history_ratings",
-            "history_length",
-            "candidate_ids",
-            "labels"
+        :param batch : dictionary of np.ndarrays:
+            'user_id' has shape (batch_size,)
+            'movie_id'  has shape (batch_size,)
+            'rating'  has shape (batch_size,)
+            'timestamp'  has shape (batch_size,)
+            "history_movie_ids"  has shape (batch_size, max_history)
+            "history_ratings"  has shape (batch_size, max_history)
+            "history_length"  has shape (batch_size,)
+            "candidate_ids"  has shape (batch_size, num_candidates)
+            "labels"  has shape (batch_size, num_candidates)
+                Note that candidate_ids is guaranteed to not have padding values, they're all real movie_ids'.
+                labels are all 0.0 with exception of being 1.0 at the index where candidate_ids has the target positive movie_id.
         :return: a list of a sparsely populated jraph.GraphsTuple representation of the local subgraph for
         the train user_id.  Note that this is not the padded version to give to the model being trained.
         The node array lengths are = 1 + n_real_history + n_candidates.
