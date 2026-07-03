@@ -80,14 +80,9 @@ project directory hierarchy:
 ├── src/       
 │   ├──main/   
 │   │   ├── python/movie_lens_ranker  # Core JAX/AI Application Code 
-│   |   └── rust                      #rust src code for input graph
-│   |        └── Cargo.toml
-│   |        └── src
 │   ├──test/   
 │   │   ├── python/movie_lens_ranker  # Tests for Main Branch
 │   |   └── resources                 #data for tests
-│   |   └── rust                      #rust test code
-│   |        └── test
 ├── deploy/                         # Yaml Files (No executable code)   
 │   ├── compose/                    # Local Docker Compose configurations   
 │   │   ├── docker-compose.yaml     # Combines app + dbs   
@@ -112,8 +107,30 @@ project directory hierarchy:
 ├── requirements*.txt               # Python application dependencies   
 └── README.md   
 └── pyproject.toml   
-└── pyproject.toml   
 
+Then the sources for the export (needs tensorflow + orbax), inference (needs rust and tensorlow)
+export_src
+│   ├── pyproject.toml
+│   ├── main
+│   |   └── python                  
+│   |        └── movie_lens_ranker_export
+│   ├── test
+│       └── python 
+│            └── movie_lens_ranker_export
+|
+inference_src
+│   ├── pyproject.toml
+    ├── main
+    |   └── python                  
+    |        └── movie_lens_ranker_inference
+    |   └── rust                      #rust src code for input graph
+    |        └── Cargo.toml
+    |        └── src
+    ├── test
+        └── python                  
+             └── movie_lens_ranker_inference
+        └── rust                      #rust src code for input graph
+             └── src
 
 --------------------------------------------------
 to install rust:
