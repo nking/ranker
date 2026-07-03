@@ -95,7 +95,7 @@ impl UserHistory {
 }
 
 
-pub fn _testable_build_map_async(ratings_uris: &[&String]) -> (FxHashMap<i32, UserMapEntry>, usize) {
+pub fn _testable_build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEntry>, usize) {
     let rt = Runtime::new().unwrap();
 
     let (map, longest_history)  = rt.block_on(build_map_async(ratings_uris));
@@ -119,7 +119,7 @@ pub fn _testable_build_map_async(ratings_uris: &[&String]) -> (FxHashMap<i32, Us
 /// ```
 ///
 /// ```
-async fn build_map_async(ratings_uris: &[&String]) -> (FxHashMap<i32, UserMapEntry>, usize) {
+async fn build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEntry>, usize) {
 
     // use semaphore to prevent memory swap thrashing from too many threads
     let semaphore = Arc::new(Semaphore::new(4));
@@ -301,7 +301,7 @@ fn prepare_user_data(
 /// build the UserHistory from the given list of uris for the ratings parquet files
 /// # Arguments
 /// * `ratings_uris` -  vector of uris for ratings parquet files for building UserHistory hashmap
-pub fn build_user_history(ratings_uris: &[&String], max_history: usize) -> UserHistory {
+pub fn build_user_history(ratings_uris: &[&str], max_history: usize) -> UserHistory {
     // Because PyO3 functions are synchronous by default, we spin up a
     // Tokio runtime to execute our highly concurrent async disk/network I/O.
     // The code can begin processing data while it is still loading because the loading onto CPU is usually a bottleneck.

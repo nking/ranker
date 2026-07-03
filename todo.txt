@@ -24,6 +24,17 @@
 - add ability to introduce a delay to some of the gradient computations on one worker
   to test that synchronization occurs even when one Pod might be busier than others.
 
+- low priority:
+  - for speeding up the training, could consider binding the rust implementations
+    for UserHistory, UserRecommendations to the python code, though
+    would need to modify the python to use flattened 1D arrays.
+    - can also combine SparseLocal.. and SuperPadded.. transforms
+      into 1 grain MapTransform that uses the rust build_padded_super_graph method.
+    using the same core code of rust for python too would in the 
+    long run make maintenance simpler
+    and would be better avoidance of train-server skew.
+    The bindings are done with PyO3.
+
 - consider the remaining MLOps components needed:
   - data statistics for raw ingested data and for the features
     - the raw data stats component can use TFDV and pandas

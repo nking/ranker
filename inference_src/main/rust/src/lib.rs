@@ -5,6 +5,7 @@ pub mod user_history;
 pub mod recommended_movies;
 pub mod graph_builder;
 pub mod util;
+mod inference;
 /*
 #[pyfunction]
 pub fn process_batch(py: Python, raw_bytes: Vec<&[u8]>) -> PyResult<Bound<PyArrayDyn<f32>>> {
@@ -15,7 +16,7 @@ pub fn process_batch(py: Python, raw_bytes: Vec<&[u8]>) -> PyResult<Bound<PyArra
 }
 
 #[pymodule]
-fn prep_inputs_for_graphranker(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn inference_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(process_batch, m)?)?;
     Ok(())
 }

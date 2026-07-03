@@ -77,8 +77,8 @@ fn build_graph_arrays(
 #[derive(Debug)]
 // A struct to hold your final GraphTuple equivalent
 pub struct JraphGraph {
-    pub n_node: Vec<usize>,
-    pub n_edge: Vec<usize>,
+    pub n_node: Vec<i32>,
+    pub n_edge: Vec<i32>,
     pub senders: Vec<i32>,
     pub receivers: Vec<i32>,
     pub edge_features: Vec<i32>,
@@ -107,8 +107,8 @@ pub fn build_padded_super_graph(
 
     // PRE-ALLOCATE THE SUPER GRAPH (Replaces pad_features concatenations)
     // By filling with defaults (0, 0.0, false), the padding data is implicitly created.
-    let mut n_node_padded: Vec<usize> = vec![0; max_graphs];
-    let mut n_edge_padded: Vec<usize> = vec![0; max_graphs];
+    let mut n_node_padded: Vec<i32> = vec![0; max_graphs];
+    let mut n_edge_padded: Vec<i32> = vec![0; max_graphs];
 
     let mut senders_padded = vec![0; max_edges];
     let mut receivers_padded = vec![0; max_edges];
@@ -142,8 +142,8 @@ pub fn build_padded_super_graph(
             build_graph_arrays(u_id, n_hist, &c_ids, &h_rats, &h_m_ids, &lbls);
 
         //WRITE METADATA
-        n_node_padded[i] = total_nodes;
-        n_edge_padded[i] = total_edges;
+        n_node_padded[i] = total_nodes as i32;
+        n_edge_padded[i] = total_edges as i32;
 
         let n_end = current_node_offset + total_nodes;
         let e_end = current_edge_offset + total_edges;
@@ -176,8 +176,8 @@ pub fn build_padded_super_graph(
 
     // 6. APPLY PADDING METADATA TO THE "DUMMY" GRAPH (Index = batch_size)
     // The empty graphs after the dummy graph remain 0 because of our initial vec![0; max]
-    n_node_padded[batch_size] = pad_n_node;
-    n_edge_padded[batch_size] = pad_n_edge;
+    n_node_padded[batch_size] = pad_n_node as i32;
+    n_edge_padded[batch_size] = pad_n_edge as i32;
 
     // 7. POINT PADDING EDGES TO THE FIRST PADDING NODE
     // Replaces Python: np.full(pad_n_edge, total_nodes, dtype=np.int32)

@@ -7,7 +7,7 @@ mod recommended_movies_tests {
     }
     use helper::{get_project_dir};
 
-    use prep_inputs_for_graphranker::recommended_movies::{build_recommended_movies};
+    use inference_engine::recommended_movies::{build_recommended_movies};
 
     #[test]
     pub fn test_movie_recomendations_build() {

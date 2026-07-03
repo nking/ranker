@@ -24,9 +24,9 @@ mod graph_builder_tests {
 
     use helper::{get_train_val_test_liked_uris, DataSize};
 
-    use prep_inputs_for_graphranker::graph_builder::{build_enriched_padded_supergraph, create_fake_padded_super_batch, JraphGraph};
-    use prep_inputs_for_graphranker::user_history::{build_user_history, UserHistory};
-    use prep_inputs_for_graphranker::util;
+    use inference_engine::graph_builder::{build_enriched_padded_supergraph, create_fake_padded_super_batch, JraphGraph};
+    use inference_engine::user_history::{build_user_history, UserHistory};
+    use inference_engine::util;
 
     #[test]
     pub fn test_create_fake_batch() {
@@ -46,8 +46,8 @@ mod graph_builder_tests {
 
         print!("padded_super_graph={:?}", padded_super_graph);
 
-        let expected_n_node : Vec<usize> = vec![7,  8,  9, 40,  0];
-        let expected_n_edge : Vec<usize> = vec![6,  7,  8, 43,  0];
+        let expected_n_node : Vec<i32> = vec![7,  8,  9, 40,  0];
+        let expected_n_edge : Vec<i32> = vec![6,  7,  8, 43,  0];
 
         let expected_senders : Vec<i32> = vec![1,  0,  0,  0,  0,  0,  8,  9,  7,  7,  7,  7,  7, 16, 17, 18, 15,
             15, 15, 15, 15, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
@@ -203,7 +203,7 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
         let (user_ids, timestamps) = read_user_timestamps(&r, &rows);
 
         // storing the items as references
-        let ratings_uris: Vec<&String> = vec![&r];
+        let ratings_uris: Vec<&str> = vec![&r];
 
         let user_history : UserHistory = build_user_history(&ratings_uris, 2048);
 
@@ -222,8 +222,8 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
 
         print!("graph={:?}", padded_super_graph);
 
-        let expected_n_node : Vec<usize> = vec![9,  9, 46,  0];
-        let expected_n_edge : Vec<usize> = vec![ 8,  8, 48,  0];
+        let expected_n_node : Vec<i32> = vec![9,  9, 46,  0];
+        let expected_n_edge : Vec<i32> = vec![ 8,  8, 48,  0];
 
         let expected_senders : Vec<i32> = vec![
             1,  2,  3,  0,  0,  0,  0,  0, 10, 11, 12,  9,  9,  9,  9,  9, 18,
@@ -291,7 +291,8 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
        false, false, false, false, false, false, false, false, false,
        false, false, false, false, false, false, false, false, false,
        false, false, false, false, false, false, false, false, false,
-       false]), 'ids': array([6040, 6888, 6630, 8356, 6610, 6252, 9083, 6564, 6584, 6040, 6888,
+       false]),
+       'ids': array([6040, 6888, 6630, 8356, 6610, 6252, 9083, 6564, 6584, 6040, 6888,
        6630, 8356, 9477, 6941, 6948, 8475, 6356,    0,    0,    0,    0,
           0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
           0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,

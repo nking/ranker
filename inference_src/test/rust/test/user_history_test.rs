@@ -15,8 +15,8 @@ mod user_history_tests {
     }
     use helper::{get_train_val_test_liked_uris, DataSize};
 
-    use prep_inputs_for_graphranker::user_history::{build_user_history, UserHistory, UserMapEntry};
-    use prep_inputs_for_graphranker::user_history::_testable_build_map_async;
+    use inference_engine::user_history::{build_user_history, UserHistory, UserMapEntry};
+    use inference_engine::user_history::_testable_build_map_async;
 
     #[test]
     pub fn test_user_history_load() {
@@ -24,7 +24,7 @@ mod user_history_tests {
 
         let max_history = 2048;
         // storing the items as references
-        let ratings_uris: Vec<&String> = vec![
+        let ratings_uris: Vec<&str> = vec![
             ratings_map.get("train_liked").unwrap(),
             ratings_map.get("train_3").unwrap(),
             ratings_map.get("train_disliked").unwrap(),

@@ -1234,26 +1234,6 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
             mlflow.log_metric(f"final_ndcg_{config['top_k']}",
                 float(best_val_ndcg_k))
             mlflow.end_run()
-
-def export_model(trained_model: GraphRanker, batch_size:int, max_history:int,
-        num_candidates:int, output_uri:str):
-    """
-    
-    :param trained_model:
-    :param batch_size: batch_size used for model training
-    :param max_history: max_hisory used for model training
-    :param num_candidates: num_candidates used for model training
-    :return:
-    """
-
-    jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
-        max_history, num_candidates, n_local_devices=jax.local_device_count())
-    
-    MAX_NODES = jax_graph_comp_dict['max_nodes']
-    MAX_EDGES = jax_graph_comp_dict['max_edges']
-    MAX_GRAPHS = 1  # Usually 1 if doing single-request real-time ranking
-
-    raise Exception("not yet implemented")
     
 def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, global_step, top_k:int=20):
     

@@ -8,7 +8,7 @@ mod integration_tests {
     // To run:
     //   cd src/main/rust
     //   cargo test
-    //use prep_inputs_for_graphranker::user_history;
+    //use inference_engine::user_history;
 
     /*
     #[test]
