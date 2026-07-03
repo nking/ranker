@@ -1,7 +1,6 @@
 [build-system]
-requires = ["maturin>=1.14,<2.0"]
-build-backend = "maturin"
-
+requires = ["setuptools>=72", "wheel", "tomli"]
+build-backend = "setuptools.build_meta"
 [project]
 name = "movie_lens_ranker"
 version = "0.1.0"
@@ -10,26 +9,30 @@ authors = [
     { name = "Nichole King" },
 ]
 requires-python = ">=3.12.0,<3.13"
-#see requirements-[c|g]pu.txt for dependencies
+#  RUN pip install --no-deps -r requirements-cpu.txt or -gpu.txt
 dependencies = [
 ]
 readme = "README.txt"
-license = { text = "MIT" }
+license = "MIT"
 
 classifiers = [
-    "Development Status :: 1 - development",
-    "Programming Language :: Python",
-    "Programming Language :: Rust",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+  #   3 - Alpha
+  #   4 - Beta
+  #   5 - Production/Stable
+  "Development Status :: 1 - development",
+  "Programming Language :: Python",
 ]
+
+[tool.setuptools]
+
+[tool.setuptools.packages.find]
+where = ["src/main/python"]
+include = ['movie_lens_ranker',]
+#exclude = ["tests"]
+
+[project.optional-dependencies]
+#test = ["pytest", ]
 
 [project.urls]
 Homepage = "https://www.kaggle.com/code/nicholeasuniquename/ranker-cross-encoder-w-gatv2/"
 Repository = "https://github.com/nking/ranker.git"
-
-[tool.maturin]
-# This tells maturin where your rust project lives
-manifest-path = "src/rust/Cargo.toml"
-# This tells maturin where your python source is located
-python-source = "src/main/python"
