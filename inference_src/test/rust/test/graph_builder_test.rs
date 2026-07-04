@@ -215,9 +215,11 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
          */
         let candidate_ids : Vec<i32> = vec![6610, 6252, 9083, 6564, 6584, 9477, 6941, 6948, 8475, 6356];
 
+        //labels aren't used in inference.  a value of -1 can help distinguish that is isn't used.
+        let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
         let padded_super_graph : JraphGraph = build_enriched_padded_supergraph(&user_ids, &timestamps,
-            &candidate_ids, &user_history, max_history,
+            &candidate_ids, &labels, &user_history, max_history,
             n_local_devices);
 
         print!("graph={:?}", padded_super_graph);

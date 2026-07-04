@@ -156,8 +156,7 @@ class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
         if (candidate_ids == self.pad_value).any():
             mask = (candidate_ids == self.pad_value)
             candidate_ids[mask] = rng.choice(self.all_movie_ids, size=np.sum(mask))
-            
-        # TODO: consider removing labels.  they're useful for debugging, but not used anywhere
+
         # LABELS
         labels = np.zeros((n_users, self.num_candidates), dtype=np.int32)
         labels[:, 0] = 1  # Positive is at index 0

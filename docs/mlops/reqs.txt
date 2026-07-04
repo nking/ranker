@@ -6,6 +6,9 @@ this will be measured by NDCG@20 metric.
 This is often accomplished by following the bi-encoder
 + Retrieval with a cross-encoder.
 
+Another goal is reduced latency.  This goal needs to consider the entire system from
+bi-encoder to this cross-encoder.
+
 The cross-encoder (Ranker) in this project will use
 a graph attention network with efficient, query-dependent
 attention, a.k.a. GATv2, as the first layer in a
@@ -77,19 +80,22 @@ the MLOps, but it is in a state of transitioning to v2 and
 the Tuner is not compatible with the new v2 trainer, just one
 major bug, but after 1 day of trying to configure it, will
 try another framework, that is more stable and or simpler 
-if possible.
+if possible.  I settled on Kubeflow Trainer v2 which is already compatible with the jax and k82 eco-systems.
 options:
 - google's vizier for hypertune training
-   - version compat conflicts only with xmanager.
+   - version compat conflicts only with xmanager, but that is solved by compartmentalizing code using docker container.
 - vizier, optuna, katib
 
-
-Dataloading:  Google Grain
+Train (pre-production) Dataloading:  Google Grain
 State Managements: Orbax
 Experiment Tracking: MLFlow-skinny
 MLOps workflow tasks:  
 code container: Docker or equiv
 orchestrator: xmanager for dev, kfp for dev and production
+
+Production Dataloading:  rust query history enriching graph building
+   compiled into a custom TF Operation.
+   usable, for example, in TensorflowServing (TFS) multi-model configuration
 
 MLOps details:
   tasks for the workflow or indiv tasks:
@@ -101,7 +107,7 @@ MLOps details:
           retrieval project
         - Grain is used in this project to create data loader
     - calc statistics of data
-    - generate data schema and perist it
+    - generate data schema and persist it
     - validate data statistics
     - compare data to latest artifact
     - * transform data
@@ -135,4 +141,4 @@ consider ways to reduce the runtime execution
   operation instead of chunked.
 
 - different architectures:
-  - the re-ranker fine-tunes a LiT5 reranker
+  - the re-ranker fine-tunes a LiT5 reranker.  see https://github.com/nking/reranker.git

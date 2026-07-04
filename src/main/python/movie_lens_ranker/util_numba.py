@@ -349,7 +349,8 @@ np.ndarray, np.ndarray, np.ndarray, int, int]:
     node_ids[0] = user_id
     node_ids[1:1 + n_real_history] = history_movie_ids[:n_real_history]
     node_ids[1 + n_real_history:] = candidate_ids
-    
+
+    #NOTE: the original target movie_id has a label "1" in labels, while the negatives have a label "0"
     # Labels
     node_labels = np.empty(total_nodes, dtype=np.int32)
     node_labels[0] = 0

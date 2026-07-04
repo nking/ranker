@@ -1,0 +1,50 @@
+The prototype was constructed first and then below, the 2nd prototype refactoring is introduced.
+
+(1) pre-production model training and testing:
+
+   phases are defined for hyper-parameter tuning, model training and model testing
+   using the best found hyper-parameters or the given hyper-parameters.
+
+   the code handles data partition over multi-host and multi-local devices (like gpus), and
+   synchronization of the model training over multi-host.
+
+   dataloader transformation operations are defined to take a batch of user_id, movie_id, rating, timestamps
+   and produce an output graph of arrays. the transformations use user history, recommended movies for the user,
+   and the movie catalog to form "negatives" for each single row in the batch (which is called the positive).
+   this builds a graph for contrastive learning for goal of ranking results.
+
+   the adamw algorithm is used in optimization to reduce the softmax loss.
+
+   after each epoch of training, the validataion dataset is used to calculate metrics.
+
+   early stopping of training can occur if validation ndcg@20 stops improving.
+
+
+   the software engineering challenges were:
+   - coding for multi-host ability and verification that the  model checkpoints saves and restores were correct and
+     agreed with live model results.
+   - getting the datasets correct for contrastive learning.
+   - coding for the k8s, and kfp runs using kubeflow trainer v2
+   - improving the reading of data from CPU onto GPUs:
+     - required use ofthe multi-procesisng library,
+       configuration of grain workers, threads, and prefetch,
+       proper inclusion of nvidia libraries and NCCL flags to make sure NCCL
+       moves data between both GPUs, then using asynchronous prefetching of
+       dataloader onto GPUs.
+
+see file opt_gpu_notes.txt for the gradual improvements in reducing runtime.
+the file is a work in progress.
+
+---------------------------
+
+the 2nd prototype:
+
+refactoring of GraphRanker to move the embeddings from the constructor, to data included in the batch given to
+the call method.  The increase in data for each batch call is not a significant amount considering that the
+batch size at largest is 256 and that the embeddings lengths are 16.
+
+this will reduce the model RAM which makes loading of the model faster, and it will reduce redundancy is the overall
+workflow of the recommendation system.
+
+
+

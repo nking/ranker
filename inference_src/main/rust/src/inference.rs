@@ -107,9 +107,13 @@ pub async fn run_inference(
     // create padded_super_graph
     let user_history : UserHistory = build_user_history(&ratings_uris, 2048);
 
+
+    //labels aren't used in inference.  a value of -1 can help distinguish that is isn't used.
+    let labels: Vec<i32> = vec![-1; candidate_ids.len()];
+
     let n_loal_devices_on_server = 1;
     let padded_super_graph : JraphGraph = build_enriched_padded_supergraph(&user_ids, &timestamps,
-        &candidate_ids, &user_history, MAX_HISTORY, n_loal_devices_on_server);
+        &candidate_ids, &labels, &user_history, MAX_HISTORY, n_loal_devices_on_server);
 
     let inputs : HashMap<String, TensorProto> = build_proto_inputs(padded_super_graph);
 

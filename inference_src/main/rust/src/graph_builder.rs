@@ -270,7 +270,7 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
         padded_super_graph
     }
     pub fn build_enriched_padded_supergraph(user_ids: &[i32], timestamps: &[i64],
-        candidate_ids: &[i32], user_history: &crate::user_history::UserHistory, max_history: usize,
+        candidate_ids: &[i32], labels: &[i32], user_history: &crate::user_history::UserHistory, max_history: usize,
         n_local_devices: usize) -> JraphGraph {
 
         let num_users = user_ids.len();
@@ -287,9 +287,6 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
 
         let history_lengths = util::get_non_padded_lengths_of_flattened_arrays(num_users,
             max_history, &history_movie_ids, user_history.pad_value);
-
-        //labels aren't used anywhere, but are kept to mirror python.  1 for positives, 0 for negatives
-        let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
         let padded_super_graph = build_padded_super_graph(
             &user_ids,
