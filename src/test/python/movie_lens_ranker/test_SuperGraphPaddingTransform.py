@@ -10,7 +10,7 @@ from helper import *
 from movie_lens_ranker.RatingsHistoryTransform import *
 from movie_lens_ranker.UserHistory import UserHistory
 from movie_lens_ranker.data_loading import *
-from movie_lens_ranker.util import read_embeddings, \
+from movie_lens_ranker.util import get_num_users_movies, read_user_movie_embeddings, \
     calc_number_jax_graph_components
 
 
@@ -55,18 +55,23 @@ class TestSuperGraphPadding(unittest.TestCase):
         # (movie_id, title, genres)
         self.movies_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")
-        
-        self.embeddings, self.num_users = read_embeddings(
+
+        self.num_users, self.num_movies, self.emb_len = get_num_users_movies(
+            user_embeddings_uri=self.user_embeddings_uri,
+            movie_embeddings_uri=self.movie_embeddings_uri,
+        )
+        self.embeddings = read_user_movie_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)
-        
+
+
         self.recommended_movies_getter = RecommendedMovies(
             num_users=self.num_users, movie_rec_file_uri=self.recommendations_uri,
             movie_rec_ts_file_uri=self.recommendations_ts_uri)
         
     def test_transform(self):
-        batch_size = 1024
+        batch_size = 3
         max_history = 20
         num_candidates = 20
         
@@ -77,19 +82,22 @@ class TestSuperGraphPadding(unittest.TestCase):
         watch_history = UserHistory(ratings_uri_list=[self.ratings_train_liked_uri, self.ratings_train_3_uri,
             self.ratings_train_disliked_uri], max_history=max_history)
         
-        disliked_history = UserHistory(ratings_uri_list=[self.ratings_train_disliked_uri], max_history=max_history)
+        disliked_history = UserHistory(ratings_uri_list=[
+            self.ratings_train_liked_uri, self.ratings_train_3_uri, self.ratings_train_disliked_uri,
+            self.ratings_val_liked_uri, self.ratings_val_3_uri, self.ratings_val_disliked_uri], max_history=max_history)
 
         all_movie_ids: List[int] = read_movies_array_record(self.movie_ids_uri, batch_size=batch_size)
        
-        batch = [(1875, 1101, 4, 975768800), (635, 2068, 4, 975768823),
-            (635, 2357, 4, 975768823)]
+        batch = [(1875, 1101, 4, 975768800),
+                (635, 2068, 4, 975768823),
+                (635, 2357, 4, 975768823)]
         
         transform1 = RatingsHistoryLookupTransform(
             history_lookup=watch_history, max_history=max_history)
         
         result1: Dict[str, np.ndarray] = transform1.map(batch)
         results = []
-        
+
         for i, seed in enumerate((0, 0, 123)):
             
             rng = np.random.default_rng(seed)
@@ -101,7 +109,7 @@ class TestSuperGraphPadding(unittest.TestCase):
                 recommendations=self.recommended_movies_getter,
                 num_candidates = num_candidates)
             
-            transform3 = SparseLocalSubgraphTransform()
+            transform3 = SparseLocalSubgraphTransform(self.embeddings)
             
             transform4 = SuperGraphPaddingTransform(
                 batch_size=batch_size, max_history=max_history,
@@ -168,6 +176,17 @@ class TestSuperGraphPadding(unittest.TestCase):
                     AssertionError,
                     np.testing.assert_array_equal,aa, bb, strict=True
                 )
+            elif key == "embeddings":
+                count = 0
+                for row in range(aa.shape[0]):
+                    a1 = aa[row]
+                    b1 = bb[row]
+                    diff = a1 - b1
+                    indices = np.where(abs(diff) > 1)[0]
+                    if len(indices) > 0:
+                        print(f'row={row}, indices={indices}', flush=True)
+                        count += 1
+                self.assertNotEqual(0, count)
             else:
                 np.testing.assert_array_equal(aa, bb, strict=True)
         

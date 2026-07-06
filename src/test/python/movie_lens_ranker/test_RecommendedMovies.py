@@ -8,8 +8,7 @@ from movie_lens_ranker.RecommendedMovies import RecommendedMovies
 
 from helper import *
 from movie_lens_ranker.data_loading import *
-
-from movie_lens_ranker.util import _read_embeddings, read_embeddings
+from movie_lens_ranker.util import get_num_users_movies
 
 
 class TestRecommendedMovies(unittest.TestCase):
@@ -51,12 +50,17 @@ class TestRecommendedMovies(unittest.TestCase):
         # (movie_id, title, genres)
         self.movies_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")
-        
-        self.embeddings, self.num_users = read_embeddings(
+
+        self.num_users, self.num_movies, self.emb_len = get_num_users_movies(
+            user_embeddings_uri=self.user_embeddings_uri,
+            movie_embeddings_uri=self.movie_embeddings_uri,
+        )
+        self.embeddings = read_user_movie_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)
-        
+
+
         self.recommended_movies_getter = RecommendedMovies(
             num_users=self.num_users,
             movie_rec_file_uri=self.recommendations_uri,

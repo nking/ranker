@@ -2,6 +2,7 @@
 from typing import Tuple, List
 import os
 import grain.sharding
+import jax.numpy as jnp
 from array_record.python import array_record_module
 from grain import DataLoader
 
@@ -17,13 +18,16 @@ from movie_lens_ranker.SparseLocalSubgraphTransform import \
 from movie_lens_ranker.SuperGraphPaddingTransform import \
     SuperGraphPaddingTransform
 from movie_lens_ranker.UserHistory import UserHistory
-from movie_lens_ranker.util import read_movies_array_record
+from movie_lens_ranker.util import read_movies_array_record, read_user_movie_embeddings
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 def create_train_and_val_dataloaders(
         num_users:int,
-        movies_uri:str, recommendations_uri:str, recommendations_ts_uri:str,
+        user_embeddings_uri : str,
+        movie_embeddings_uri : str,
+        movies_uri:str,
+        recommendations_uri:str, recommendations_ts_uri:str,
         ratings_train_data_uri:str,
         ratings_train_history_uris:List[str],
         ratings_train_disliked_uris:List[str],
@@ -34,17 +38,22 @@ def create_train_and_val_dataloaders(
         num_epochs:int, batch_size:int, seed:int=0) -> Tuple[DataLoader, DataLoader]:
         
     all_movie_ids: List[int] = read_movies_array_record(movies_uri, batch_size=batch_size)
-    
+
     # the number per user must be >= half of num_candidates
     recommendations = RecommendedMovies(
         num_users=num_users,
         movie_rec_file_uri=recommendations_uri,
         movie_rec_ts_file_uri=recommendations_ts_uri)
+
+    user_movie_embeddings = read_user_movie_embeddings(
+        user_embeddings_uri=user_embeddings_uri,
+        movie_embeddings_uri=movie_embeddings_uri)
     
     os.environ["PYTHONPATH"] = os.environ.get("PYTHONPATH", "")
     os.environ["LD_LIBRARY_PATH"] = os.environ.get("LD_LIBRARY_PATH", "")
     
     train_dataloader = _create_dataloader(
+        user_movie_embeddings = user_movie_embeddings,
         all_movie_ids=all_movie_ids,
         recommendations=recommendations,
         ratings_data_uri= ratings_train_data_uri,
@@ -54,6 +63,7 @@ def create_train_and_val_dataloaders(
         num_epochs=num_epochs, batch_size=batch_size, seed=seed)
     
     val_dataloader = _create_dataloader(
+        user_movie_embeddings = user_movie_embeddings,
         all_movie_ids=all_movie_ids,
         recommendations=recommendations,
         ratings_data_uri=ratings_val_data_uri,
@@ -66,6 +76,8 @@ def create_train_and_val_dataloaders(
 
 def create_test_dataloader(
         num_users:int,
+        user_embeddings_uri : str,
+        movie_embeddings_uri : str,
         movies_uri: str,
         recommendations_uri: str,recommendations_ts_uri: str,
         rattings_data_uri: str,
@@ -97,11 +109,16 @@ def create_test_dataloader(
         num_users=num_users,
         movie_rec_file_uri=recommendations_uri,
         movie_rec_ts_file_uri=recommendations_ts_uri)
+
+    user_movie_embeddings = read_user_movie_embeddings(
+        user_embeddings_uri=user_embeddings_uri,
+        movie_embeddings_uri=movie_embeddings_uri)
     
     os.environ["PYTHONPATH"] = os.environ.get("PYTHONPATH", "")
     os.environ["LD_LIBRARY_PATH"] = os.environ.get("LD_LIBRARY_PATH", "")
     
     dataloader = _create_dataloader(
+        user_movie_embeddings=user_movie_embeddings,
         all_movie_ids=all_movie_ids,
         recommendations=recommendations,
         ratings_data_uri= rattings_data_uri,
@@ -113,6 +130,7 @@ def create_test_dataloader(
     return dataloader
 
 def _create_dataloader(
+        user_movie_embeddings : jnp.ndarray,
         all_movie_ids: List[int], recommendations: RecommendedMovies,
         ratings_data_uri: str,
         ratings_history_uris: List[str],
@@ -150,7 +168,7 @@ def _create_dataloader(
         shard_options=shard_opts)
     
     original_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "0,1")
-    # 2. Hide GPUs from the next processes to be spawned
+    # Hide GPUs from the next processes to be spawned
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     logging.info("Instantiating Grain DataLoader (hiding GPUs from child workers)...")
     
@@ -169,7 +187,7 @@ def _create_dataloader(
                 all_movie_ids=all_movie_ids,
                 recommendations=recommendations,
                 num_candidates=num_candidates),
-            SparseLocalSubgraphTransform(),
+            SparseLocalSubgraphTransform(user_movie_embeddings=user_movie_embeddings),
             SuperGraphPaddingTransform(batch_size=batch_size,
                 max_history=max_history, num_candidates=num_candidates,
                 n_local_devices=len(jax.local_devices())),

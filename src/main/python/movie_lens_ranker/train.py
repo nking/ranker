@@ -32,11 +32,11 @@ import orbax.checkpoint as ocp
 from movie_lens_ranker.data_loading import create_train_and_val_dataloaders, \
     create_test_dataloader
 from movie_lens_ranker.model import GraphRanker
-from movie_lens_ranker.util import read_embeddings, \
+from movie_lens_ranker.util import \
     stringify_mlflow_params, get_canonical_mlflow_run_name, \
     calc_number_jax_graph_components, get_model_mesh, get_gpu_stats, \
     get_cpu_stats, is_running_on_gpu, model_params_trainable_keys, \
-    create_dirs_if_is_filepath
+    create_dirs_if_is_filepath, get_num_users_movies, read_user_movie_embeddings
 
 from jax.experimental import multihost_utils
 
@@ -371,7 +371,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     if save_checkpoints:
         logging.info(f'worker_rank={rank}: constructing checkpoint managers')
         mngr_latest = ocp.CheckpointManager(latest_checkpoint_uri,
-            item_handlers={
+              item_handlers={
                 'model': ocp.StandardCheckpointHandler(),
                 'opt': ocp.StandardCheckpointHandler(),
                 'global_step': ocp.StandardCheckpointHandler(),
@@ -667,16 +667,15 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
             raise ValueError(f'missing key {key} in config')
     
     worker_rank = jax.process_index()
-    
-    # NOTE: these are prepended with a row of zeros so that user_ids and movie_ids are direct indexes to the embeddings
-    embeddings, num_users = read_embeddings(
+
+    num_users, num_movies, emb_len = get_num_users_movies(
         user_embeddings_uri=config['user_embeddings_uri'],
-        movie_embeddings_uri=config['movie_embeddings_uri'],
-        batch_size=1024)
-    num_movies = len(embeddings) - 1 - num_users
-    
+        movie_embeddings_uri=config['movie_embeddings_uri'])
+
     train_dataloader, val_dataloader = create_train_and_val_dataloaders(
         num_users = num_users,
+        user_embeddings_uri = config['user_embeddings_uri'],
+        movie_embeddings_uri = config['movie_embeddings_uri'],
         movies_uri=config['movies_uri'],
         recommendations_uri=config['recommendations_uri'],
         recommendations_ts_uri=config['recommendations_ts_uri'],
@@ -709,7 +708,8 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
     with jax.set_mesh(model_mesh):
         
         #each model gets the same rngs so will have the same initialization even though in a different process
-        model = GraphRanker(user_movie_embeds=embeddings,
+        model = GraphRanker(
+            emb_in_dim = emb_len,
             num_candidates=config['num_candidates'],
             hidden_features=config['hidden_dim'],
             num_layers=config['num_layers'],
@@ -725,8 +725,10 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         fake_batch = create_fake_jagged_batch(batch_size=config['batch_size'],
             max_history=config['max_history'],
             num_candidates=config['num_candidates'], user_id_range=user_id_range,
-            movie_id_range=movie_id_range)
-        
+            movie_id_range=movie_id_range,
+            movie_embeddings_uri = config['movie_embeddings_uri'],
+            user_embeddings_uri = config['user_embeddings_uri'])
+
         jax_graph_comp_dict = calc_number_jax_graph_components(
             batch_size=config['batch_size'], max_history=config['max_history'],
             num_candidates=config['num_candidates'], n_local_devices=jax.local_device_count())
@@ -1093,6 +1095,7 @@ def run_test_phase(config: dict):
         
         #write to config from restore dict config
         for key in {"max_history", "num_candidates", "batch_size",
+            "movie_embeddings_uri",
             "movies_uri", "recommendations_uri", "recommendations_ts_uri",
             "ratings_train_liked_uri", "ratings_train_3_uri", "ratings_train_disliked_uri",
             "ratings_val_liked_uri", "ratings_val_3_uri", "ratings_val_disliked_uri",
@@ -1107,6 +1110,8 @@ def run_test_phase(config: dict):
         #these uris are all in config too, excepting test_ratings
         test_dataloader = create_test_dataloader(
             num_users = num_users,
+            user_embeddings_uri = config["user_embeddings_uri"],
+            movie_embeddings_uri = config["movie_embeddings_uri"],
             movies_uri = config['movies_uri'],
             recommendations_uri = config['recommendations_uri'],
             recommendations_ts_uri = config['recommendations_ts_uri'],
@@ -1343,7 +1348,9 @@ def check_model_state_equality(model_a, model_b, rtol=1e-5, atol=1e-8) -> bool:
     return True
 
 def create_fake_jagged_batch(batch_size: int,
-    max_history: int, num_candidates: int, user_id_range:Tuple[int, int], movie_id_range:Tuple[int, int]):
+    max_history: int, num_candidates: int,
+    user_id_range:Tuple[int, int],movie_id_range:Tuple[int, int],
+    user_embeddings_uri:str, movie_embeddings_uri:str):
     """
 
     :param batch_size:
@@ -1393,16 +1400,25 @@ def create_fake_jagged_batch(batch_size: int,
         "labels" : labels
     }
 
-    transform = SparseLocalSubgraphTransform()
+    user_movie_embeddings = read_user_movie_embeddings(
+        user_embeddings_uri=user_embeddings_uri,
+        movie_embeddings_uri=movie_embeddings_uri)
+
+    transform = SparseLocalSubgraphTransform(user_movie_embeddings=user_movie_embeddings)
     graphs : List[jraph.GraphsTuple] = transform.map(inputs)
 
     return graphs
 
 def create_dummy_super_padded_graph(batch_size: int,
-    max_history: int, num_candidates: int, user_id_range:Tuple[int, int], movie_id_range:Tuple[int, int]):
+    max_history: int, num_candidates: int, user_id_range:Tuple[int, int],
+    movie_id_range:Tuple[int, int], user_embeddings_uri:str,
+    movie_embeddings_uri:str):
     
     fake_graph_list = create_fake_jagged_batch(batch_size=batch_size, max_history=max_history,
-        num_candidates=num_candidates, user_id_range=user_id_range, movie_id_range=movie_id_range)
+        num_candidates=num_candidates, user_id_range=user_id_range,
+        movie_id_range=movie_id_range,
+        movie_embeddings_uri = movie_embeddings_uri,
+        user_embeddings_uri = user_embeddings_uri)
     
     jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
         max_history, num_candidates, n_local_devices=jax.local_device_count())
@@ -1415,5 +1431,3 @@ def create_dummy_super_padded_graph(batch_size: int,
     )
     
     return padded_super_graph
-    
-    

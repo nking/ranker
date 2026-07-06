@@ -25,7 +25,8 @@ class SuperGraphPaddingTransform(pgrain.MapTransform):
                     "ids": node_ids,
                     "label": node_labels,
                     "type": node_types,
-                    "candidate_mask": candidate_mask
+                    "candidate_mask": candidate_mask,
+                    "embeddings" : embeddings for node_ids
                 },
                 edges={"rating": edge_features},
                 senders=senders,

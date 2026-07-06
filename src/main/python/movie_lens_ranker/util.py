@@ -316,32 +316,52 @@ def destringify_mlflow_params(params:dict):
             # Fallback for plain strings that aren't valid JSON (like "adam")
             config[k] = v
     return config
-    
-def read_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_size:int=1024) -> Tuple[jnp.ndarray, int]:
+
+def get_num_users_movies(user_embeddings_uri:str, movie_embeddings_uri:str) -> Tuple[int, int, int]:
     """
-    read the user and movie embeddings and concatenate them: [row of zeros, user embeddings, movie embeddings].  the
-    row of zeros is needed because user_ids start with 1.
+    returns number of users, number of movies, and the embedding length.
+    note that the user ids are [1, num_users], inclusive and movie_ids are [num_users + 1. num_users+ 1 + num_movies], inclusive.
+    :param user_embeddings_uri:
+    :param movie_embeddings_uri:
+    :return:
+    """
+    try:
+        reader = array_record_module.ArrayRecordReader(user_embeddings_uri)
+        num_users = reader.num_records()
+    finally:
+        reader.close()
+    try:
+        reader = array_record_module.ArrayRecordReader(movie_embeddings_uri)
+        num_movies= reader.num_records()
+        batch_bytes = reader.read([0])
+        batch = [msgpack.unpackb(b, use_list=True) for b in batch_bytes]  # list of [int, [list]] of id and embedding
+        for record in batch:
+            emb_len = len(record[1])
+    finally:
+        reader.close()
+    return num_users, num_movies, emb_len
+
+def read_user_movie_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
+    """
+    read and return the movie embedding
     :param user_embeddings_uri:
     :param movie_embeddings_uri:
     :param batch_size:
-    :return: a tuple of:
-        concatenated row of zeros, user embeddings, movie embeddings,
-        num_users
+    :return: tconcatenated row of zeros, user embeddings, movie embeddings,
     """
     user_emb = _read_embeddings(user_embeddings_uri, batch_size=batch_size)
     movie_emb = _read_embeddings(movie_embeddings_uri, batch_size=batch_size)
     zero_row = jnp.zeros((1, user_emb.shape[1]))
     emb = jnp.concatenate([zero_row, user_emb, movie_emb])
-    return emb, len(user_emb)
+    return emb
 
-    
-def _read_embeddings(embeddings_uri:str, batch_size:int=1024) ->  jnp.ndarray:
+def _read_embeddings(embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
     """
     given the embedding uri return and the embeddings
     as a 2D jnp array.
     :param embeddings_uri:
     :param batch_size:
-    :return:
+    :return: 2D array of embeddings
     """
     ids = []
     embeddings = []

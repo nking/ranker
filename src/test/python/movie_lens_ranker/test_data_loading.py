@@ -75,7 +75,7 @@ class TestDataLoading(unittest.TestCase):
         self.assertEqual(3883, len(emb))
         self.assertTrue(isinstance(emb, jnp.ndarray))
         
-        embeddings, num_users = read_embeddings(
+        embeddings = read_user_movie_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)
@@ -231,11 +231,7 @@ class TestDataLoading(unittest.TestCase):
             f'avg time to read a dataloader item (batched) = {(stop_time - start_time) / (count * batch_size):.6f} sec')
     
     def test_build_history_lookup(self):
-        
-        embeddings, num_users = read_embeddings(
-            user_embeddings_uri=self.user_embeddings_uri,
-            movie_embeddings_uri=self.movie_embeddings_uri, batch_size=1024)
-        
+
         batch_size = 1024
         # expecting Dict[int, Tuple[list, list, list]]
         history_dict, max_history = build_history_lookup(
@@ -255,10 +251,12 @@ class TestDataLoading(unittest.TestCase):
     def test_read_array_records2(self):
         batch_size = 1024
         
-        embeddings, num_users = read_embeddings(
+        user_movie_embeddings = read_user_movie_embeddings(
             user_embeddings_uri=self.user_embeddings_uri,
             movie_embeddings_uri=self.movie_embeddings_uri,
             batch_size=1024)
+        self.assertIsNotNone(user_movie_embeddings)
+        self.assertTrue(len(user_movie_embeddings) > 100)
         
         all_movie_ids: List[int] = read_movies_array_record(
             self.movie_ids_uri, batch_size=batch_size)

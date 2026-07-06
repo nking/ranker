@@ -41,7 +41,8 @@ The steps to making the enriched graph:
                     "label": node_labels,
                     "type": np.array(
                         [0] + [1] * n_real_history + [2] * n_candidates),
-                    "candidate_mask": node_is_candidate
+                    "candidate_mask": node_is_candidate,
+                    "embeddings" : embeddings corresponding to "ids"
                 },
                 # edges, senders, receivers are length  n_real_history + self.num_candidates
                 edges={"rating": edge_features},

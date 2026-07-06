@@ -5,13 +5,13 @@ from flax import nnx
 import jax.numpy as jnp
 
 class GraphRanker(nnx.Module):
-    def __init__(self, user_movie_embeds: jnp.ndarray,
+    def __init__(self,
+            emb_in_dim:int, #16
             num_candidates: int,
             hidden_features: int = 128, num_layers: int = 2,
             out_features: int = 64, heads: int = 4, edge_embed_dim:int=8,
             dropout_rate: float = 0.1, rngs: nnx.Rngs = nnx.Rngs(0)):
         """
-        :param user_movie_embeds: concat of [user embeddings and movie_embeddings]
         :param num_candidates: number per user of negatives + positive to use for their final graph
         :param hidden_features: size of hidden layers per head in the GATv2 layer
         :param num_layers: number of layers in the GATv2 layer
@@ -22,8 +22,9 @@ class GraphRanker(nnx.Module):
         :param rngs: the pseudo random number generator
         """
         self.edge_embed_dim = edge_embed_dim
-        self.embed_in_dim = user_movie_embeds.shape[1]
-        self.user_movie_embeddings = nnx.Variable(user_movie_embeds)
+        #self.embed_in_dim = user_movie_embeds.shape[1]
+        self.embed_in_dim = emb_in_dim
+        #self.user_movie_embeddings = nnx.Variable(user_movie_embeds)
         
         self.K = num_candidates
         
@@ -58,7 +59,8 @@ class GraphRanker(nnx.Module):
         :return:
         """
         #[ len(graph.nodes["ids"]) X embed_in_dim ]
-        x = jnp.take(a=self.user_movie_embeddings.get_value(), indices=graph.nodes["ids"], axis=0)
+
+        x = graph.nodes["embeddings"]
         
         # Convert edge ratings to integers (0-5)
         # Ensure they are int32 so the embedding layer can use them as indices

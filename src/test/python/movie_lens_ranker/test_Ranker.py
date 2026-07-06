@@ -2,6 +2,9 @@ import datetime
 import os
 import logging
 import sys
+# Force etils to think tensorflow doesn't exist, triggering the gcsfs fallback
+sys.modules['tensorflow'] = None
+
 #to test for multiple devices before using on GPUs or TPUs:
 #os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=4'
 
@@ -757,23 +760,23 @@ class TestRanker(unittest.TestCase):
     def test_feed_fake_data(self):
         
         config = self.config
-        
-        embeddings, num_users = read_embeddings(
+
+        num_users,num_movies, embed_len = get_num_users_movies(
             user_embeddings_uri=config['user_embeddings_uri'],
-            movie_embeddings_uri=config['movie_embeddings_uri'],
-            batch_size=1024)
-        
-        num_movies = len(embeddings) - 1 - num_users
-        
+            movie_embeddings_uri=config['movie_embeddings_uri'])
+
         max_history = 10
         num_candidates = 20
         user_id_range = (1, num_users)
         movie_id_range = (num_users + 1, num_users + num_movies)
         
-        fake_data = create_dummy_super_padded_graph(batch_size = 1,
+        fake_data = create_dummy_super_padded_graph(
+            batch_size = 1,
             max_history = max_history,
             num_candidates = num_candidates,
-            user_id_range = user_id_range, movie_id_range = movie_id_range)
+            user_id_range = user_id_range, movie_id_range = movie_id_range,
+            user_embeddings_uri=config['user_embeddings_uri'],
+            movie_embeddings_uri=config['movie_embeddings_uri'])
         
         rngs = nnx.Rngs(config.get('seed', 0))
         
@@ -787,7 +790,8 @@ class TestRanker(unittest.TestCase):
         config['edge_embed_dim'] = 8
         config['dropout_rate'] = 0.05
         
-        model = GraphRanker(user_movie_embeds=embeddings,
+        model = GraphRanker(
+            emb_in_dim = embed_len,
             num_candidates=config['num_candidates'],
             hidden_features=config['hidden_dim'],
             num_layers=config['num_layers'],
@@ -814,14 +818,15 @@ class TestRanker(unittest.TestCase):
         fake_batch = create_fake_jagged_batch(batch_size=batch_size,
             max_history=max_history,
             num_candidates=num_candidates, user_id_range=user_id_range,
-            movie_id_range=movie_id_range)
+            movie_id_range=movie_id_range,
+            user_embeddings_uri=config['user_embeddings_uri'],
+            movie_embeddings_uri=config['movie_embeddings_uri'])
         
         n_local_devices = jax.local_device_count()
         
         time0 = datetime.datetime.now()
-        
-        padded_super_graph_0 = pad_graph_tuple_batch(fake_batch,
-            jax_graph_comp_dict)
+
+        padded_super_graph_0 = pad_graph_tuple_batch(fake_batch, jax_graph_comp_dict)
         
         time1 = datetime.datetime.now()
         
@@ -849,7 +854,15 @@ class TestRanker(unittest.TestCase):
         
         np.testing.assert_array_equal(padded_super_graph_1.receivers, padded_super_graph_0.receivers)
         np.testing.assert_array_equal(padded_super_graph_1.senders, padded_super_graph_0.senders)
-        
+
+        np.testing.assert_array_equal(padded_super_graph_1.nodes["ids"], padded_super_graph_0.nodes["ids"])
+        np.testing.assert_array_equal(padded_super_graph_1.nodes["label"], padded_super_graph_0.nodes["label"])
+        np.testing.assert_array_equal(padded_super_graph_1.nodes["type"], padded_super_graph_0.nodes["type"])
+        np.testing.assert_array_equal(padded_super_graph_1.nodes["candidate_mask"], padded_super_graph_0.nodes["candidate_mask"])
+        np.testing.assert_array_almost_equal(padded_super_graph_1.nodes["embeddings"],
+            padded_super_graph_0.nodes["embeddings"])
+
+
     def _dictionaries_are_same(self, d0:Dict[str, np.ndarray], d1:Dict[str, np.ndarray]):
         self.assertEqual(len(d0), len(d1))
         self.assertEqual(d0.keys(), d1.keys())
@@ -896,13 +909,18 @@ class TestRanker(unittest.TestCase):
             [9477, 6941, 6948, 8475, 6356]
         ])
 
+
+        user_movie_embeddings = read_user_movie_embeddings(
+            user_embeddings_uri=self.user_embeddings_uri,
+            movie_embeddings_uri=self.movie_embeddings_uri)
+
         user_history = UserHistory(ratings_uri_list=[ratings_uri_dict['train_liked']], max_history=2048)
 
         tr1 = RatingsHistoryLookupTransform(
             history_lookup=user_history,
             max_history=max_history)
         tr2 = CandidateIdTransform(num_candidates=num_candidates)
-        tr3 = SparseLocalSubgraphTransform()
+        tr3 = SparseLocalSubgraphTransform(user_movie_embeddings=user_movie_embeddings)
         tr4 = SuperGraphPaddingTransform(batch_size=batch_size,
              max_history=max_history, num_candidates=num_candidates,
             n_local_devices=len(jax.local_devices()))
@@ -913,6 +931,57 @@ class TestRanker(unittest.TestCase):
         r4 = tr4.map(r3)
 
         print(f'demo batch:\n {r4}')
+
+
+    def test_optimized_batch_and_pad(self):
+
+        batch_size = 3
+        max_history = 4
+        num_candidates = 5
+
+        user_id_range = (1, 10)
+        movie_id_range = (1, 10)
+
+        jax_graph_comp_dict = calc_number_jax_graph_components(
+            batch_size=batch_size, max_history=max_history,
+            num_candidates=num_candidates,
+            n_local_devices=jax.local_device_count())
+
+        fake_batch = create_fake_jagged_batch(batch_size=batch_size,
+                                              max_history=max_history,
+                                              num_candidates=num_candidates, user_id_range=user_id_range,
+                                              movie_id_range=movie_id_range,
+                                              user_embeddings_uri=self.user_embeddings_uri, movie_embeddings_uri=self.movie_embeddings_uri)
+
+        #import pprint
+        #pprint.pprint(f"fake_jagged_batch=\n{fake_batch}")
+        print(f"fake_jagged_batch=\n{fake_batch}")
+
+        n_local_devices = jax.local_device_count()
+
+        padded_super_graph_0 = pad_graph_tuple_batch(fake_batch,
+                                                     jax_graph_comp_dict)
+
+        padded_super_graph_1, _ = optimized_batch_and_pad(
+            batch=fake_batch,
+            max_nodes=jax_graph_comp_dict['max_nodes'],
+            max_edges=jax_graph_comp_dict['max_edges'],
+            max_graphs=jax_graph_comp_dict['max_graphs'],
+        )
+
+        print(f"padded_super_graph_1=\n{padded_super_graph_1}")
+
+
+        ## compare the graphs
+        self._dictionaries_are_same(padded_super_graph_1.edges, padded_super_graph_0.edges)
+        np.testing.assert_array_equal(padded_super_graph_1.n_edge, padded_super_graph_0.n_edge)
+        np.testing.assert_array_equal(padded_super_graph_1.n_node, padded_super_graph_0.n_node)
+        self._tuples_are_same(padded_super_graph_1._fields, padded_super_graph_0._fields)
+        self.assertIsNone(padded_super_graph_0.globals)
+        self.assertIsNone(padded_super_graph_1.globals)
+
+        np.testing.assert_array_equal(padded_super_graph_1.receivers, padded_super_graph_0.receivers)
+        np.testing.assert_array_equal(padded_super_graph_1.senders, padded_super_graph_0.senders)
 
 
 if __name__ == '__main__':

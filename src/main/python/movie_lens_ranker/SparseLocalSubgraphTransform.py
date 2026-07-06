@@ -3,14 +3,20 @@ from typing import Dict, List
 import jraph
 import grain.python as pgrain
 import numpy as np
+import jax.numpy as jnp
 
 from movie_lens_ranker.util_numba import build_graph_arrays
 
 class SparseLocalSubgraphTransform(pgrain.MapTransform):
     
-    def __init__(self):
-        pass
-    
+    def __init__(self, user_movie_embeddings:jnp.ndarray):
+        """
+
+        :param user_movie_embeddings: stacked embeddings with first row being all zeros so that user
+        ids and movie_ids will be the same as the indexes of the user_movie_embeddings 2D array
+        """
+        self.user_movie_embeddings = user_movie_embeddings
+
     def map(self, batch:Dict[str, np.ndarray]) -> List[jraph.GraphsTuple]:
         """
         create a local subgraph for the record in which all indexes are relative to just these local
@@ -44,7 +50,7 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
         #   in the RatingsHistoryLookupTransform
         
         # NOTE: method returns a sparse GraphsTuple, ignoring the padded variables in record, because
-        # the resulting datastructure is not seen by the GPU.
+        # the resulting data structure is not seen by the GPU.
         results = []
         batch_size = len(batch['user_id'])
         
@@ -55,11 +61,14 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
             h_rats = batch["history_ratings"][i]
             h_m_ids = batch["history_movie_ids"][i]
             lbls = batch["labels"][i]
-            
+
             # Run the Numba kernel
             (senders, receivers, edge_features, node_ids,
                 node_labels, node_types, candidate_mask,
-                total_nodes, total_edges) = build_graph_arrays(u_id, n_hist, c_ids, h_rats, h_m_ids, lbls)
+                total_nodes, total_edges
+             ) = build_graph_arrays(u_id, n_hist, c_ids, h_rats, h_m_ids, lbls)
+
+            emb = jnp.take(a=self.user_movie_embeddings, indices=node_ids, axis=0)
             
             # Construct the GraphsTuple (Python side)
             results.append(jraph.GraphsTuple(
@@ -67,7 +76,8 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
                     "ids": node_ids,
                     "label": node_labels,
                     "type": node_types,
-                    "candidate_mask": candidate_mask
+                    "candidate_mask": candidate_mask,
+                    "embeddings" : emb,
                 },
                 edges={"rating": edge_features},
                 senders=senders,
