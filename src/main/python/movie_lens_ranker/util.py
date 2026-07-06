@@ -336,10 +336,10 @@ def get_num_users_movies(user_embeddings_uri:str, movie_embeddings_uri:str) -> T
         batch_bytes = reader.read([0])
         batch = [msgpack.unpackb(b, use_list=True) for b in batch_bytes]  # list of [int, [list]] of id and embedding
         for record in batch:
-            emb_len = len(record[1])
+            embed_len = len(record[1])
     finally:
         reader.close()
-    return num_users, num_movies, emb_len
+    return num_users, num_movies, embed_len
 
 def read_user_movie_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
     """

@@ -646,7 +646,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
 def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[str, Any]:
     """
     build the model, optimizer, and dataloaders and return them in a dictionary that has keys {"rngs", "model", "optimizer", 'train_dataloader',
-    'val_dataloader', 'num_users', 'num_movies'}  where num_users and num_movies are the number of users and movies in the
+    'val_dataloader', 'num_users', 'num_movies', 'embed_len'}  where num_users and num_movies are the number of users and movies in the
     entire user and movie catalog represented by the embeddings.
     
     :param config:
@@ -668,12 +668,17 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
     
     worker_rank = jax.process_index()
 
-    num_users, num_movies, emb_len = get_num_users_movies(
-        user_embeddings_uri=config['user_embeddings_uri'],
-        movie_embeddings_uri=config['movie_embeddings_uri'])
+    if "num_users" not in config:
+        num_users, num_movies, embed_len = get_num_users_movies(
+            user_embeddings_uri=config['user_embeddings_uri'],
+            movie_embeddings_uri=config['movie_embeddings_uri'])
+
+        config['num_users'] = num_users
+        config['num_movies'] = num_movies
+        config['embed_len'] = embed_len
 
     train_dataloader, val_dataloader = create_train_and_val_dataloaders(
-        num_users = num_users,
+        num_users = config['num_users'],
         user_embeddings_uri = config['user_embeddings_uri'],
         movie_embeddings_uri = config['movie_embeddings_uri'],
         movies_uri=config['movies_uri'],
@@ -709,7 +714,7 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         
         #each model gets the same rngs so will have the same initialization even though in a different process
         model = GraphRanker(
-            emb_in_dim = emb_len,
+            emb_in_dim = config['embed_len'],
             num_candidates=config['num_candidates'],
             hidden_features=config['hidden_dim'],
             num_layers=config['num_layers'],
@@ -719,8 +724,8 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
             dropout_rate=config['dropout_rate'], rngs=rngs)
         
         #initialize the layers with same fake data
-        user_id_range = (1, num_users)
-        movie_id_range = (num_users + 1, num_users + num_movies)
+        user_id_range = (1, config['num_users'])
+        movie_id_range = (config['num_users'] + 1, config['num_users'] + config['num_movies'])
         
         fake_batch = create_fake_jagged_batch(batch_size=config['batch_size'],
             max_history=config['max_history'],
@@ -777,7 +782,7 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         
     return {"rngs": rngs, "model": model, "optimizer": optimizer,
         'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader,
-        'num_users': num_users, 'num_movies': num_movies}
+        'num_users': config['num_users'], 'num_movies': config['num_movies'], 'embed_len' : config['embed_len']}
 
 def run_train_phase(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tuple[float, str]:
     """
@@ -825,9 +830,11 @@ def run_train_phase(config: dict, trial:Trial=None, save_checkpoints:bool=False)
     val_dataloader = _dict['val_dataloader']
     num_users = _dict['num_users']
     num_movies = _dict['num_movies']
+    embed_len = _dict['embed_len']
     
     config['num_users'] = num_users
     config['num_movies'] = num_movies
+    config['embed_len'] = embed_len
     
     mlflow_run = None
     best_val_ndcg_k = -1.0
@@ -977,7 +984,7 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     # restore config, then rngs, so can restore model and dataloaders from them
     restored_config = mngr.restore(epoch, args=ocp.args.Composite(config=ocp.args.JsonRestore()))
     config = restored_config['config']
-    
+
     _dict = build_model_optimizer_and_dataloaders(config, rngs=nnx.Rngs(config.get('seed', 0)))
     model = _dict['model']
     optimizer = _dict['optimizer']
@@ -985,6 +992,7 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
     val_dataloader = _dict['val_dataloader']
     num_users = _dict['num_users']
     num_movies = _dict['num_movies']
+    embed_len = _dict['embed_len']
     
     #model_mesh = get_model_mesh()
     #graphdef_model, model_state = nnx.get_abstract_model(lambda: model, model_mesh)
@@ -1028,6 +1036,7 @@ def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -
         'global_step': global_step,
         'num_users': num_users,
         'num_movies': num_movies,
+        'embed_len' : embed_len,
         'config': config
     }
 
@@ -1072,6 +1081,7 @@ def run_test_phase(config: dict):
     num_movies = restore_dict['num_movies']
     config['num_users'] = num_users
     config['num_movies'] = num_movies
+    config['embed_len'] = restore_dict['embed_len']
     
     model = restore_dict['model']
     model.eval()
@@ -1353,6 +1363,8 @@ def create_fake_jagged_batch(batch_size: int,
     user_embeddings_uri:str, movie_embeddings_uri:str):
     """
 
+    :param movie_embeddings_uri:
+    :param user_embeddings_uri:
     :param batch_size:
     :param max_history:
     :param num_candidates:

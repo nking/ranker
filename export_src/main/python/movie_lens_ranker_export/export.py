@@ -26,7 +26,7 @@ def create_serving_signature(max_nodes:int, max_edges:int, max_graphs:int, embed
                 "node_embeddings" : tf.TensorSpec(shape=(max_nodes, embed_len), dtype=tf.float32, name="node_embeddings"),
 
                 # Edges attributes
-                "edge_features": tf.TensorSpec(shape=(max_edges,), dtype=tf.int32, name="edge_rating"),
+                "edge_features": tf.TensorSpec(shape=(max_edges,), dtype=tf.int32, name="edge_features"),
 
                 # Core Graph Topology
                 "receivers": tf.TensorSpec(shape=(max_edges,), dtype=tf.int32,  name="receivers"),
@@ -77,6 +77,9 @@ def export_models(trained_model: GraphRanker, batch_size:int, max_history:int,
     jax_graph_comp_dict_single = calc_number_jax_graph_components(1,
         max_history, num_candidates, n_local_devices=n_local_devices)
 
+    print(f'jax_graph_comp_dict_single={jax_graph_comp_dict_single}', flush=True)
+    print(f'jax_graph_comp_dict_batch={jax_graph_comp_dict_batch}', flush=True)
+
     single_serving_config = create_serving_signature(
         max_nodes=jax_graph_comp_dict_single['max_nodes'],
         max_edges=jax_graph_comp_dict_single['max_edges'],
@@ -115,7 +118,7 @@ def export_models(trained_model: GraphRanker, batch_size:int, max_history:int,
             n_edge=inputs["n_edge"]
         )
 
-        return model(graph_batch)
+        return model(graph_batch)[:num_candidates]
 
     # Pass *only* the params to JaxModule, not the whole trained_model
     jax_module = export.JaxModule(

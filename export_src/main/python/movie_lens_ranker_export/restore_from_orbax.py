@@ -8,7 +8,7 @@ from functools import partial
 
 from build.lib.movie_lens_ranker.util import get_model_mesh
 from movie_lens_ranker.model import GraphRanker
-from movie_lens_ranker.train import create_fake_jagged_batch, convert_to_global
+from movie_lens_ranker.train import create_fake_jagged_batch, convert_to_global, create_dummy_super_padded_graph
 from movie_lens_ranker.util import calc_number_jax_graph_components
 
 from movie_lens_ranker.util_np import optimized_batch_and_pad
@@ -103,11 +103,12 @@ def _build_model_only(config:dict, rngs:nnx.Rngs) -> Dict[str, Any]:
         edge_embed_dim=config['edge_embed_dim'],
         dropout_rate=config['dropout_rate'], rngs=rngs)
 
+    '''
     #initialize the layers with same fake data
     user_id_range = (1, config['num_users'])
     movie_id_range = (config['num_users'] + 1, config['num_users'] + config['num_movies'])
 
-    fake_batch = create_fake_jagged_batch(batch_size=config['batch_size'],
+    fake_padded_graph = create_dummy_super_padded_graph(batch_size=config['batch_size'],
                                           max_history=config['max_history'],
                                           num_candidates=config['num_candidates'],
                                           user_id_range=user_id_range,
@@ -115,19 +116,9 @@ def _build_model_only(config:dict, rngs:nnx.Rngs) -> Dict[str, Any]:
                                           movie_embeddings_uri = config['movie_embeddings_uri'],
                                           user_embeddings_uri = config['user_embeddings_uri'])
 
-    jax_graph_comp_dict = calc_number_jax_graph_components(
-        batch_size=config['batch_size'], max_history=config['max_history'],
-        num_candidates=config['num_candidates'], n_local_devices=jax.local_device_count())
-
-    padded_graph, _ = optimized_batch_and_pad(
-        batch=fake_batch,
-        max_nodes=jax_graph_comp_dict['max_nodes'],
-        max_edges=jax_graph_comp_dict['max_edges'],
-        max_graphs=jax_graph_comp_dict['max_graphs'],
-    )
-
     model.eval()
-    model(padded_graph)
+    model(fake_padded_graph)
+    '''
 
     return {"rngs": rngs, "model": model,
             'num_users': config['num_users'], 'num_movies': config['num_movies'], 'embed_len' : config['embed_len']}
