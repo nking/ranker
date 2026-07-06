@@ -1,0 +1,10 @@
+{
+    "version": 2,
+    "last_seen_indices": {
+        "0": 3
+    },
+    "last_worker_index": -1,
+    "worker_count": 0,
+    "sampler": "BatchSampler(num_records=100, num_epochs=4,batch_size=64, shuffle=True, seed=234shard_options=ShardByJaxProcess(shard_index=0, shard_count=1, drop_remainder=False))",
+    "data_source": "RandomAccessArrayRecordDataSource gs://data/tiny/ratings_train_liked.array_record"
+}

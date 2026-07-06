@@ -1,0 +1,1 @@
+{"array_metadatas": [{"array_metadata": {"param_name": "default.count.value", "write_shape": [], "chunk_shape": [], "ext_metadata": null}}, {"array_metadata": {"param_name": "default.key.value", "write_shape": [2], "chunk_shape": [2], "ext_metadata": {"random_key_impl": "threefry2x32"}}}]}
