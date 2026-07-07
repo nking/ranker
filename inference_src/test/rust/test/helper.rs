@@ -75,11 +75,23 @@ pub fn get_embeddings_uris() -> (String, String) {
         p.push("src/test/resources/data/user_emb-00000-of-00001.parquet");
     }
     let mut movie_embedding_uri : Option<PathBuf> = get_project_dir();
-    if let Some(ref mut p) = user_embedding_uri {
+    if let Some(ref mut p) = movie_embedding_uri {
         p.push("src/test/resources/data/movie_emb-00000-of-00001.parquet");
     }
 
-    (movie_embedding_uri.unwrap().to_string_lossy().into_owned(),
-    user_embedding_uri.unwrap().to_string_lossy().into_owned())
+    (user_embedding_uri.unwrap().to_string_lossy().into_owned(),
+    movie_embedding_uri.unwrap().to_string_lossy().into_owned())
+}
+
+pub fn assert_slices_nearly_equal(a: &[f32], b: &[f32], epsilon: f32) {
+    assert_eq!(a.len(), b.len(), "Slices have different lengths");
+    for (i, (val_a, val_b)) in a.iter().zip(b.iter()).enumerate() {
+        let diff = (val_a - val_b).abs();
+        assert!(
+            diff < epsilon,
+            "At index {}: {} and {} are not close (diff: {})",
+            i, val_a, val_b, diff
+        );
+    }
 }
 

@@ -1,4 +1,5 @@
 use std::cmp::min;
+use crate::embeddings_util::{read_movie_embeddings, read_user_embeddings};
 use crate::util;
 
 fn build_graph_arrays(
@@ -267,10 +268,17 @@ pub fn build_padded_super_graph(
 /// ```
 pub fn create_fake_padded_super_batch(batch_size: usize,
     max_history: usize, num_candidates: usize, user_id_range: (usize, usize),
-    movie_id_range: (usize, usize), n_local_devices: usize) -> JraphGraph {
+    movie_id_range: (usize, usize), n_local_devices: usize,
+    user_embeddings_uri : &String,
+    movie_embeddings_uri : &String
+    ) -> JraphGraph {
     if (movie_id_range.1 - movie_id_range.0 + 1) < (num_candidates + max_history + 1) {
         panic!("the range of movie_id_range must be >= (num_history + num_candidates + 1)")
     }
+
+    let (user_embeddings_catalog, num_users, embed_len) = read_user_embeddings(&user_embeddings_uri);
+    let (movie_embeddings_catalog, num_movies, _) = read_movie_embeddings(&movie_embeddings_uri);
+
 
     let mut user_ids: Vec<i32> = vec![0; batch_size];
     let mut movie_ids: Vec<i32> = vec![0; batch_size];
@@ -280,6 +288,8 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
     let mut history_ratings: Vec<i32> = vec![-1; batch_size * max_history];
     let mut candidate_ids: Vec<i32> = vec![0; batch_size * num_candidates];
     let mut labels: Vec<i32> = vec![0; batch_size * num_candidates];
+
+    let mut user_embeddings = vec![0.0; batch_size * embed_len];
 
     for i in 0..batch_size {
         user_ids[i] = (user_id_range.0 + i) as i32;
@@ -298,9 +308,13 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
         // choose the positive candidate to be at index 0
         candidate_ids[i * num_candidates] = movie_ids[i];
         labels[i * num_candidates] = 1;
-    }
 
-    editing for embeddings
+        let idx = (user_ids[i] -1) as usize;
+        let idx_offset = idx * embed_len;
+        let out_offset = i * embed_len;
+        user_embeddings[out_offset..(out_offset + embed_len)].copy_from_slice(
+            &user_embeddings_catalog[idx_offset..(idx_offset + embed_len)]);
+    }
 
     let padded_super_graph = build_padded_super_graph(
             &user_ids,
@@ -311,18 +325,31 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
             &labels,
             num_candidates,
             max_history,
+            num_users,
+            num_movies,
+            embed_len,
+            &movie_embeddings_catalog,
+            &user_embeddings,
             n_local_devices);
 
         padded_super_graph
     }
-    pub fn build_enriched_padded_supergraph(user_ids: &[i32], timestamps: &[i64],
-        candidate_ids: &[i32], labels: &[i32], user_history: &crate::user_history::UserHistory, max_history: usize,
-        num_users : usize, num_movies : usize, embed_len: usize,
-        movie_embeddings_catalog : &[f32], user_embeddings : &[f32],
+    pub fn build_enriched_padded_supergraph(
+        user_ids: &[i32],
+        timestamps: &[i64],
+        candidate_ids: &[i32],
+        labels: &[i32],
+        user_history: &crate::user_history::UserHistory,
+        max_history: usize,
+        num_users : usize,
+        num_movies : usize,
+        embed_len: usize,
+        movie_embeddings_catalog : &[f32],
+        user_embeddings : &[f32],
         n_local_devices: usize) -> JraphGraph {
 
-        let num_users = user_ids.len();
-        let num_candidates = candidate_ids.len() / num_users;
+        let batch_size = user_ids.len();
+        let num_candidates = candidate_ids.len() / batch_size;
 
         // get max_history lengths of most recent histories of user_ids, but only if before timestamp.
         // empty elements are represented by user_history.pad_value
@@ -330,11 +357,8 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
             user_ids, timestamps, max_history,
         );
 
-        // get real history length
-        let num_users = user_ids.len();
-
-        let history_lengths = util::get_non_padded_lengths_of_flattened_arrays(num_users,
-            max_history, &history_movie_ids, user_history.pad_value);
+        let history_lengths = util::get_non_padded_lengths_of_flattened_arrays(
+            batch_size, max_history, &history_movie_ids, user_history.pad_value);
 
         let padded_super_graph = build_padded_super_graph(
             &user_ids,

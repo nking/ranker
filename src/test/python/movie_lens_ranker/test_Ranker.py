@@ -931,6 +931,8 @@ class TestRanker(unittest.TestCase):
         r4 = tr4.map(r3)
 
         print(f'demo batch:\n {r4}')
+        print(f'nodes["embeddings"]={np.array2string(r4.nodes["embeddings"], threshold=sys.maxsize)}')
+
 
 
     def test_optimized_batch_and_pad(self):

@@ -1,12 +1,8 @@
 //! class to prepare inputs into protocol buffers for use in gRPC calls to a Tensorflow Serving or other server
 //! hosting the TF SavedModel
 use std::error::Error;
-use std::fs::Metadata;
 use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
-use once_cell::sync::Lazy;
-
 use std::collections::HashMap;
-use tonic::transport::Channel;
 
 //use crate::inference::tf_core::Example;
 
@@ -22,7 +18,7 @@ use tf_core::Example;
 use tf_core::SignatureDef;
 
 use tf_serving::prediction_service_client::PredictionServiceClient;
-use tf_serving::{PredictRequest, ModelSpec, PredictResponse};
+use tf_serving::{PredictRequest, ModelSpec};
 use tf_core::{TensorProto, TensorShapeProto, DataType};
 use tf_core::tensor_shape_proto::Dim;
 use crate::user_history::{build_user_history, UserHistory};
@@ -65,6 +61,30 @@ impl IntoTensorProto for Vec<i32> {
     }
 }
 
+impl IntoTensorProto for Vec<f32> {
+    fn into_tensor(self) -> TensorProto {
+        let size = self.len() as i64;
+        TensorProto {
+            dtype: DataType::DtFloat as i32,
+            tensor_shape: Some(TensorShapeProto {
+                dim: vec![Dim { size, name: String::new() }],
+                unknown_rank: false,
+            }),
+            version_number: 0,
+            // f32 data goes into float_val, NOT int_val
+            float_val: self,
+            int_val: vec![],
+            // ... all other fields must be empty vectors
+            tensor_content: vec![], half_val: vec![],
+            double_val: vec![], string_val: vec![], scomplex_val: vec![],
+            int64_val: vec![], bool_val: vec![], dcomplex_val: vec![],
+            resource_handle_val: vec![], variant_val: vec![],
+            uint32_val: vec![], uint64_val: vec![],
+            float8_val: vec![],
+        }
+    }
+}
+
 // Implement for Vec<bool> (For candidate masks)
 impl IntoTensorProto for Vec<bool> {
     fn into_tensor(self) -> TensorProto {
@@ -87,13 +107,39 @@ impl IntoTensorProto for Vec<bool> {
     }
 }
 
+///
+///
+/// # Arguments
+///
+/// * `savedmodel_uri`:
+/// * `user_ids`:
+/// * `timestamps`:
+/// * `candidate_ids`:
+/// * `ratings_uris`:
+/// * `num_catalog_users`:
+/// * `num_catalog_movies`:
+/// * `user_embeddings`:
+/// * `movie_embeddings_catalog`:  catalog of movie_embeddings.  TODO: wrap this in an object
+///      which can be cached
+///
+/// returns: Result<Vec<f32, Global>, Box<dyn Error, Global>>
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
 #[tokio::main]
 pub async fn run_inference(
-    savedmodel_uri: &str,
     user_ids: &[i32],
     timestamps: &[i64],
     candidate_ids: &[i32],
     ratings_uris : &[&str],
+    num_catalog_users : usize,
+    num_catalog_movies : usize,
+    user_embeddings: &[f32],
+    movie_embeddings_catalog: &[f32],
+    n_local_devices_on_server : usize
 ) -> Result<(Vec<f32>), Box<dyn Error>> {
 
     if candidate_ids.len() != NUM_CANDIDATES {
@@ -104,6 +150,8 @@ pub async fn run_inference(
         panic!["user_ids length should equal timestamps length"]
     }
 
+    let embed_len = &user_embeddings.len() / &user_ids.len();
+
     // create padded_super_graph
     let user_history : UserHistory = build_user_history(&ratings_uris, 2048);
 
@@ -111,11 +159,20 @@ pub async fn run_inference(
     //labels aren't used in inference.  a value of -1 can help distinguish that is isn't used.
     let labels: Vec<i32> = vec![-1; candidate_ids.len()];
 
-    let n_loal_devices_on_server = 1;
-    let padded_super_graph : JraphGraph = build_enriched_padded_supergraph(&user_ids, &timestamps,
-        &candidate_ids, &labels, &user_history, MAX_HISTORY, n_loal_devices_on_server);
+    let padded_super_graph : JraphGraph = build_enriched_padded_supergraph(
+        &user_ids,
+        &timestamps,
+        &candidate_ids,
+        &labels,
+        &user_history,
+        MAX_HISTORY,
+        num_catalog_users,
+        num_catalog_movies,
+        embed_len,
+        &movie_embeddings_catalog, &user_embeddings,
+        n_local_devices_on_server);
 
-    let inputs : HashMap<String, TensorProto> = build_proto_inputs(padded_super_graph);
+    let inputs : HashMap<String, TensorProto> = build_proto_inputs(padded_super_graph, embed_len);
 
     let mut client = PredictionServiceClient::connect(TFS_ENDPOINT).await?;
 
@@ -165,7 +222,7 @@ pub async fn run_inference(
 
 }
 
-fn build_proto_inputs(padded_super_graph: JraphGraph) -> HashMap<String, TensorProto> {
+fn build_proto_inputs(padded_super_graph: JraphGraph, embed_len : usize) -> HashMap<String, TensorProto> {
     /*
     //MAX_GRAPHS:
     padded_super_graph.n_node
@@ -182,6 +239,8 @@ fn build_proto_inputs(padded_super_graph: JraphGraph) -> HashMap<String, TensorP
     */
     let mut inputs = HashMap::new();
 
+    let max_nodes = (&padded_super_graph.node_ids).len();
+
     // Graph Structure (Usually single-element Vecs or small arrays)
     inputs.insert("n_node".into(), padded_super_graph.n_node.into_tensor());
     inputs.insert("n_edge".into(), padded_super_graph.n_edge.into_tensor());
@@ -195,6 +254,7 @@ fn build_proto_inputs(padded_super_graph: JraphGraph) -> HashMap<String, TensorP
     inputs.insert("node_ids".into(), padded_super_graph.node_ids.into_tensor());
     inputs.insert("node_labels".into(), padded_super_graph.node_labels.into_tensor());
     inputs.insert("node_types".into(), padded_super_graph.node_types.into_tensor());
+    inputs.insert("node_embeddings".into(), padded_super_graph.node_embeddings.into_tensor());
 
     // Masks
     inputs.insert("candidate_mask".into(), padded_super_graph.candidate_mask.into_tensor());
