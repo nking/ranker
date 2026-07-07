@@ -85,6 +85,7 @@ pub struct JraphGraph {
     pub node_ids: Vec<i32>,
     pub node_labels: Vec<i32>,
     pub node_types: Vec<i32>,
+    pub node_embeddings : Vec<f32>,
     pub candidate_mask: Vec<bool>,
 }
 
@@ -97,6 +98,13 @@ pub fn build_padded_super_graph(
     labels: &[i32],
     num_candidates: usize,
     max_history: usize,
+
+    num_users : usize,
+    num_movies : usize,
+    embed_len : usize,
+    movie_embeddings_catalog : &[f32],
+    user_embeddings : &[f32],
+
     n_local_devices: usize,
 ) -> JraphGraph {
     let batch_size = user_ids.len();
@@ -118,6 +126,8 @@ pub fn build_padded_super_graph(
     let mut node_labels_padded = vec![0; max_nodes];
     let mut node_types_padded = vec![0; max_nodes];
     let mut candidate_mask_padded = vec![false; max_nodes];
+
+    let mut node_embeddings_padded = vec![0.0; max_nodes * embed_len];
 
     // Tracking offsets for where to write the next graph's data
     let mut current_node_offset = 0;
@@ -154,6 +164,39 @@ pub fn build_padded_super_graph(
         node_types_padded[current_node_offset..n_end].copy_from_slice(&node_types);
         candidate_mask_padded[current_node_offset..n_end].copy_from_slice(&candidate_mask);
         edge_features_padded[current_edge_offset..e_end].copy_from_slice(&edge_features);
+
+        // COPY EMBEDDINGS INTO PADDED GRAPH
+        for local_idx in 0..total_nodes {
+            let global_node_idx = current_node_offset + local_idx;
+            let id = node_ids[local_idx];
+
+            // Destination slice in the 1D padded super graph
+            let out_start = global_node_idx * embed_len;
+            let out_end = out_start + embed_len;
+
+            if local_idx == 0 {
+                // GROUP 1: THE USER NODE
+                // `build_graph_arrays` always puts the user at index 0.
+                // We pull directly from the dynamic `user_embeddings` using the batch index `i`.
+                let emb_start = i * embed_len;
+                let emb_end = emb_start + embed_len;
+
+                node_embeddings_padded[out_start..out_end]
+                    .copy_from_slice(&user_embeddings[emb_start..emb_end]);
+            } else {
+                // GROUPS 2 & 3: HISTORY AND CANDIDATE NODES
+                // Everything after index 0 is a movie.
+                // We pull from the static `movie_embeddings_catalog` using exact index mapping.
+                let m_idx = (id as usize) - num_users - 1;
+                let emb_start = m_idx * embed_len;
+                let emb_end = emb_start + embed_len;
+
+                node_embeddings_padded[out_start..out_end]
+                    .copy_from_slice(&movie_embeddings_catalog[emb_start..emb_end]);
+            }
+        }
+
+        // ... continue with senders/receivers vector offset math ...
 
         // APPLY VECTOR OFFSET TO SENDERS/RECEIVERS
         // Replaces the Python: np.concatenate([g.senders for g in graphs]) + repeated_offsets
@@ -197,6 +240,7 @@ pub fn build_padded_super_graph(
         node_ids: node_ids_padded,
         node_labels: node_labels_padded,
         node_types: node_types_padded,
+        node_embeddings: node_embeddings_padded,
         candidate_mask: candidate_mask_padded,
     }
 }
@@ -256,6 +300,8 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
         labels[i * num_candidates] = 1;
     }
 
+    editing for embeddings
+
     let padded_super_graph = build_padded_super_graph(
             &user_ids,
             &history_movie_ids,
@@ -271,6 +317,8 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
     }
     pub fn build_enriched_padded_supergraph(user_ids: &[i32], timestamps: &[i64],
         candidate_ids: &[i32], labels: &[i32], user_history: &crate::user_history::UserHistory, max_history: usize,
+        num_users : usize, num_movies : usize, embed_len: usize,
+        movie_embeddings_catalog : &[f32], user_embeddings : &[f32],
         n_local_devices: usize) -> JraphGraph {
 
         let num_users = user_ids.len();
@@ -297,6 +345,11 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
             &labels,
             num_candidates,
             max_history,
+            num_users,
+            num_movies,
+            embed_len,
+            &movie_embeddings_catalog,
+            &user_embeddings,
             n_local_devices);
 
         padded_super_graph

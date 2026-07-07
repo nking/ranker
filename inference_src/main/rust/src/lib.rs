@@ -1,9 +1,12 @@
-use pyo3::prelude::*;
+//use pyo3::prelude::*;
 use numpy::{PyArrayDyn};
 
 pub mod user_history;
 pub mod recommended_movies;
 pub mod graph_builder;
+
+pub mod embeddings_util;
+
 pub mod util;
 mod inference;
 /*

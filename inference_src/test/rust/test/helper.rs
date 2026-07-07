@@ -69,3 +69,17 @@ pub fn get_train_val_test_liked_uris(
     out
 }
 
+pub fn get_embeddings_uris() -> (String, String) {
+    let mut user_embedding_uri : Option<PathBuf> = get_project_dir();
+    if let Some(ref mut p) = user_embedding_uri {
+        p.push("src/test/resources/data/user_emb-00000-of-00001.parquet");
+    }
+    let mut movie_embedding_uri : Option<PathBuf> = get_project_dir();
+    if let Some(ref mut p) = user_embedding_uri {
+        p.push("src/test/resources/data/movie_emb-00000-of-00001.parquet");
+    }
+
+    (movie_embedding_uri.unwrap().to_string_lossy().into_owned(),
+    user_embedding_uri.unwrap().to_string_lossy().into_owned())
+}
+

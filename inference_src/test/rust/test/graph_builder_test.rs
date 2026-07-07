@@ -23,10 +23,11 @@ mod graph_builder_tests {
     //use tokio::runtime::Runtime;
 
     use helper::{get_train_val_test_liked_uris, DataSize};
-
+    use inference_engine::embeddings_util::{get_number_of_users, read_movie_embeddings};
     use inference_engine::graph_builder::{build_enriched_padded_supergraph, create_fake_padded_super_batch, JraphGraph};
     use inference_engine::user_history::{build_user_history, UserHistory};
     use inference_engine::util;
+    use crate::graph_builder_tests::helper::get_embeddings_uris;
 
     #[test]
     pub fn test_create_fake_batch() {
@@ -195,6 +196,13 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
         let num_candidates = 5;
         let n_local_devices = 1;
 
+        let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
+
+        let (movie_embeddings_catalog, num_movies, embed_len) = read_movie_embeddings(
+            &movie_embeddings_uri);
+
+        let num_users = get_number_of_users(&user_embeddings_uri);
+
         let ratings_map = get_train_val_test_liked_uris(DataSize::Tiny, false);
 
         let r = ratings_map.get("train_liked").unwrap();
@@ -215,11 +223,24 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
          */
         let candidate_ids : Vec<i32> = vec![6610, 6252, 9083, 6564, 6584, 9477, 6941, 6948, 8475, 6356];
 
+        // for embeddings, the graph build is given the user_embedding because it may have been
+        // recently built with updated timestamp, age, etc
+        // and graph builder performs look-ups for chosen user_history and candidate_ids
+        //let user_emb : Vec<f32> = vec![];
+        let rows = rows.len();
+        let cols = embed_len;
+        let mut rng = rand::thread_rng();
+        // Generate 32 (2 * 16) random numbers
+        let user_embeddings: Vec<f32> = (0..(rows * cols))
+            .map(|_| rng.gen_range(-1.0..1.0))
+            .collect();
+
         //labels aren't used in inference.  a value of -1 can help distinguish that is isn't used.
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
         let padded_super_graph : JraphGraph = build_enriched_padded_supergraph(&user_ids, &timestamps,
             &candidate_ids, &labels, &user_history, max_history,
+            num_users, num_movies, embed_len, &movie_embeddings_catalog, &user_embeddings,
             n_local_devices);
 
         print!("graph={:?}", padded_super_graph);
