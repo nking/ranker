@@ -34,26 +34,31 @@ in VSCode
    Open the Command Palette by pressing Ctrl + Shift + P (or Cmd + Shift + P on Mac).
    Type "Dev Containers: Reopen in Container" and hit Enter.
    when finished the explorer window will show 
-      Dev Container: TF Custom Op Builder
+      Dev Container: SCANN_C++_GRPC_SERVICE_SRC
    press <ctr> and ` at same time to get a prompt to a terminl running
       inside the ai-build (bazel) container
-   touch WORKSPACE
-   skipping the rest of the directions
-   create BUILD and  put in it:
-      load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 
-cc_binary(
-    name = "graph_builder_op.so",
-    srcs = ["graph_builder_op.cc"],
-    linkshared = True, # This tells Bazel to build a .so file, not an executable
-    # deps = ["@tensorflow_headers//:tensorflow"] # You will configure this linkage soon
-)
+   create BUILD  file
+   create MODULE.bazel  file
 
-create graph_builder_op.cc
-
-bazel build //:graph_builder_op.so
+   see files...
 
 
+In the terminal window, install buildifier:
+# Replace <version> with the latest (e.g., 8.5.1)
+wget https://github.com/bazelbuild/buildtools/releases/download/v8.5.1/buildifier-linux-amd64
+chmod +x buildifier-linux-amd64
+sudo mv buildifier-linux-amd64 /usr/local/bin/buildifier
 
+then in the terminal, use:
 
+to resolve MODULE.bazel dependency tree and download files:
+    bazel mod deps
+
+shows that ScANN project hasn't written a valid Bzlmod yet,
+so need to work around that using a hybrid approach using
+the legacy WORKSPACE file.
+
+to build project:
+    buildifier BUILD
 

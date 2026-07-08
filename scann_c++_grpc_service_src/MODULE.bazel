@@ -1,0 +1,28 @@
+###############################################################################
+# Bazel now uses Bzlmod by default to manage external dependencies.
+# Please consider migrating your external dependencies from WORKSPACE to MODULE.bazel.
+#
+# For more details, please check https://github.com/bazelbuild/bazel/issues/18958
+###############################################################################
+module(
+    name = "scann_service",
+    version = "1.0",
+)
+
+# Pull standard dependencies from the Bazel Central Registry (BCR)
+bazel_dep(name = "rules_cc", version = "0.1.4")
+bazel_dep(name = "grpc", version = "1.82.0") # A stable, modern BCR version
+
+# Declare ScaNN as a dependency
+# We give it a dummy version here because the override below takes precedence
+bazel_dep(name = "scann", version = "1.0.0")
+
+# The "Shim": Override the registry to pull ScaNN directly from GitHub
+# We use the exact commit hash you found.
+archive_override(
+    module_name = "scann",
+    urls = ["https://github.com/google-research/google-research/archive/5b09c22d73a9d35eb6c5d2a99b95677a45053466.zip"],
+    # strip_prefix dives into the unzipped folder and extracts ONLY the scann directory
+    strip_prefix = "google-research-5b09c22d73a9d35eb6c5d2a99b95677a45053466/scann",
+    integrity = "sha256-uyFx52hKr/aQHvWMzr5doYIwm31Pclbruq3lRHLd77s=",
+)

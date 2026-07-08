@@ -1,0 +1,14 @@
+syntax = "proto3";
+package scann_service;
+option cc_enable_arenas = true;
+service ScaNNService {
+    rpc Search(SearchRequest) returns (SearchResponse);
+}
+message SearchRequest {
+    repeated float query_embedding = 1;
+    int32 k = 2;
+}
+message SearchResponse {
+    repeated int32 movie_ids = 1;
+    repeated float scores = 2;
+}
