@@ -1,0 +1,13 @@
+{
+  "name": "TF Custom Op Builder",
+  "image": "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "bazelbuild.vscode-bazel"
+      ]
+    }
+  },
+  "remoteUser": "root" 
+}
