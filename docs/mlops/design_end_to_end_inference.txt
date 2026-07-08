@@ -1,0 +1,140 @@
+how to serve the end-to-end request for recommendations?
+let's call is the recommendation service.
+
+In summary, I choose the 2nd option to implement.
+
+Here are options I'm considering:
+(1) an all-in-one saved-model built with TF C++
+   the latency is limited by "in-graph" latency.
+   - pros:
+     only 1 execution graph.  operations can be fused across
+     components, composed into a single "kernel" of instructtions.
+     for example, the movie embeddings would be a mmap ed file.
+     avoids protobuf serialziation and deserialization overheads from
+     gRPC calls over multiple hops.
+     simple deployment since it is 1 endpoint.
+     only 1 hop so is fastest.
+     Zero network overhead.
+     everything is in CPU/GPU L3 cahce
+   - cons:
+     - a change in any internal component requires rebuilding 
+       the savedmodel, therefore is the highest maintenance choice.
+       rebuilding the ScANN index for example using the already 
+       trained Query and Candidate models is often done daily.
+     - resource contention is more difficult to solve
+     - a large complex graph is more difficult for the graph 
+       optimizer to handle and can lead to longer build times
+       and massive memory spikes during compilation.
+     - locked into a TF C++ runtime environment
+
+(2) TensorFlow Custom Op + Model Composition at the Serving level
+   a TFS servable for each of query model, scann index, ranker model.
+   the latency is limited by "system-orchestration" latency.
+   - pros
+     - indep scaling.  for example, can deploy the ranker model on
+       a GPU-heavy instance and the ScANN indexer on a RAM optimized
+       instance.
+     - decoupled lifecycle.
+       the ScANN index can be updated daily.
+     - A/B testing granularity.
+       the ranker actually depends upon being trained with two-tower
+       results, so they are not independent granular components,
+       but certainly the ScANN component can be put through A/B testing
+       in such a granular context.
+     - operational flexibility in graceful fails or cached fallbacks
+       if a component crashes.
+     - easier to maintain
+     - is likely less than 10 ms larger latency than an all-in-one model.
+   - cons:
+     - is at least 3 hops
+     - serialization overhead with copying of data into tensors
+       and serialzing protobufs possibly needed with every hop.
+     - orchestration logic complexity:
+       c++ or rust layer that orchestrates all of the calls and
+       graph building  
+     - managing multiple servables.
+       - monitoring multiple dashboards
+       - potentially complex load balancing.
+
+-------------------------------------------------
+An overview of what the all-in-one-serving model follows.  
+
+all-in-one model:
+  - inputs:
+      user_id, age, gender, occupation, timestamp
+  - outputs:
+      candidate movie ids sorted by rank
+
+internally the all-in-one model has:
+  - trained query savemodel
+      - inputs:
+          user_id, age, gender, occupation, timestamp
+      - outputs:
+          user embedding
+  - * google ScANN indexer pre-loaded
+      - inputs:
+          user_embedding
+      - outputs:
+          top_k ANN movie_ids (a.k.a. candidate_ids)
+  - * tf c++ op to build graphranker array inputs
+      - inputs:
+          user_ids, timestamps, user_embeddings, candidate_ids, labels,
+          max_history, num_catalogs_users, num_catalog_movies, embed_len,
+          * user_history, *movie_embeddings
+      - outputs:
+          arrays that are inputs to graphranker
+  - trained graphranker savedmodel
+      - inputs:
+          query enriched arrays for graph, include candidate_ids
+      - outputs:
+          scores for the candidate_ids
+  -   * sort the ids and return them and title etc
+
+the *s are for components that need special coding to cache and reload
+quickly.
+
+-------------------------------------------------
+the TFS Model Composition (micro-service approach):
+
+uses a "Manager" or "Orchestrator" (often a thin C++ wrapper) to 
+coordinate the calls to the different Servables.
+
+-------------------------------------------------
+
+Having decided on the TFS Model composition approach, here are components
+and decision left to make.
+
+- for the orchestrator:
+     consider developer velocaity vs latency
+     rust:
+        no memory leaks, high concurrency capabilities.
+        near c++ speeds.
+        a graph_builder built with rust is compatible with a
+        rust orchestrator.
+     c++:
+        more effort needed for memory and pointer management.
+        highest speeds (for a 3rd generation language).
+        con is that a graph_builder built as a tf c++ op 
+        requires careful management of package dependency versions.
+
+- a ScaNN servable
+  - needed for development while no access to Vertex AI Vector Search
+    or Alloy DB, nor Amazon OpenSearch, nor Azure AI Search
+  - create a dedicated C++ gRPC service:
+    - a C++ application that initializes a ScaNNSearcher once at startup
+      loading index from disk
+    - gRPC protobuf interface:
+      service ScaNNService {
+          rpc Search(SearchRequest) returns (SearchResponse);
+      }
+      message SearchRequest {
+        repeated float query_embedding = 1;
+        int32 k = 2;
+      }
+      message SearchResponse {
+        repeated int32 movie_ids = 1;
+        repeated float scores = 2;
+      }
+    - deployed as its own container not in TFS.
+    - the request to it is a gRPC call
+    - see the instructions in the directory

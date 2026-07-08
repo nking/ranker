@@ -5,6 +5,18 @@ __pycache__/
 *logs*txt
 hpo_results.txt
 
+# Visual Studio Code local folder
+.vscode/*
+# BUT keep these specific files often shared
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/*.code-snippets
+# Ignore workspaces and built extensions
+*.code-workspace
+*.vsix
+
 TMP?/
 mlruns/
 *.bak
