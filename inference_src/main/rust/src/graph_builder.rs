@@ -1,5 +1,5 @@
 use std::cmp::min;
-use crate::embeddings_util::{read_movie_embeddings, read_user_embeddings};
+use crate::embeddings_util::{get_user_embeddings, read_movie_embeddings, read_user_embeddings};
 use crate::util;
 
 fn build_graph_arrays(
@@ -9,6 +9,10 @@ fn build_graph_arrays(
     history_ratings: &[i32],
     history_movie_ids: &[i32],
     labels: &[i32],
+    user_embedding: &[f32],
+    movie_embeddings_catalog : &[f32],
+    num_catalog_users : usize,
+    embed_len : usize,
 ) -> (
     Vec<i32>,  // senders
     Vec<i32>,  // receivers
@@ -16,6 +20,7 @@ fn build_graph_arrays(
     Vec<i32>,  // node_ids
     Vec<i32>,  // node_labels
     Vec<i32>,  // node_types
+    Vec<f32>,  //node_embeddings
     Vec<bool>, // candidate_mask
     usize,     // total_nodes
     usize,     // total_edges
@@ -23,6 +28,8 @@ fn build_graph_arrays(
     let num_candidates = candidate_ids.len();
     let total_nodes = 1 + n_real_history + num_candidates;
     let total_edges = n_real_history + num_candidates;
+
+    //print!("n_real_history: {}, total_nodes : {}, total_edges : {}", n_real_history, total_nodes, total_edges);
 
     // Senders, Receivers, Edge Features
     // vec![val; len] is highly optimized in Rust and avoids uninitialized memory risks.
@@ -49,6 +56,28 @@ fn build_graph_arrays(
     node_ids[1..1 + n_real_history].copy_from_slice(&history_movie_ids[0..n_real_history]);
     node_ids[1 + n_real_history..].copy_from_slice(candidate_ids);
 
+    let mut node_embeddings: Vec<f32> = vec![0.0; total_nodes * embed_len];
+    // copy in the user embedding
+    node_embeddings[0..embed_len].copy_from_slice(&user_embedding[0..embed_len]);
+    let mut emb_off = embed_len;
+    //copy in the movie embeddings for user history
+    for i in 0..n_real_history {
+        let movie_id = &history_movie_ids[i];
+        let m_idx = (movie_id - 1) as usize - num_catalog_users;
+        let i00 = m_idx * embed_len;
+        node_embeddings[emb_off..(emb_off + embed_len)].copy_from_slice(&movie_embeddings_catalog[i00..(i00 + embed_len)]);
+        emb_off += embed_len;
+    }
+
+    // copy in the movie embeddings for the candidates
+    for i in 0..candidate_ids.len() {
+        let movie_id = &candidate_ids[i];
+        let m_idx = (movie_id - 1) as usize - num_catalog_users;
+        let i00 = m_idx * embed_len;
+        node_embeddings[emb_off..(emb_off + embed_len)].copy_from_slice(&movie_embeddings_catalog[i00..(i00 + embed_len)]);
+        emb_off += embed_len;
+    }
+
     // Labels
     let mut node_labels: Vec<i32> = vec![0; total_nodes];
     // node_labels[0..1+n_real_history] is already 0.0
@@ -69,6 +98,7 @@ fn build_graph_arrays(
         node_ids,
         node_labels,
         node_types,
+        node_embeddings,
         candidate_mask,
         total_nodes,
         total_edges,
@@ -100,8 +130,8 @@ pub fn build_padded_super_graph(
     num_candidates: usize,
     max_history: usize,
 
-    num_users : usize,
-    num_movies : usize,
+    num_catalog_users : usize,
+    num_catalog_movies : usize,
     embed_len : usize,
     movie_embeddings_catalog : &[f32],
     user_embeddings : &[f32],
@@ -141,16 +171,20 @@ pub fn build_padded_super_graph(
         // Cast to i64/f64 if build_graph_arrays expects them
         let c_ids: Vec<i32> = candidate_ids[c_offset..c_offset + num_candidates].iter().map(|&x| x).collect();
         let lbls: Vec<i32> = labels[c_offset..c_offset + num_candidates].iter().map(|&x| x).collect();
+
         let h_rats: Vec<i32> = history_ratings[h_offset..h_offset + max_history].iter().map(|&x| x).collect();
         let h_m_ids: Vec<i32> = history_movie_ids[h_offset..h_offset + max_history].iter().map(|&x| x).collect();
 
         let u_id: i32 = user_ids[i];
         let n_hist: usize = history_lengths[i];
 
+        let u_emb = &user_embeddings[i*embed_len..(i+1)*embed_len];
+
         // Generate the subgraph
         let (senders, receivers, edge_features, node_ids, node_labels,
-            node_types, candidate_mask, total_nodes, total_edges) =
-            build_graph_arrays(u_id, n_hist, &c_ids, &h_rats, &h_m_ids, &lbls);
+            node_types, node_embeddings, candidate_mask, total_nodes, total_edges) =
+            build_graph_arrays(u_id, n_hist, &c_ids, &h_rats, &h_m_ids, &lbls,
+                &u_emb,&movie_embeddings_catalog, num_catalog_users, embed_len);
 
         //WRITE METADATA
         n_node_padded[i] = total_nodes as i32;
@@ -166,36 +200,9 @@ pub fn build_padded_super_graph(
         candidate_mask_padded[current_node_offset..n_end].copy_from_slice(&candidate_mask);
         edge_features_padded[current_edge_offset..e_end].copy_from_slice(&edge_features);
 
-        // COPY EMBEDDINGS INTO PADDED GRAPH
-        for local_idx in 0..total_nodes {
-            let global_node_idx = current_node_offset + local_idx;
-            let id = node_ids[local_idx];
-
-            // Destination slice in the 1D padded super graph
-            let out_start = global_node_idx * embed_len;
-            let out_end = out_start + embed_len;
-
-            if local_idx == 0 {
-                // GROUP 1: THE USER NODE
-                // `build_graph_arrays` always puts the user at index 0.
-                // We pull directly from the dynamic `user_embeddings` using the batch index `i`.
-                let emb_start = i * embed_len;
-                let emb_end = emb_start + embed_len;
-
-                node_embeddings_padded[out_start..out_end]
-                    .copy_from_slice(&user_embeddings[emb_start..emb_end]);
-            } else {
-                // GROUPS 2 & 3: HISTORY AND CANDIDATE NODES
-                // Everything after index 0 is a movie.
-                // We pull from the static `movie_embeddings_catalog` using exact index mapping.
-                let m_idx = (id as usize) - num_users - 1;
-                let emb_start = m_idx * embed_len;
-                let emb_end = emb_start + embed_len;
-
-                node_embeddings_padded[out_start..out_end]
-                    .copy_from_slice(&movie_embeddings_catalog[emb_start..emb_end]);
-            }
-        }
+        let i0 = current_node_offset * embed_len;
+        let i1 = i0 + (total_nodes * embed_len);
+        node_embeddings_padded[i0 .. i1].copy_from_slice(&node_embeddings);
 
         // ... continue with senders/receivers vector offset math ...
 

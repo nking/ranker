@@ -17,8 +17,6 @@ class CandidateIdTransform():
         if candidate_ids.shape[0] != batch['movie_id'].shape[0]:
             raise ValueError(f"expecting number of rows in candidate_ids and batch['movie_id'] to be equal")
 
-        m = batch['movie_id'][:, np.newaxis]
-
         labels = np.ones((batch['user_id'].shape[0], self.num_candidates), dtype=np.int32)
 
         return {
