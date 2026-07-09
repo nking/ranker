@@ -25,7 +25,7 @@ cc_library(
     hdrs = ["searcher.h"],
     deps = [
         "@com_github_grpc_grpc//:grpc++",
-        "@scann//scann:scann_ops",
+        "@scann//scann/scann_ops/cc:scann_ops",
     ],
 )
 

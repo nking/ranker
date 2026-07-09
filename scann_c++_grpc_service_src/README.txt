@@ -59,6 +59,32 @@ shows that ScANN project hasn't written a valid Bzlmod yet,
 so need to work around that using a hybrid approach using
 the legacy WORKSPACE file.
 
+downloaded bazelisk (needed to use bazel server version 8.7.0 because need to use WORKSPACE for scann download)
+wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
+chmod +x bazelisk-linux-amd64
+sudo mv bazelisk-linux-amd64 /usr/local/bin/bazel
+create file .bazelversion and put 8.7.0a in it
+bazel version
+echo "common --enable_workspace" > .bazelrc
+
+needed to add to MODULE.bazel, an entry for envoy_api
+needed to createWORKSPACE  entry for scann
+
+see file
+then in terminal:
+
+rm -f MODULE.bazel.lock
+bazel clean --expunge
+bazel mod deps
+
 to build project:
+rm -f MODULE.bazel.lock
+bazel clean --expunge
+bazel build //:scann_server
+
+helpful in debugging:
+   bazel query "kind(cc_library, @scann//scann/...)"
+
+to check BUILD files
     buildifier BUILD
 
