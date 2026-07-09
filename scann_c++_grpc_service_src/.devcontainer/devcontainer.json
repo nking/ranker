@@ -9,5 +9,6 @@
       ]
     }
   },
-  "remoteUser": "root"
+  "remoteUser": "root",
+  "postCreateCommand": "pip3 install tensorflow==2.20.0",
 }

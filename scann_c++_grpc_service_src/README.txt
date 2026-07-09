@@ -12,22 +12,7 @@ software to download or install.
 
 open VSCode
 open folder ranker/scann_c++_grpc_service_src
-mkdir .devcontainer
-vi ranker/scann_c++_grpc_service_src/.devcontainer/devcontainer.json
-and put into it the following:
-{
-  "name": "ScaNN C++ gRPC Builder",
-  "image": "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest",
-  "customizations": {
-    "vscode": {
-      "extensions": [
-        "ms-vscode.cpptools",
-        "bazelbuild.vscode-bazel"
-      ]
-    }
-  },
-  "remoteUser": "root" 
-}
+had to create .devcontainer and its contents
 # that will automatically install the C++ and Bazel extension into the container
 
 in VSCode 
@@ -43,47 +28,45 @@ in VSCode
 
    see files...
 
-
-In the terminal window, install buildifier:
+In the dev container terminal window, install buildifier:
 # Replace <version> with the latest (e.g., 8.5.1)
 wget https://github.com/bazelbuild/buildtools/releases/download/v8.5.1/buildifier-linux-amd64
 chmod +x buildifier-linux-amd64
 sudo mv buildifier-linux-amd64 /usr/local/bin/buildifier
 
-then in the terminal, use:
-
-to resolve MODULE.bazel dependency tree and download files:
-    bazel mod deps
-
-shows that ScANN project hasn't written a valid Bzlmod yet,
-so need to work around that using a hybrid approach using
-the legacy WORKSPACE file.
-
-downloaded bazelisk (needed to use bazel server version 8.7.0 because need to use WORKSPACE for scann download)
+download bazelisk (needed to use bazel server version 8.7.0
+in the dev container terminal, use:
 wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
 chmod +x bazelisk-linux-amd64
 sudo mv bazelisk-linux-amd64 /usr/local/bin/bazel
-create file .bazelversion and put 8.7.0a in it
+create file .bazelversion and put 8.7.0 in it
 bazel version
 echo "common --enable_workspace" > .bazelrc
+
+building ScANN requires a few files from tensorflow like
+libtensorflow_framework.so* and protocol buffer files from
+a build (like tensorflow/core/framework/full_type.pb.h)
+so we can use a pip installed tensorflow for that.
+    pip install tensorflow==2.20.0
 
 needed to add to MODULE.bazel, an entry for envoy_api
 needed to createWORKSPACE  entry for scann
 
-see file
-then in terminal:
-
-rm -f MODULE.bazel.lock
-bazel clean --expunge
-bazel mod deps
+see files ...
 
 to build project:
+in dev container terminal type:
 rm -f MODULE.bazel.lock
 bazel clean --expunge
 bazel build //:scann_server
 
 helpful in debugging:
    bazel query "kind(cc_library, @scann//scann/...)"
+   bazel info output_base
+   du -sh $(bazel info output_base)/external
+   bazel mod graph --depth=10
+   bazel mod tidy
+   bazel query "@eigen//..."
 
 to check BUILD files
     buildifier BUILD

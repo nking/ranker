@@ -1,7 +1,7 @@
+load("@com_github_grpc_grpc//bazel:cc_grpc_library.bzl", "cc_grpc_library")
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
-load("@com_github_grpc_grpc//bazel:cc_grpc_library.bzl", "cc_grpc_library")
 
 # Define the language-agnostic proto library
 proto_library(
@@ -14,7 +14,7 @@ proto_library(
 cc_grpc_library(
     name = "scann_cc_grpc",
     srcs = [":scann_proto"],
-    grpc_only = False, # Set to False to get both Protobuf messages AND gRPC stubs
+    grpc_only = False,  # Set to False to get both Protobuf messages AND gRPC stubs
     deps = [":scann_proto"],
 )
 
