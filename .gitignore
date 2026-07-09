@@ -17,6 +17,8 @@ hpo_results.txt
 *.code-workspace
 *.vsix
 
+**/user.bazelrc
+
 TMP?/
 mlruns/
 *.bak
