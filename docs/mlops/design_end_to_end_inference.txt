@@ -1,5 +1,5 @@
 how to serve the end-to-end request for recommendations?
-let's call is the recommendation service.
+let's call it the recommendation service.
 
 In summary, I choose the 2nd option to implement.
 
@@ -27,7 +27,7 @@ Here are options I'm considering:
        and massive memory spikes during compilation.
      - locked into a TF C++ runtime environment
 
-(2) TensorFlow Custom Op + Model Composition at the Serving level
+(2) Indep Model hosting and a central orchestrator
    a TFS servable for each of query model, scann index, ranker model.
    the latency is limited by "system-orchestration" latency.
    - pros
@@ -147,7 +147,7 @@ For simplicity without sacrificing much in scalability:
   RAM and reasonably fast CPU.
 
 - for the orchestrator:
-     consider developer velocaity vs latency
+     consider developer velocity vs latency
      rust:
         no memory leaks, high concurrency capabilities.
         near c++ speeds.
@@ -163,8 +163,7 @@ For simplicity without sacrificing much in scalability:
   - needed for development while no access to Vertex AI Vector Search
     or Alloy DB, nor Amazon OpenSearch, nor Azure AI Search
 
-- the rust approach can use axum or tonic to handle incoming
+- the rust orchestrator approach can use axum or tonic to handle incoming
   requests and internally the orchestrator can use tokio for
   concurrent processing.
 
-will implment this with rust.
