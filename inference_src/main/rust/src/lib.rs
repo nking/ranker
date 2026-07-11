@@ -8,7 +8,16 @@ pub mod graph_builder;
 pub mod embeddings_util;
 
 pub mod util;
-mod inference;
+pub mod states;
+pub mod main;
+pub mod client;
+pub mod orchestrator;
+pub mod embeddings_ann;
+
+pub mod pb {
+    tonic::include_proto!("recommender");
+}
+
 /*
 #[pyfunction]
 pub fn process_batch(py: Python, raw_bytes: Vec<&[u8]>) -> PyResult<Bound<PyArrayDyn<f32>>> {

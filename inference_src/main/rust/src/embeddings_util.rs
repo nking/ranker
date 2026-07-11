@@ -14,12 +14,12 @@ pub fn get_number_of_users(user_embeddings_uri : &String)-> usize {
     num_rows as usize
 }
 
-pub fn read_movie_embeddings(movie_embeddings_uri : &String) -> (Vec<f32>, usize, usize) {
+pub fn read_movie_embeddings(movie_embeddings_uri : &str) -> (Vec<f32>, usize, usize) {
     _read_embeddings(&movie_embeddings_uri)
 }
 
 
-pub fn read_user_embeddings(user_embeddings_uri : &String) -> (Vec<f32>, usize, usize) {
+pub fn read_user_embeddings(user_embeddings_uri : &str) -> (Vec<f32>, usize, usize) {
     _read_embeddings(&user_embeddings_uri)
 }
 
@@ -38,7 +38,8 @@ pub fn get_user_embeddings(ids: &[i32], embeddings_catalog: &[f32], embed_len: u
     embeddings_1d
 }
 
-fn _read_embeddings(embeddings_uri: &String) -> (Vec<f32>, usize, usize) {
+//TODO: improve the exception handling in this:
+fn _read_embeddings(embeddings_uri: &str) -> (Vec<f32>, usize, usize) {
 
     let file = File::open(embeddings_uri).unwrap();
     let reader = SerializedFileReader::new(file).unwrap();
