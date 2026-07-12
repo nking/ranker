@@ -33,7 +33,12 @@ tonic-build = "0.14.6"
 tonic-prost = "0.14.6"
 prost-types = "0.14.4"
 
+arc-swap = "1.9.2"
+
 rand = "0.8"
+notify = "9.0.0-rc.4"
+
+usearch = "2.26.0"
 
 [build-dependencies]
 tonic-prost-build = "0.14.6"
@@ -55,3 +60,7 @@ path="../../test/rust/test/recommended_movies_test.rs"
 [[test]]
 name = "graph_builder_tests"
 path="../../test/rust/test/graph_builder_test.rs"
+
+[[test]]
+name = "client_tests"
+path="../../test/rust/test/client_test.rs"

@@ -1,6 +1,17 @@
---  rust: make changes to rust code for the moving of embeddings from
-    GraphRanker constructor to the call function
--- c++: finish the tf c++ custom op and end-to-end inference
+- finish end to end inference request
+- make the code for inputs to monitoring:
+   input data
+   input features
+   input embeddings
+   outputs
+   - follow best advice from nannyml, especially for live target prediction
+     though will have to adapt the later to a ranked list
+   - and use historgrams
+      - difference in top x modes of histograms by std dev
+      - diff in histogram measureed by
+        - earth movers distance
+        - jenson-shannon divergence
+   - also see notes below to use tfdv etc
 
 - consider using a CliffordNet layer instead of the GATv2.
   - requires a change in the bi-encoder to make embeddings
@@ -25,10 +36,12 @@
 
 - low priority:
   - for speeding up the training, could consider binding the rust implementations
-    for UserHistory, UserRecommendations to the python code, though
+    for UserHistory, UserRecommendations to the python code for
+    grain Transformers, though
     would need to modify the python to use flattened 1D arrays.
     - can also combine SparseLocal.. and SuperPadded.. transforms
-      into 1 grain MapTransform that uses the rust build_padded_super_graph method.
+      into 1 grain MapTransform that uses the rust 
+      build_padded_super_graph method.
     using the same core code of rust for python too would in the 
     long run make maintenance simpler
     and would be better avoidance of train-server skew.
@@ -40,22 +53,14 @@
     - the features data would be best handled after the python or c++ code
       below that replaces the grain data loader for inference.
       - then data stats can be used on training or production data features too
-  - export model
-    - requires tensorflow install for orbax-export to tf savedmodel
-    - when add it to the KFP pipeline, consider a PVC for the fakegcs
-      server to hold output artifact... not needed in development
-      because I'm using mounts and mount paths to local disk
   - monitoring
   - consider NannyML in monitoring
-
-- implement the python or C++ code to replace the grain dataloaders
-  for inference using the tf saved model
 
 - consider using kube-linter
    https://github.com/stackrox/kube-linter
 
 - replace use of passwords in the .env and uris with
-  a mock service for GCP Secret Manager.
+  a mock service for GCP Secret Manager or other cloud k8s equiv.
   e.g. can add this to docker-compose-dbs.yaml:
 
   with services:

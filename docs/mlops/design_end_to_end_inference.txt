@@ -13,7 +13,6 @@ Here are options I'm considering:
      avoids protobuf serialziation and deserialization overheads from
      gRPC calls over multiple hops.
      simple deployment since it is 1 endpoint.
-     only 1 hop so is fastest.
      Zero network overhead.
      everything is in CPU/GPU L3 cahce
    - cons:
@@ -21,7 +20,7 @@ Here are options I'm considering:
        the savedmodel, therefore is the highest maintenance choice.
        rebuilding the ScANN index for example using the already 
        trained Query and Candidate models is often done daily.
-     - resource contention is more difficult to solve
+     - resource contention is more difficult to solve.
      - a large complex graph is more difficult for the graph 
        optimizer to handle and can lead to longer build times
        and massive memory spikes during compilation.
@@ -39,7 +38,7 @@ Here are options I'm considering:
      - A/B testing granularity.
        the ranker actually depends upon being trained with two-tower
        results, so they are not independent granular components,
-       but certainly the ScANN component can be put through A/B testing
+       but certainly the ScANN component and its updates can be put through A/B testing
        in such a granular context.
      - operational flexibility in graceful fails or cached fallbacks
        if a component crashes.
@@ -57,7 +56,7 @@ Here are options I'm considering:
        - potentially complex load balancing.
 
 -------------------------------------------------
-An overview of what the all-in-one-serving model follows.  
+An overview of choice (1), the all-in-one-serving model follows.  
 
 all-in-one model:
   - inputs:
@@ -71,12 +70,12 @@ internally the all-in-one model has:
           user_id, age, gender, occupation, timestamp
       - outputs:
           user embedding
-  - * google ScANN indexer pre-loaded
+  - * google ScANN or FAISS indexer or equiv, pre-loaded
       - inputs:
           user_embedding
       - outputs:
           top_k ANN movie_ids (a.k.a. candidate_ids)
-  - * tf c++ op to build graphranker array inputs
+  - * graph builder (rust or tf c++ op)  to build graphranker array inputs
       - inputs:
           user_ids, timestamps, user_embeddings, candidate_ids, labels,
           max_history, num_catalogs_users, num_catalog_movies, embed_len,
@@ -85,7 +84,7 @@ internally the all-in-one model has:
           arrays that are inputs to graphranker
   - trained graphranker savedmodel
       - inputs:
-          query enriched arrays for graph, include candidate_ids
+          query enriched arrays for graph, including candidate_ids
       - outputs:
           scores for the candidate_ids
   -   * sort the ids and return them and title etc
@@ -94,15 +93,15 @@ the *s are for components that need special coding to cache and reload
 quickly.
 
 -------------------------------------------------
-the TFS Model Composition (micro-service approach):
+detals for choice (2), TFS Model Composition (micro-service approach):
 
-uses a "Manager" or "Orchestrator" (often a thin C++ wrapper) to 
+uses a "Manager" or "Orchestrator" to 
 coordinate the calls to the different Servables.
 
 -------------------------------------------------
 
 Having decided on the TFS Model composition approach, here are components
-and decision left to make.
+and decisions left to make.
 
   [user] -> [orchestrator] --> [Query model]
     |             | <--------- user embedding                    
@@ -130,6 +129,7 @@ For ultimate scalability and ease of updates:
   They should be hosted on a machine with large RAM.
 
 - The user history should be hosted on a machine with large RAM.
+  They might also be updated frequently.
 
 - The orchestrator would benefit from a fast CPU.
   - It makes gRPC request to the Query model.
@@ -143,8 +143,21 @@ For ultimate scalability and ease of updates:
 For simplicity without sacrificing much in scalability:
 
 - The orchestrator, ScaNN indexer, embeddings, and user history 
-  should all live on the same host and that host should have large
+  can all live on the same host and that host should have large
   RAM and reasonably fast CPU.
+  - user history and embeddings datasets would be in PVC or shared memory
+    segments.
+  - they all live in same pod.  Using the side car pattern, the shared
+    data is seen by the orchestrator container and by the side-car
+    container called the data-loader.  the data-loader container is reponsible for updating
+    the data.  the data are mounted as read-only for the orchestrator
+    and read-write for the data-loader.
+  - orchestrator starts and waits for empty /data dir with a "loading" state.
+  - data-loader sidecar starts and download the embeddings and saves them to /data
+  - orchestrator detects the files via the notify crate,
+    loads the indexer into memory and markes the service as 'ready'
+  - if data-loader later updates /data, the orchestrator notices and hot-swaps the
+    indexer without downtime (ArcSwap).
 
 - for the orchestrator:
      consider developer velocity vs latency
@@ -167,3 +180,90 @@ For simplicity without sacrificing much in scalability:
   requests and internally the orchestrator can use tokio for
   concurrent processing.
 
+------------------------------------------------------
+code CRCs:
+
+main.rs
+  - spins up a tonic server listening on port 50051 for example
+  - init tokio runtime
+  - creates shared Orchestrator
+  - starts gRPC server
+  - a request is dispatched to orchestrator struct
+  - init state handling
+  - init notify for changes to /data mount
+client.rs:
+  impl gRPC calls to the model endpoints by creating the channels
+  only once
+  - ModelClient struct
+  - can handle http if needed
+embeddings_ann.rs:
+  - contains vector search logic
+    - request and response using local FAISS or ScANN bridge
+movie_embeddings_handler.rs:
+  - loads movie_embeddings structure and returns it.
+  - MovieEmbeddings structure returns movie_embeddings given movie_ids
+user_history_handler.rs:
+  - loads user_history stucture and returns it.
+  - UserHistory structure returns movie_ids and their ratings for timestamps < target timestamp.
+orchestrator.rs:
+  - contains shared state like the Arc<Embeddings> and clients as a struct:
+    Orchestrator has query model clien, ranker model client, indexer
+  - receives user request
+  - gets user embedding by gRPC to Query model endpoint
+  - gets movie_ids from search_handler
+  - gets graph arrays from graph builder
+  - get scores for candidate movie_ids from gRPC to GraphRanker.
+    (largest latency component) 
+
+==============================================
+changes:
+  - the saved_models are not successfully loaded by the TFS docker containers.
+    - the saved_model_cli shows the signatures are as expoected and
+      unit tests in venvs with tf 2.16.1 and tf 2.20.0 successfully load
+      the models and get outputs from the signatures.- 
+    - gemini suggests that the strict C++ typing in TFS is not finding
+      all of the variables easily found by python.
+    - alternatives to TFS:
+      - NVIDIA Triton Inference Server
+        - It natively supports TensorFlow SavedModels, ONNX, PyTorch, and TensorRT
+        - need to replace use of tf proto files with triton's proto files
+      - custom python gRPC server
+        - uses same prot stubs as my rust code does for TFS
+        - would take about 50 lines of code to boot a grpc.aio.server,
+          load the model with python tf.saved_model.load() just as successfully
+          done in tests, and serve predictions
+      - convert saved models or loaded trained models to ONNX
+  Triton server is the most performant alternative.
+  Pathways, Saxml aren't publicly available.
+
+For Triton serving, need this directory hierarchy for the models:
+
+If hosted on same server this is how they appear, else separate them into to model repos:
+model_repository/
+├── two-tower/
+│   ├── config.pbtxt      # The config file for the model
+│   └── 1/
+│       └── model.savedmodel/  # Your existing Keras SavedModel folder
+└── graph-ranker/
+    ├── config.pbtxt
+    └── 1/
+        └── model.onnx         # The exported ONNX file
+
+* need config.pbtxt for  the two-tower model
+* need to export the orbax/jax model to ONXX format using
+  NVIDIA Triton Model Navigator
+  pip install triton-model-navigator
+  import model_navigator as nav
+
+# 1. Define how to load your model from the Orbax checkpoint
+# 2. Define a small dataloader (just 1-2 dummy samples)
+
+package = nav.jax.optimize(
+    model=my_jax_model,
+    dataloader=my_dataloader,
+    target_formats=(nav.Format.ONNX,), # This converts your model to ONNX
+)
+# 3. Save the package
+nav.package.save(package, path="graph-ranker.nav")
+
+   

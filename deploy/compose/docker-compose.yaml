@@ -19,7 +19,7 @@ services:
       - .env
     user: "${UID_DB}:${GID_DB}"
     volumes:
-      #avoidn rebuilding when src code changes:
+      #avoid rebuilding when src code changes:
       - ./src:/app/src
     environment:
       #- PYTHONPATH=/usr/local/lib/python3.11/site-packages

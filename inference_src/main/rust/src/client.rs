@@ -26,19 +26,18 @@ pub struct RankerModelClient {
 
 impl QueryModelClient {
 
-    pub async fn new(uri: &str) -> Self {
-        let channel = Channel::from_static(uri).connect().await.unwrap();
+    pub async fn new(uri: &'static str) -> Self {
+        let channel = Channel::from_static(uri).connect().await.expect("Failed to connect to TFS for query model");
         Self { client: PredictionServiceClient::new(channel) }
     }
 
     pub async fn get_user_embedding(&self, request: UserRequest) -> Result<(Vec<f32>), Box<dyn Error>> {
-        //self.client.clone().predict(request).await.unwrap().into_inner()
 
         let inputs : HashMap<String, TensorProto> = build_query_model_inputs(request);
 
         let mut predict_req = PredictRequest::default();
         predict_req.model_spec = Some(ModelSpec {
-            name: "two_tower_model".to_string(),
+            name: "two-tower".to_string(),
             signature_name: "serving_query_dict".to_string(),
             ..Default::default()
         });
@@ -47,7 +46,7 @@ impl QueryModelClient {
         println!("Sending gRPC request to TF Serving for Query Embedding Model...");
 
         // Send the request
-        let response = self.client.clone().predict(predict_req).await.unwrap();
+        let response = self.client.clone().predict(predict_req).await?;
 
         let mut inner_response = response.into_inner();
 
@@ -65,8 +64,8 @@ impl QueryModelClient {
 
 impl RankerModelClient {
 
-    pub async fn new(uri: &str) -> Self {
-        let channel = Channel::from_static(uri).connect().await.unwrap();
+    pub async fn new(uri: &'static str) -> Self {
+        let channel = Channel::from_static(uri).connect().await.expect("Failed to connect to TFS for ranker model");
         Self { client: PredictionServiceClient::new(channel) }
     }
 
@@ -76,7 +75,7 @@ impl RankerModelClient {
 
         // Define which model and signature
         let model_spec = ModelSpec {
-            name: "movie_lens_ranker".into(),
+            name: "graph-ranker".into(),
             signature_name: "serving_default".into(),
             version_choice: None,
         };
@@ -92,7 +91,7 @@ impl RankerModelClient {
 
         println!("Sending gRPC request to TF Serving for GraphRanker...");
 
-        let response = self.client.clone().predict(predict_req).await.unwrap();
+        let response = self.client.clone().predict(predict_req).await?;
 
         let mut inner_response = response.into_inner();
 
@@ -215,13 +214,14 @@ impl IntoTensorProto for Vec<String> {
 }
 
 pub fn build_query_model_inputs(req: UserRequest) -> HashMap<String, TensorProto> {
+
     let mut inputs = HashMap::new();
 
     inputs.insert("user_id".into(), vec![req.user_id].into_tensor());
 
     inputs.insert("age".into(), vec![req.age].into_tensor());
 
-    inputs.insert("age".into(), vec![req.gender].into_tensor());
+    inputs.insert("gender".into(), vec![req.gender].into_tensor());
 
     inputs.insert("occupation".into(), vec![req.occupation].into_tensor());
 

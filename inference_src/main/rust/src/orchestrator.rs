@@ -1,3 +1,4 @@
+use std::ptr::null;
 use std::sync::Arc;
 use arc_swap::ArcSwap;
 use crate::client::{QueryModelClient, RankerModelClient};
@@ -27,7 +28,7 @@ pub struct Orchestrator {
 
 impl Orchestrator {
     // Note: We make this async because connecting to gRPC takes time
-    pub async fn new(query_uri: &str, ranker_uri: &str,
+    pub async fn new(query_uri: &'static str, ranker_uri: &'static str,
         movie_embeddings_uri: &str,
         ratings_uris: Vec<&str>,
         max_history: usize, num_candidates: usize,
@@ -76,18 +77,20 @@ impl Orchestrator {
 
 #[tonic::async_trait]
 impl RecommenderService for Orchestrator {
-    async fn predict(&self, req: Request<UserRequest>) -> Result<Response<RankedMovies>, Status> {
+    async fn predict(&self, req: Request<UserRequest>) ->Result<Response<RankedMovies>, tonic::Status> {
 
         let inner_req = req.into_inner();
-        let user_ids = vec![inner_req.user_id];
+        let user_ids : Vec<i32> = vec![inner_req.user_id as i32];
         let timestamps = vec![inner_req.timestamp];
 
         // Get user_embedding from TFS Query model
-        let user_embedding = self.query_model.get_user_embedding(inner_req).await?;
+        let user_embedding = self.query_model.get_user_embedding(inner_req).await
+            .map_err(|e| tonic::Status::internal(format!("user embedding: {}", e)))?;
         let user_embeddings = user_embedding;
 
         let searcher = self.searcher.load();
-        let nearest : Vec<Matches> = searcher.search(&user_embeddings)?;
+        let nearest : Vec<Matches> = searcher.search(&user_embeddings)
+            .map_err(|e| tonic::Status::internal(format!("Vector search failed: {}", e)))?;
         let candidate_ids: Vec<i32> = nearest
             .into_iter()
             // Flatten the nested collections
@@ -115,6 +118,17 @@ impl RecommenderService for Orchestrator {
 
         //TODO: process the response
 
-        Ok(Response::new(final_response))
+        match final_response {
+            Ok(ranks) => {
+                let r = RankedMovies{
+                    movie_ids: candidate_ids,
+                    scores: ranks,
+                };
+                Ok(Response::new(r))
+            },
+            Err(e) => {
+                Err(tonic::Status::internal(format!("ranking request failed: {}", e)))
+            }
+        }
     }
 }
