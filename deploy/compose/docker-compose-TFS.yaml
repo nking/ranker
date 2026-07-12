@@ -4,39 +4,43 @@
 services:
   tfs-bi-encoder:
     #24.xx containers for TF 2.16.1
-    image: tensorflow/serving:2.16.1
+    image: nvcr.io/nvidia/tritonserver:24.12-py3
     container_name: tfs-bi-encoder
     restart: unless-stopped
     ports:
       - "172.17.0.1:8500:8500" # gRPC port
       - "172.17.0.1:8501:8501" # REST API port
+      - "172.17.0.1:8502:8502" # metrics
     environment:
       - MODEL_NAME=two-tower
     volumes:
-      - ./src/test/resources/savedmodels/two-tower:/models/two-tower
+      - ./src/test/resources/model_repositories/bi-encoder:/models/
+    command: [ "tritonserver", "--model-repository=/models" ]
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8501/v1/models/two-tower" ]
+      # Triton has a built-in health endpoint
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/v2/health/ready" ]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
-      #can check in browser with: http://172.17.0.1:8501/v1/models/two-tower
 
   tfs-cross-encoder:
-    image: tensorflow/serving:2.20.0
+    # 26.xx containers for jax 0.8.*
+    # 26.03 through 26.06
+    image: nvcr.io/nvidia/tritonserver:26.04-py3
     container_name: tfs-cross-encoder
     restart: unless-stopped
     ports:
       - "172.17.0.1:8510:8500" # gRPC port
       - "172.17.0.1:8511:8501" # REST API port
+      - "172.17.0.1:8512:8502" # metrics
     environment:
       - MODEL_NAME=graph-ranker
     volumes:
-      - ./src/test/resources/savedmodels/graph-ranker:/models/graph-ranker
+      - ./src/test/resources/model_repositories/cross-encoder:/models/
+    command: [ "tritonserver", "--model-repository=/models" ]
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8501/v1/models/graph-ranker" ]
+      # Triton has a built-in health endpoint
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/v2/health/ready" ]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
-      #can check in browser with: http://172.17.0.1:8511/v1/models/graph-ranker
