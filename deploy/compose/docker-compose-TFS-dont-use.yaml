@@ -1,0 +1,44 @@
+#USAGE  DON'T USE!  the TFS container wasn't able to run the XLA execution graph.
+#  docker compose --project-directory . -f deploy/compose/docker-compose-TFS-dont-use.yaml up -d
+#     the project_directory flag ensure the file paths are all relative to that directory
+services:
+  tfs-bi-encoder:
+    image: tensorflow/serving:2.16.1
+    container_name: tfs-bi-encoder
+    restart: unless-stopped
+    ports:
+      - "172.17.0.1:8500:8500" # gRPC port
+      - "172.17.0.1:8501:8501" # REST API port
+    environment:
+      - MODEL_NAME=gtwo-tower
+    volumes:
+      - ./ranker/src/test/resources/model_repositories/saved_model_formats/bi-encoder/two-tower:/models/graph-ranker
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8501/v1/models/two-tower" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+      #can check in browser with: http://172.17.0.1:8511/v1/models/two-tower
+
+  tfs-cross-encoder:
+    image: tensorflow/serving:2.20.0
+    container_name: tfs-cross-encoder
+    restart: unless-stopped
+    ports:
+      - "172.17.0.1:8510:8500" # gRPC port
+      - "172.17.0.1:8511:8501" # REST API port
+    environment:
+      - MODEL_NAME=graph-ranker
+      - TF_ENABLE_XLA=1
+      - TF_XLA_FLAGS=--tf_xla_enable_xla_devices --tf_xla_cpu_global_jit --tf_xla_auto_jit=2
+    volumes:
+      - ./ranker/src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker:/models/graph-ranker
+    healthcheck:
+      #health check is executed inside the container
+      test: [ "CMD", "curl", "-f", "http://localhost:8501/v1/models/graph-ranker" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+      #can check in browser with: http://172.17.0.1:8511/v1/models/graph-ranker

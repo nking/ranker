@@ -1,0 +1,7 @@
+name: "graph-ranker"
+platform: "tensorflow_savedmodel"
+max_batch_size: 0
+
+# You can omit the input/output blocks initially. 
+# Triton's TF backend is very good at auto-detecting shapes 
+# directly from the saved_model.pb signature.

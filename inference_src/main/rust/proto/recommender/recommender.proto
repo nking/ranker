@@ -1,0 +1,25 @@
+// proto/recommender.proto
+syntax = "proto3";
+package recommender;
+
+// input for the query model
+message UserRequest {
+  int64 user_id = 1;
+  string gender = 2;
+  int64 occupation = 3;
+  int64 age = 4;
+  int64 timestamp = 5;
+}
+
+// input for the graph ranker
+
+// The output from your orchestrator
+message RankedMovies {
+  repeated int32 movie_ids = 1; // "repeated" means it's a Vec in Rust
+  repeated float scores = 2;
+}
+
+// Tonic will generate the RecommenderService trait from this
+service RecommenderService {
+  rpc Predict (UserRequest) returns (RankedMovies);
+}
