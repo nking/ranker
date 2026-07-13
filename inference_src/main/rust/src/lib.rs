@@ -1,5 +1,5 @@
 //use pyo3::prelude::*;
-use numpy::{PyArrayDyn};
+//use numpy::{PyArrayDyn};
 
 pub mod user_history;
 pub mod recommended_movies;
@@ -16,6 +16,9 @@ pub mod embeddings_ann;
 
 pub mod pb {
     tonic::include_proto!("recommender");
+}
+pub mod triton {
+    tonic::include_proto!("inference");
 }
 
 /*

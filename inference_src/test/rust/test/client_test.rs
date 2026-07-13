@@ -14,7 +14,7 @@ mod client_tests {
 
     #[tokio::test]
     async fn test_query_model_connection() {
-        let uri = "http://172.17.0.1:8500";
+        let uri = "http://172.17.0.1:8501";
 
         let client = QueryModelClient::new(uri).await;
 
@@ -28,7 +28,7 @@ mod client_tests {
 
         // If the docker container isn't running, or the model isn't loaded,
         // this will fail and print the gRPC status error.
-        let result : Result<(Vec<f32>), Box<dyn Error>> = client.get_user_embedding(mock_request).await;
+        let result : Result<(Vec<f32>), Box<dyn Error>> = client.get_user_embedding(&mock_request).await;
 
         assert!(result.is_ok(), "Failed to get embedding: {:?}", result.err());
 
@@ -41,15 +41,18 @@ mod client_tests {
 
     #[tokio::test]
     async fn test_ranker_model_connection() {
-        let uri = "http://172.17.0.1:8510";
+        let uri = "http://172.17.0.1:8511";
 
         let client = RankerModelClient::new(uri).await;
 
-        let batch_size = 3;
-        let max_history = 4;
-        let num_candidates = 5;
+        // the placeholder mode used:
+        //"signature_name": "serving_batch", "batch_size": 256, "max_history": 60, "num_candidates": 60, "max_nodes": 31040, "max_edges": 30784, "max_graphs": 258, "embed_len": 16
+        //    the range of movie_id_range must be >= (num_history + num_candidates + 1)
+        let batch_size = 1;
+        let max_history = 60;
+        let num_candidates = 60;
         let user_id_range = (1, 10);
-        let movie_id_range = (1, 10);
+        let movie_id_range = (6041, 6041 + (max_history + num_candidates + 2));
         let n_local_devices = 1;
 
         let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();

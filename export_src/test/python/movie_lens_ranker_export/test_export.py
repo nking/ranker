@@ -1,4 +1,4 @@
-from unittest import TestCase
+import unittest
 import os
 
 import shutil
@@ -10,7 +10,7 @@ from movie_lens_ranker_export.export import export_models
 from movie_lens_ranker_export.restore_from_orbax import restore_model_from_checkpoint
 
 
-class ExportTest(TestCase):
+class ExportTest(unittest.TestCase):
 
     def test_export(self):
 
@@ -78,6 +78,8 @@ class ExportTest(TestCase):
             n_edge = fake_single.n_edge,
         )
         predictions_single = response['output_0']
+        print(f'predictions_single={predictions_single}', flush=True)
+        print(type(predictions_single), predictions_single.dtype)
         self.assertEqual(num_candidates, predictions_single.shape[0])
 
         predictions_batch = batch_inference_sig(
@@ -93,10 +95,11 @@ class ExportTest(TestCase):
             n_edge = fake_batch.n_edge,
         )
         predictions_batch = response['output_0']
+        print(f'predictions_batch={predictions_batch}', flush=True)
         self.assertEqual(num_candidates, predictions_batch.shape[0])
 
-
-
+if __name__ == '__main__':
+    unittest.main()
 
 
 

@@ -84,7 +84,7 @@ impl RecommenderService for Orchestrator {
         let timestamps = vec![inner_req.timestamp];
 
         // Get user_embedding from TFS Query model
-        let user_embedding = self.query_model.get_user_embedding(inner_req).await
+        let user_embedding = self.query_model.get_user_embedding(&inner_req).await
             .map_err(|e| tonic::Status::internal(format!("user embedding: {}", e)))?;
         let user_embeddings = user_embedding;
 
@@ -113,8 +113,7 @@ impl RecommenderService for Orchestrator {
 
         // Send to TFS Ranker model
         let final_response = self.ranker_model.get_candidate_ranks(
-            padded_super_graph_arrays, searcher.get_embed_len()
-        ).await;
+            padded_super_graph_arrays, searcher.get_embed_len()).await;
 
         //TODO: process the response
 

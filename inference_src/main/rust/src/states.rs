@@ -1,6 +1,5 @@
 use arc_swap::ArcSwap;
 use crate::embeddings_ann::Searcher;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub struct AppState {

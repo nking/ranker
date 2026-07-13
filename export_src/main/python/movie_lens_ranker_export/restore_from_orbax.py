@@ -6,7 +6,7 @@ from typing import Dict, Any
 
 from functools import partial
 
-from build.lib.movie_lens_ranker.util import get_model_mesh
+from movie_lens_ranker.util import get_model_mesh
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.train import create_fake_jagged_batch, convert_to_global, create_dummy_super_padded_graph
 from movie_lens_ranker.util import calc_number_jax_graph_components
@@ -103,7 +103,6 @@ def _build_model_only(config:dict, rngs:nnx.Rngs) -> Dict[str, Any]:
         edge_embed_dim=config['edge_embed_dim'],
         dropout_rate=config['dropout_rate'], rngs=rngs)
 
-    '''
     #initialize the layers with same fake data
     user_id_range = (1, config['num_users'])
     movie_id_range = (config['num_users'] + 1, config['num_users'] + config['num_movies'])
@@ -118,7 +117,6 @@ def _build_model_only(config:dict, rngs:nnx.Rngs) -> Dict[str, Any]:
 
     model.eval()
     model(fake_padded_graph)
-    '''
 
     return {"rngs": rngs, "model": model,
             'num_users': config['num_users'], 'num_movies': config['num_movies'], 'embed_len' : config['embed_len']}

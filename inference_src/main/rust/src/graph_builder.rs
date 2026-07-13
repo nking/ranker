@@ -1,5 +1,5 @@
 use std::cmp::min;
-use crate::embeddings_util::{get_user_embeddings, read_movie_embeddings, read_user_embeddings};
+use crate::embeddings_util::{read_movie_embeddings, read_user_embeddings};
 use crate::util;
 
 fn build_graph_arrays(
