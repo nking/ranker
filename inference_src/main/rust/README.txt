@@ -26,35 +26,16 @@ Query Model deployment:
 i build.rs is invoked by cargo build, before the src files are loaded
 
 Ranker model deployment:
+see docker-compose-TFS.yaml
 
-exports to NVIDIA's triton server.
+=======================================
+graph-ranker bulk inferrence could benefit from a GPU
+so in that case, use NVIDIA's triton container:
+   nvcr.io/nvidia/tritonserver:26.04-py3
 
-exporting to onxx
-
-- the two-tower query model needs to be exported to onxx
-  and that is an embedded model 
-
-Then settled on NVIDIA's triton server.
-
-triton versions 25.02 and earlier offer a tensorflow_savedmode backend
-with container image pattern xx.yy-tf2-python-py3.
-- for the two-tower model which was built with tf 2.16.1,
-  the iamge is nvcr.io/nvidia/tritonserver:24.12-py3
-- for the ranker model, no image contains tf and jax.
-  so the ranker model needs to be exported to onxx format
-
-to download the triton image for the two-tower model
-to try to load the saved_model, do a docker pull ahead of
-time because the images are so large:
-e.g.:
-export img=nvcr.io/nvidia/tritonserver:24.12-py3
-docker pull $img
-docker save $img > tritonserver_image.tar
-docker load < tritonserver_image.tar
-
-then from the ranker directory:
-  docker compose --project-directory . -f deploy/compose/docker-compose-triton-query.yaml up -d
-
-copied the protos into this project from
+   it requires a different model repository structure and a config.pb.txt
+   file and different docker compose flags,
+   and different protocol buffer files that need to be added to
+   proto directory and build.rs
     https://github.com/triton-inference-server/common/tree/main/protobuf
 
