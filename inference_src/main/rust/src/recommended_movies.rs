@@ -1,3 +1,6 @@
+// NOTE: this class is not used in inference.  it was designed to look at using it in the
+//    python grain MapTransform and data readers, so uses a runtime which pyO3 needs,
+//    and pyO3 would be used for bindings
 
 use arrow_array::{Int32Array, Int64Array, FixedSizeListArray};
 use tokio::runtime::Runtime;

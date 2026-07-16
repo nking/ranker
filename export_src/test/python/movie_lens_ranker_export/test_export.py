@@ -60,6 +60,8 @@ class ExportTest(unittest.TestCase):
             max_history = restore_dict['config']['max_history'],
             num_candidates=restore_dict['config']['num_candidates'],
             embed_len=restore_dict['config']['embed_len'],
+            num_catalog_users=restore_dict['config']['num_users'],
+            num_catalog_movies=restore_dict['config']['num_movies'],
             output_savedmodel_dir_uri = savedmodel_dir)
 
 

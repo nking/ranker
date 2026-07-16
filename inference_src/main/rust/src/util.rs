@@ -97,5 +97,13 @@ pub fn next_64(x : usize) -> usize {
     64 * ((x + 63) / 64)
 }
 
+pub fn sort_by_scores(ids : &[i32], scores : &[f32]) -> (Vec<i32>, Vec<f32>) {
+    let mut indices: Vec<usize> = (0..ids.len()).collect();
+    indices.sort_by(|&a, &b| scores[b].total_cmp(&scores[a]));
+    let sorted_ids: Vec<i32> = indices.clone().into_iter().map(|idx| ids[idx]).collect();
+    let sorted_scores: Vec<f32> = indices.into_iter().map(|idx| scores[idx]).collect();
+    (sorted_ids, sorted_scores)
+}
+
 
 

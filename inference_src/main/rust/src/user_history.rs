@@ -301,14 +301,10 @@ fn prepare_user_data(
 /// build the UserHistory from the given list of uris for the ratings parquet files
 /// # Arguments
 /// * `ratings_uris` -  vector of uris for ratings parquet files for building UserHistory hashmap
-pub fn build_user_history(ratings_uris: &[&str], max_history: usize) -> UserHistory {
-    // Because PyO3 functions are synchronous by default, we spin up a
-    // Tokio runtime to execute our highly concurrent async disk/network I/O.
-    // The code can begin processing data while it is still loading because the loading onto CPU is usually a bottleneck.
-    let rt = Runtime::new().unwrap();
+pub async fn build_user_history(ratings_uris: &[&str], max_history: usize) -> UserHistory {
 
     // Block the thread until the map is built and sorted
-    let (map, longest_history)  = rt.block_on(build_map_async(&ratings_uris));
+    let (map, longest_history)  = build_map_async(&ratings_uris).await;
 
     print!("longest history read has length={}", longest_history);
 

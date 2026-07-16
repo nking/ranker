@@ -5,22 +5,14 @@ mod recommended_movies_tests {
         // Tell Rust to literally include the code from helper.rs
         include!("helper.rs");
     }
-    use helper::{get_project_dir};
+    use helper::{get_project_dir, get_recommended_movies_uris};
 
     use inference_engine::recommended_movies::{build_recommended_movies};
 
     #[test]
     pub fn test_movie_recomendations_build() {
 
-        let movies_rec_uri = get_project_dir()
-            .map(|p| p.join("src/test/resources/data/recommended_movies.parquet"))
-            .map(|p| p.to_string_lossy().into_owned())
-            .expect("Project directory not found");
-
-        let movies_rec_ts_uri = get_project_dir()
-            .map(|p| p.join("src/test/resources/data/recommended_movies_timestamps.parquet"))
-            .map(|p| p.to_string_lossy().into_owned())
-            .expect("Project directory not found");
+        let (movies_rec_uri, movies_rec_ts_uri) = get_recommended_movies_uris();
 
         let num_users: usize = 6040;
 

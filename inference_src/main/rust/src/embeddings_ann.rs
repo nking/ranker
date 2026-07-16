@@ -3,9 +3,10 @@ use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 use usearch::ffi::Matches;
 use crate::embeddings_util::read_movie_embeddings;
 
-const PERSISTED_INDEX_PATH: &'static str = "./movie_embeddings_indexer";
+//TODO: make this settable by cli flag and by equiv of a properties file for use in deployment:
+const PERSISTED_INDEX_PATH: &'static str = "./target/movie_embeddings_indexer";
 
-const TOPK : usize = 20;
+pub const TOPK : usize = 20;
 
 pub struct Searcher {
     indexer : Index,
@@ -70,7 +71,12 @@ impl Searcher {
         Ok(index)
     }
 
-    pub fn search(&self, query: &[f32]) -> Result<Vec<Matches>, Box<dyn std::error::Error>> {
+    pub fn search(&self, query: &[f32]) -> Result<Matches, Box<dyn std::error::Error>> {
+        let r = self.indexer.search(&query, TOPK)?;
+        Ok(r)
+    }
+
+    pub fn search_batch(&self, query: &[f32]) -> Result<Vec<Matches>, Box<dyn std::error::Error>> {
         let num_queries = query.len() / self.embed_len;
         let mut results: Vec<Matches> = Vec::with_capacity(num_queries);
 

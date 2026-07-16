@@ -44,7 +44,9 @@ def create_serving_signature(max_nodes:int, max_edges:int, max_graphs:int, embed
     return serving_config
 
 def save_metadata(output_file_uri:str, batch_size:int, max_history:int, num_candidates:int,
-                  max_nodes:int, max_edges:int, max_graphs:int, embed_len:int, signature_name:str):
+    max_nodes:int, max_edges:int, max_graphs:int, embed_len:int, num_catalog_users : int,
+    num_catalog_movies: int,
+    signature_name:str):
     metadata = {
         "signature_name" : signature_name,
         "batch_size": batch_size,
@@ -53,6 +55,8 @@ def save_metadata(output_file_uri:str, batch_size:int, max_history:int, num_cand
         "max_nodes" : max_nodes,
         "max_edges" : max_edges,
         "max_graphs" : max_graphs,
+        "num_catalog_users" : num_catalog_users,
+        "num_catalog_movies" : num_catalog_movies,
         "embed_len" : embed_len
     }
     with open(output_file_uri, "w") as f:
@@ -103,7 +107,8 @@ def make_jax_module(trained_model: GraphRanker,  num_candidates:int) -> JaxModul
     return jax_module
 
 def export_models(trained_model: GraphRanker, batch_size:int, max_history:int,
-    num_candidates:int, embed_len:int,  output_savedmodel_dir_uri:str, n_local_devices:int=1):
+    num_candidates:int, embed_len:int,  output_savedmodel_dir_uri:str,
+    num_catalog_users: int, num_catalog_movies:int, n_local_devices:int=1):
     """
     export the model to TF SavedModel format along with a method to apply the model on the data.
     makes an export with a signature for  single inference mode and a batch inference mode.
@@ -116,6 +121,10 @@ def export_models(trained_model: GraphRanker, batch_size:int, max_history:int,
     :param batch_size: batch_size used for model training
     :param max_history: max_history used for model training
     :param num_candidates: num_candidates used for model training
+    :param num_catalog_users: number of users in the catalog of embeddings.  Note that in recomendation_systems project
+          the user ids are renumbered if needed to be between 1 and num_users,
+          then the movie_ids are renumbered to be between num_users + 1 and num_users + 1 + num_movies.
+
     :return:
     """
 
@@ -155,14 +164,20 @@ def export_models(trained_model: GraphRanker, batch_size:int, max_history:int,
         max_nodes=jax_graph_comp_dict_single['max_nodes'],
         max_edges=jax_graph_comp_dict_single['max_edges'],
         max_graphs=jax_graph_comp_dict_single['max_graphs'],
-        embed_len=embed_len, signature_name="serving_default")
+        embed_len=embed_len,
+        num_catalog_users=num_catalog_users,
+        num_catalog_movies=num_catalog_movies,
+        signature_name="serving_default")
 
     save_metadata(output_file_uri=os.path.join(assets_extra_dir, "metadata_batch.json"),
         batch_size=batch_size, max_history=max_history, num_candidates=num_candidates,
         max_nodes=jax_graph_comp_dict_batch['max_nodes'],
         max_edges=jax_graph_comp_dict_batch['max_edges'],
         max_graphs=jax_graph_comp_dict_batch['max_graphs'],
-        embed_len=embed_len, signature_name="serving_batch")
+        embed_len=embed_len,
+        num_catalog_users=num_catalog_users,
+        num_catalog_movies=num_catalog_movies,
+        signature_name="serving_batch")
 
     #TODO: consider saving the json files to assets.extra directory (create it in assets.extra)
     print(f"saved model and metadata to {output_savedmodel_dir_uri}")

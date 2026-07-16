@@ -48,7 +48,7 @@ impl QueryModelClient {
         let inner_response = response.into_inner();
 
         //debug:
-        println!("Triton Response for query model: {:#?}", inner_response);
+        println!("serving Response for query model: {:#?}", inner_response);
 
         if let Some((_key, tensor_proto)) = inner_response.outputs.into_iter().next() {
 

@@ -83,6 +83,37 @@ pub fn get_embeddings_uris() -> (String, String) {
     movie_embedding_uri.unwrap().to_string_lossy().into_owned())
 }
 
+pub fn get_recommended_movies_uris() -> (String, String) {
+    let movies_rec_uri = get_project_dir()
+        .map(|p| p.join("src/test/resources/data/recommended_movies.parquet"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .expect("Project directory not found");
+
+    let movies_rec_ts_uri = get_project_dir()
+        .map(|p| p.join("src/test/resources/data/recommended_movies_timestamps.parquet"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .expect("Project directory not found");
+
+    (movies_rec_uri, movies_rec_ts_uri)
+}
+
+pub fn get_movies_uri() -> String {
+    let movies_uri = get_project_dir()
+        .map(|p| p.join("src/test/resources/data/movies-00000-of-00001.parquet"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .expect("Project directory not found");
+
+    movies_uri
+}
+
+pub fn get_param_json_uri() -> String {
+    let params_uri = get_project_dir()
+        .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/cross-encoder/metadata_single.json"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .expect("Project directory not found");
+    params_uri
+}
+
 pub fn assert_slices_nearly_equal(a: &[f32], b: &[f32], epsilon: f32) {
     assert_eq!(a.len(), b.len(), "Slices have different lengths");
     for (i, (val_a, val_b)) in a.iter().zip(b.iter()).enumerate() {

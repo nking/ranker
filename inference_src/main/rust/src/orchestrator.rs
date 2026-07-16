@@ -11,6 +11,7 @@ use crate::user_history::{build_user_history, UserHistory};
 use crate::pb::{UserRequest, RankedMovies, recommender_service_server::RecommenderService};
 use tonic::{Request, Response, Status};
 use usearch::ffi::Matches;
+use crate::util::sort_by_scores;
 
 // the number of local_devices attached to the ranker TFS.  e.g. = 2 for the kaggle T4x2 GPUs
 const ranker_n_local_devices : usize = 1;
@@ -31,16 +32,15 @@ impl Orchestrator {
     pub async fn new(query_uri: &'static str, ranker_uri: &'static str,
         movie_embeddings_uri: &str,
         ratings_uris: Vec<&str>,
-        max_history: usize, num_candidates: usize,
+        max_history: usize,
+        num_candidates: usize,
         num_catalog_users: usize,
     ) -> Result<Self, Box<dyn std::error::Error>> {
 
         let initial_searcher = Searcher::new(movie_embeddings_uri)?;
-
         let query_client = QueryModelClient::new(query_uri).await;
         let ranker_client = RankerModelClient::new(ranker_uri).await;
-
-        let user_history: UserHistory = build_user_history(&ratings_uris, 2048);
+        let user_history: UserHistory = build_user_history(&ratings_uris, 2048).await;
 
         Ok(Self {
             query_model: query_client,
@@ -80,8 +80,6 @@ impl RecommenderService for Orchestrator {
     async fn predict(&self, req: Request<UserRequest>) ->Result<Response<RankedMovies>, tonic::Status> {
 
         let inner_req = req.into_inner();
-        let user_ids : Vec<i32> = vec![inner_req.user_id as i32];
-        let timestamps = vec![inner_req.timestamp];
 
         // Get user_embedding from TFS Query model
         let user_embedding = self.query_model.get_user_embedding(&inner_req).await
@@ -89,24 +87,30 @@ impl RecommenderService for Orchestrator {
         let user_embeddings = user_embedding;
 
         let searcher = self.searcher.load();
-        let nearest : Vec<Matches> = searcher.search(&user_embeddings)
+        let nearest : Matches = searcher.search(&user_embeddings)
             .map_err(|e| tonic::Status::internal(format!("Vector search failed: {}", e)))?;
-        let candidate_ids: Vec<i32> = nearest
-            .into_iter()
-            // Flatten the nested collections
-            .flat_map(|m| m.keys)
-            // Cast the USearch u64 ID to your Protobuf i32 ID
-            .map(|key| key as i32)
-            .collect();
 
+        // candidate_ids are in "reference frame" of 0 to num_catalog_movies  - 1, so translate to
+        // reference frame num_catalog_users + 1 to num_catalog_users + 1 + num_catalog_movies
+        let candidate_ids : Vec<i32> = nearest.keys
+            .into_iter()
+            .map(|x| x as i32 + 1 + self.num_catalog_users as i32)
+            .collect();
+        
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
+
+        let user_ids : Vec<i32> = vec![inner_req.user_id as i32];
+        let timestamps = vec![inner_req.timestamp];
 
         let padded_super_graph_arrays : JraphGraph = build_enriched_padded_supergraph(
             &user_ids,
             &timestamps,
             &candidate_ids,
-            &labels, &self.user_history, self.max_history,
-            self.num_catalog_users, searcher.get_num_catalog_movies(),
+            &labels,
+            &self.user_history,
+            self.max_history,
+            self.num_catalog_users,
+            searcher.get_num_catalog_movies(),
             searcher.get_embed_len(),
             searcher.get_movies_embedding_catalog_ref(),
             &user_embeddings,  ranker_n_local_devices);
@@ -115,13 +119,16 @@ impl RecommenderService for Orchestrator {
         let final_response = self.ranker_model.get_candidate_ranks(
             padded_super_graph_arrays, searcher.get_embed_len()).await;
 
+        // candidate
+
         //TODO: process the response
 
         match final_response {
             Ok(ranks) => {
+                let (sorted_ids, sorted_scores) = sort_by_scores(&candidate_ids, &ranks);
                 let r = RankedMovies{
-                    movie_ids: candidate_ids,
-                    scores: ranks,
+                    movie_ids: sorted_ids,
+                    scores: sorted_scores,
                 };
                 Ok(Response::new(r))
             },
