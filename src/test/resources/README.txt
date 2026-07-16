@@ -17,3 +17,11 @@ msgpack serialized rows, each containing an int movie_id
 The file that was written in repository
 github.com/nking/recommender_systems.git
 in file src/test/python/movie_lens_tfx/WriteRankerInputArrayRecords.py
+
+the model_repositories contents:
+-  the bi-encoder query model was built from the TFX pipeline in
+   the github repository 
+   github.com/nking/recommender_systems.git
+- the cross-encoder graph-ranker model was built from
+  export_src/test/python/movie_lens_ranker_export/test_export.py
+

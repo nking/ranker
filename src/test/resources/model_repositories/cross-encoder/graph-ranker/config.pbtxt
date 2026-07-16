@@ -1,8 +1,0 @@
-name: "graph-ranker"
-platform: "tensorflow_savedmodel"
-#platform: "onnxruntime_onnx"
-max_batch_size: 0
-
-# (You can usually leave inputs/outputs blank and Triton will auto-detect them 
-# from the ONNX file on startup. If it complains, we can explicitly define them 
-# based on your Rust client shapes.)

@@ -1,0 +1,111 @@
+MetaGraphDef with tag-set: 'serve' contains the following SignatureDefs:
+
+signature_def['__saved_model_init_op']:
+  The given SavedModel SignatureDef contains the following input(s):
+  The given SavedModel SignatureDef contains the following output(s):
+    outputs['__saved_model_init_op'] tensor_info:
+        dtype: DT_INVALID
+        shape: unknown_rank
+        name: NoOp
+  Method name is: 
+
+signature_def['serving_batch']:
+  The given SavedModel SignatureDef contains the following input(s):
+    inputs['edge_features'] tensor_info:
+        dtype: DT_INT32
+        shape: (30784)
+        name: serving_batch_edge_features:0
+    inputs['n_edge'] tensor_info:
+        dtype: DT_INT32
+        shape: (258)
+        name: serving_batch_n_edge:0
+    inputs['n_node'] tensor_info:
+        dtype: DT_INT32
+        shape: (258)
+        name: serving_batch_n_node:0
+    inputs['node_candidate_mask'] tensor_info:
+        dtype: DT_BOOL
+        shape: (31040)
+        name: serving_batch_node_candidate_mask:0
+    inputs['node_embeddings'] tensor_info:
+        dtype: DT_FLOAT
+        shape: (31040, 16)
+        name: serving_batch_node_embeddings:0
+    inputs['node_ids'] tensor_info:
+        dtype: DT_INT32
+        shape: (31040)
+        name: serving_batch_node_ids:0
+    inputs['node_label'] tensor_info:
+        dtype: DT_INT32
+        shape: (31040)
+        name: serving_batch_node_label:0
+    inputs['node_type'] tensor_info:
+        dtype: DT_INT32
+        shape: (31040)
+        name: serving_batch_node_type:0
+    inputs['receivers'] tensor_info:
+        dtype: DT_INT32
+        shape: (30784)
+        name: serving_batch_receivers:0
+    inputs['senders'] tensor_info:
+        dtype: DT_INT32
+        shape: (30784)
+        name: serving_batch_senders:0
+  The given SavedModel SignatureDef contains the following output(s):
+    outputs['outputs'] tensor_info:
+        dtype: DT_FLOAT
+        shape: (60)
+        name: StatefulPartitionedCall:0
+  Method name is: tensorflow/serving/predict
+
+signature_def['serving_default']:
+  The given SavedModel SignatureDef contains the following input(s):
+    inputs['edge_features'] tensor_info:
+        dtype: DT_INT32
+        shape: (128)
+        name: serving_default_edge_features:0
+    inputs['n_edge'] tensor_info:
+        dtype: DT_INT32
+        shape: (3)
+        name: serving_default_n_edge:0
+    inputs['n_node'] tensor_info:
+        dtype: DT_INT32
+        shape: (3)
+        name: serving_default_n_node:0
+    inputs['node_candidate_mask'] tensor_info:
+        dtype: DT_BOOL
+        shape: (128)
+        name: serving_default_node_candidate_mask:0
+    inputs['node_embeddings'] tensor_info:
+        dtype: DT_FLOAT
+        shape: (128, 16)
+        name: serving_default_node_embeddings:0
+    inputs['node_ids'] tensor_info:
+        dtype: DT_INT32
+        shape: (128)
+        name: serving_default_node_ids:0
+    inputs['node_label'] tensor_info:
+        dtype: DT_INT32
+        shape: (128)
+        name: serving_default_node_label:0
+    inputs['node_type'] tensor_info:
+        dtype: DT_INT32
+        shape: (128)
+        name: serving_default_node_type:0
+    inputs['receivers'] tensor_info:
+        dtype: DT_INT32
+        shape: (128)
+        name: serving_default_receivers:0
+    inputs['senders'] tensor_info:
+        dtype: DT_INT32
+        shape: (128)
+        name: serving_default_senders:0
+  The given SavedModel SignatureDef contains the following output(s):
+    outputs['outputs'] tensor_info:
+        dtype: DT_FLOAT
+        shape: (60)
+        name: StatefulPartitionedCall_1:0
+  Method name is: tensorflow/serving/predict
+The MetaGraph with tag set ['serve'] contains the following ops: {'ReadVariableOp', 'XlaCallModule', 'RestoreV2', 'StringJoin', 'SaveV2', 'ShardedFilename', 'Pack', 'Const', 'StaticRegexFullMatch', 'Placeholder', 'AssignVariableOp', 'Select', 'StatefulPartitionedCall', 'NoOp', 'PreventGradient', 'MergeV2Checkpoints', 'VarHandleOp', 'Identity', 'DisableCopyOnRead'}
+
+Concrete Functions:

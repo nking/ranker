@@ -1,1 +1,0 @@
-{"signature_name": "serving_batch", "batch_size": 256, "max_history": 60, "num_candidates": 60, "max_nodes": 31040, "max_edges": 30784, "max_graphs": 258, "embed_len": 16}
