@@ -39,7 +39,7 @@ impl Searcher {
         match fs::exists(&PERSISTED_INDEX_PATH) {
             Ok(true) => Ok(Index::restore(&PERSISTED_INDEX_PATH)?),
             Ok(false) => Err(Box::from("File does not exist.")),
-            Err(e) => Err(Box::from("Error checking file: {e}")),
+            Err(e) => Err(Box::from(format!("Error checking file: {e}"))),
         }
     }
 

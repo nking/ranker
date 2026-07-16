@@ -17,9 +17,6 @@ pub mod embeddings_ann;
 pub mod pb {
     tonic::include_proto!("recommender");
 }
-pub mod triton {
-    tonic::include_proto!("inference");
-}
 
 /*
 #[pyfunction]

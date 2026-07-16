@@ -1,12 +1,3 @@
-2026-07-05 14:55:53.625623: I external/local_tsl/tsl/cuda/cudart_stub.cc:32] Could not find cuda drivers on your machine, GPU will not be used.
-2026-07-05 14:55:53.628704: I external/local_tsl/tsl/cuda/cudart_stub.cc:32] Could not find cuda drivers on your machine, GPU will not be used.
-2026-07-05 14:55:53.670790: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
-To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
-/home/nichole/miniconda3/envs/tfx_py310/lib/python3.10/site-packages/google/api_core/_python_version_support.py:266: FutureWarning: You are using a Python version (3.10.19) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
-  warnings.warn(message, FutureWarning)
-2026-07-05 14:55:54.565952: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
-2026-07-05 14:55:57.009375: I tensorflow/compiler/mlir/mlir_graph_optimization_pass.cc:388] MLIR V1 optimization pass is not enabled
-
 MetaGraphDef with tag-set: 'serve' contains the following SignatureDefs:
 
 signature_def['__saved_model_init_op']:
@@ -18,12 +9,28 @@ signature_def['__saved_model_init_op']:
         name: NoOp
   Method name is: 
 
-signature_def['serving_candidate']:
+signature_def['serving_default']:
   The given SavedModel SignatureDef contains the following input(s):
-    inputs['examples'] tensor_info:
+    inputs['age'] tensor_info:
+        dtype: DT_INT64
+        shape: (-1, 1)
+        name: serving_default_age:0
+    inputs['gender'] tensor_info:
         dtype: DT_STRING
-        shape: (-1)
-        name: serving_candidate_examples:0
+        shape: (-1, 1)
+        name: serving_default_gender:0
+    inputs['occupation'] tensor_info:
+        dtype: DT_INT64
+        shape: (-1, 1)
+        name: serving_default_occupation:0
+    inputs['timestamp'] tensor_info:
+        dtype: DT_INT64
+        shape: (-1, 1)
+        name: serving_default_timestamp:0
+    inputs['user_id'] tensor_info:
+        dtype: DT_INT64
+        shape: (-1, 1)
+        name: serving_default_user_id:0
   The given SavedModel SignatureDef contains the following output(s):
     outputs['outputs'] tensor_info:
         dtype: DT_FLOAT
@@ -31,206 +38,30 @@ signature_def['serving_candidate']:
         name: StatefulPartitionedCall_3:0
   Method name is: tensorflow/serving/predict
 
-signature_def['serving_candidate_dict']:
+signature_def['serving_default_examples']:
   The given SavedModel SignatureDef contains the following input(s):
-    inputs['genres'] tensor_info:
+    inputs['examples'] tensor_info:
         dtype: DT_STRING
-        shape: (-1, 1)
-        name: serving_candidate_dict_genres:0
-    inputs['movie_id'] tensor_info:
-        dtype: DT_INT64
-        shape: (-1, 1)
-        name: serving_candidate_dict_movie_id:0
+        shape: (-1)
+        name: serving_default_examples_examples:0
   The given SavedModel SignatureDef contains the following output(s):
     outputs['outputs'] tensor_info:
         dtype: DT_FLOAT
         shape: (-1, 16)
         name: StatefulPartitionedCall_4:0
   Method name is: tensorflow/serving/predict
-
-signature_def['serving_default']:
-  The given SavedModel SignatureDef contains the following input(s):
-    inputs['examples'] tensor_info:
-        dtype: DT_STRING
-        shape: (-1)
-        name: serving_default_examples:0
-  The given SavedModel SignatureDef contains the following output(s):
-    outputs['outputs'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_5:0
-  Method name is: tensorflow/serving/predict
-
-signature_def['serving_default_dict']:
-  The given SavedModel SignatureDef contains the following input(s):
-    inputs['age'] tensor_info:
-        dtype: DT_INT64
-        shape: (-1, 1)
-        name: serving_default_dict_age:0
-    inputs['gender'] tensor_info:
-        dtype: DT_STRING
-        shape: (-1, 1)
-        name: serving_default_dict_gender:0
-    inputs['genres'] tensor_info:
-        dtype: DT_STRING
-        shape: (-1, 1)
-        name: serving_default_dict_genres:0
-    inputs['movie_id'] tensor_info:
-        dtype: DT_INT64
-        shape: (-1, 1)
-        name: serving_default_dict_movie_id:0
-    inputs['occupation'] tensor_info:
-        dtype: DT_INT64
-        shape: (-1, 1)
-        name: serving_default_dict_occupation:0
-    inputs['timestamp'] tensor_info:
-        dtype: DT_INT64
-        shape: (-1, 1)
-        name: serving_default_dict_timestamp:0
-    inputs['user_id'] tensor_info:
-        dtype: DT_INT64
-        shape: (-1, 1)
-        name: serving_default_dict_user_id:0
-  The given SavedModel SignatureDef contains the following output(s):
-    outputs['outputs'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_6:0
-  Method name is: tensorflow/serving/predict
-
-signature_def['serving_query']:
-  The given SavedModel SignatureDef contains the following input(s):
-    inputs['examples'] tensor_info:
-        dtype: DT_STRING
-        shape: (-1)
-        name: serving_query_examples:0
-  The given SavedModel SignatureDef contains the following output(s):
-    outputs['outputs'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 16)
-        name: StatefulPartitionedCall_7:0
-  Method name is: tensorflow/serving/predict
-
-signature_def['serving_query_dict']:
-  The given SavedModel SignatureDef contains the following input(s):
-    inputs['age'] tensor_info:
-        dtype: DT_INT64
-        shape: (-1, 1)
-        name: serving_query_dict_age:0
-    inputs['gender'] tensor_info:
-        dtype: DT_STRING
-        shape: (-1, 1)
-        name: serving_query_dict_gender:0
-    inputs['occupation'] tensor_info:
-        dtype: DT_INT64
-        shape: (-1, 1)
-        name: serving_query_dict_occupation:0
-    inputs['timestamp'] tensor_info:
-        dtype: DT_INT64
-        shape: (-1, 1)
-        name: serving_query_dict_timestamp:0
-    inputs['user_id'] tensor_info:
-        dtype: DT_INT64
-        shape: (-1, 1)
-        name: serving_query_dict_user_id:0
-  The given SavedModel SignatureDef contains the following output(s):
-    outputs['outputs'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 16)
-        name: StatefulPartitionedCall_8:0
-  Method name is: tensorflow/serving/predict
-
-signature_def['transform_features']:
-  The given SavedModel SignatureDef contains the following input(s):
-    inputs['examples'] tensor_info:
-        dtype: DT_STRING
-        shape: (-1)
-        name: transform_features_examples:0
-  The given SavedModel SignatureDef contains the following output(s):
-    outputs['age'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:0
-    outputs['gender'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:1
-    outputs['genres'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1, 18)
-        name: StatefulPartitionedCall_9:2
-    outputs['hr'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:3
-    outputs['hr_wk'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:4
-    outputs['month'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:5
-    outputs['movie_id'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:6
-    outputs['occupation'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:7
-    outputs['rating'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:8
-    outputs['sec_into_yr'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:9
-    outputs['user_id'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:10
-    outputs['weekday'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:11
-    outputs['yr'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:12
-    outputs['yr_z'] tensor_info:
-        dtype: DT_FLOAT
-        shape: (-1, 1)
-        name: StatefulPartitionedCall_9:13
-  Method name is: tensorflow/serving/predict
-The MetaGraph with tag set ['serve'] contains the following ops: {'HashTableV2', 'LookupTableImportV2', 'NoOp', 'Const', 'FloorDiv', 'Identity', 'Minimum', 'IdentityN', 'StridedSlice', 'RealDiv', 'Squeeze', 'SelectV2', 'UnsortedSegmentSum', 'Timestamp', 'MatMul', 'SaveV2', 'Tile', 'Range', 'ConcatV2', 'BatchMatMulV2', 'BroadcastTo', 'Select', 'AssignVariableOp', 'Shape', 'LookupTableExportV2', 'OneHot', 'StringSplitV2', 'Sigmoid', 'PlaceholderWithDefault', 'Less', 'Placeholder', 'Maximum', 'RaggedTensorToTensor', 'VarHandleOp', 'StringJoin', 'Cumprod', 'LookupTableFindV2', 'PartitionedCall', 'Sub', 'ShardedFilename', 'Reshape', 'ReadVariableOp', 'StatefulPartitionedCall', 'Prod', 'Where', 'StaticRegexReplace', 'AddV2', 'ParseExampleV2', 'MutableHashTableV2', 'Pack', 'Sum', 'Equal', 'VarIsInitializedOp', 'NotEqual', 'Cumsum', 'Cast', 'RestoreV2', 'Mul', 'StaticRegexFullMatch', 'Max', 'DisableCopyOnRead', 'ExpandDims', 'GatherV2', 'Fill', 'FloorMod', 'MergeV2Checkpoints', 'Sin', 'Cos'}
+The MetaGraph with tag set ['serve'] contains the following ops: {'NoOp', 'StringSplitV2', 'Shape', 'Mul', 'Cumprod', 'SaveV2', 'Sin', 'SelectV2', 'Range', 'Placeholder', 'Sigmoid', 'ReadVariableOp', 'StaticRegexFullMatch', 'Fill', 'Reshape', 'Sub', 'StringJoin', 'Cast', 'ShardedFilename', 'ExpandDims', 'Cumsum', 'StridedSlice', 'Sum', 'Cos', 'FloorMod', 'StaticRegexReplace', 'AddV2', 'Select', 'Const', 'VarHandleOp', 'LookupTableImportV2', 'Pack', 'MergeV2Checkpoints', 'UnsortedSegmentSum', 'ParseExampleV2', 'OneHot', 'Maximum', 'Less', 'RealDiv', 'RaggedTensorToTensor', 'IdentityN', 'MatMul', 'PlaceholderWithDefault', 'Squeeze', 'StatefulPartitionedCall', 'Prod', 'GatherV2', 'Identity', 'VarIsInitializedOp', 'NotEqual', 'Max', 'LookupTableFindV2', 'BroadcastTo', 'RestoreV2', 'Minimum', 'AssignVariableOp', 'DisableCopyOnRead', 'Tile', 'Timestamp', 'FloorDiv', 'ConcatV2', 'Equal', 'Where', 'HashTableV2'}
 
 Concrete Functions:
-  Function Name: '_default_save_signature'
+  Function Name: 'serving_default'
     Option #1
       Callable with:
         Argument #1
           DType: dict
-          Value: {'hr_wk': TensorSpec(shape=(1, 1), dtype=tf.float32, name='inputs_hr_wk'), 'yr_z': TensorSpec(shape=(1, 1), dtype=tf.float32, name='inputs_yr_z'), 'occupation': TensorSpec(shape=(1, 1), dtype=tf.float32, name='inputs_occupation'), 'yr': TensorSpec(shape=(1, 1), dtype=tf.float32, name='inputs_yr'), 'sec_into_yr': TensorSpec(shape=(1, 1), dtype=tf.float32, name='inputs_sec_into_yr'), 'hr': TensorSpec(shape=(1, 1), dtype=tf.float32, name='inputs_hr'), 'weekday': TensorSpec(shape=(1, 1), dtype=tf.float32, name='inputs_weekday'), 'genres': TensorSpec(shape=(1, 1, 18), dtype=tf.float32, name='inputs_genres'), 'movie_id': TensorSpec(shape=(1, 1), dtype=tf.float32, name='inputs_movie_id'), 'month': TensorSpec(shape=(1, 1), dtype=tf.float32, name='inputs_month'), 'user_id': TensorSpec(shape=(1, 1), dtype=tf.float32, name='inputs_user_id'), 'age': TensorSpec(shape=(1, 1), dtype=tf.float32, name='inputs_age'), 'gender': TensorSpec(shape=(1, 1), dtype=tf.float32, name='inputs_gender'), }
+          Value: {'occupation': TensorSpec(shape=(None, 1), dtype=tf.int64, name='occupation'), 'age': TensorSpec(shape=(None, 1), dtype=tf.int64, name='age'), 'user_id': TensorSpec(shape=(None, 1), dtype=tf.int64, name='user_id'), 'timestamp': TensorSpec(shape=(None, 1), dtype=tf.int64, name='timestamp'), 'gender': TensorSpec(shape=(None, 1), dtype=tf.string, name='gender'), }
 
-  Function Name: 'call'
+  Function Name: 'serving_default_examples'
     Option #1
       Callable with:
         Argument #1
-          DType: dict
-          Value: {'movie_id': TensorSpec(shape=(None, 1), dtype=tf.float32, name='movie_id'), 'month': TensorSpec(shape=(None, 1), dtype=tf.float32, name='month'), 'hr': TensorSpec(shape=(None, 1), dtype=tf.float32, name='hr'), 'occupation': TensorSpec(shape=(None, 1), dtype=tf.float32, name='occupation'), 'weekday': TensorSpec(shape=(None, 1), dtype=tf.float32, name='weekday'), 'genres': TensorSpec(shape=(None, 1, 18), dtype=tf.float32, name='genres'), 'yr': TensorSpec(shape=(None, 1), dtype=tf.float32, name='yr'), 'yr_z': TensorSpec(shape=(None, 1), dtype=tf.float32, name='yr_z'), 'age': TensorSpec(shape=(None, 1), dtype=tf.float32, name='age'), 'hr_wk': TensorSpec(shape=(None, 1), dtype=tf.float32, name='hr_wk'), 'sec_into_yr': TensorSpec(shape=(None, 1), dtype=tf.float32, name='sec_into_yr'), 'gender': TensorSpec(shape=(None, 1), dtype=tf.float32, name='gender'), 'user_id': TensorSpec(shape=(None, 1), dtype=tf.float32, name='user_id'), }
-
-  Function Name: 'serve_candidate_model'
-    Option #1
-      Callable with:
-        Argument #1
-          DType: dict
-          Value: {'occupation': TensorSpec(shape=(None, 1), dtype=tf.float32, name='occupation'), 'movie_id': TensorSpec(shape=(None, 1), dtype=tf.float32, name='movie_id'), 'gender': TensorSpec(shape=(None, 1), dtype=tf.float32, name='gender'), 'yr_z': TensorSpec(shape=(None, 1), dtype=tf.float32, name='yr_z'), 'month': TensorSpec(shape=(None, 1), dtype=tf.float32, name='month'), 'weekday': TensorSpec(shape=(None, 1), dtype=tf.float32, name='weekday'), 'age': TensorSpec(shape=(None, 1), dtype=tf.float32, name='age'), 'user_id': TensorSpec(shape=(None, 1), dtype=tf.float32, name='user_id'), 'hr_wk': TensorSpec(shape=(None, 1), dtype=tf.float32, name='hr_wk'), 'genres': TensorSpec(shape=(None, 1, 18), dtype=tf.float32, name='genres'), 'hr': TensorSpec(shape=(None, 1), dtype=tf.float32, name='hr'), 'sec_into_yr': TensorSpec(shape=(None, 1), dtype=tf.float32, name='sec_into_yr'), 'yr': TensorSpec(shape=(None, 1), dtype=tf.float32, name='yr'), }
-
-  Function Name: 'serve_query_model'
-    Option #1
-      Callable with:
-        Argument #1
-          DType: dict
-          Value: {'hr': TensorSpec(shape=(None, 1), dtype=tf.float32, name='hr'), 'gender': TensorSpec(shape=(None, 1), dtype=tf.float32, name='gender'), 'sec_into_yr': TensorSpec(shape=(None, 1), dtype=tf.float32, name='sec_into_yr'), 'movie_id': TensorSpec(shape=(None, 1), dtype=tf.float32, name='movie_id'), 'month': TensorSpec(shape=(None, 1), dtype=tf.float32, name='month'), 'age': TensorSpec(shape=(None, 1), dtype=tf.float32, name='age'), 'yr_z': TensorSpec(shape=(None, 1), dtype=tf.float32, name='yr_z'), 'genres': TensorSpec(shape=(None, 1, 18), dtype=tf.float32, name='genres'), 'weekday': TensorSpec(shape=(None, 1), dtype=tf.float32, name='weekday'), 'hr_wk': TensorSpec(shape=(None, 1), dtype=tf.float32, name='hr_wk'), 'user_id': TensorSpec(shape=(None, 1), dtype=tf.float32, name='user_id'), 'occupation': TensorSpec(shape=(None, 1), dtype=tf.float32, name='occupation'), 'yr': TensorSpec(shape=(None, 1), dtype=tf.float32, name='yr'), }
+          examples: TensorSpec(shape=(None,), dtype=tf.string, name='examples')

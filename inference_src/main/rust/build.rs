@@ -8,8 +8,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/tensorflow_serving/apis/prediction_service.proto",
                 "proto/tensorflow/core/example/example.proto",
                 "proto/tensorflow/core/protobuf/meta_graph.proto",
-                "proto/grpc_service.proto",
-                "proto/health.proto",
                 "proto/recommender/recommender.proto",
             ],
             &["proto/"], // The root include directory

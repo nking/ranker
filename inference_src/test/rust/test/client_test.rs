@@ -14,7 +14,7 @@ mod client_tests {
 
     #[tokio::test]
     async fn test_query_model_connection() {
-        let uri = "http://172.17.0.1:8501";
+        let uri = "http://172.17.0.1:8500";
 
         let client = QueryModelClient::new(uri).await;
 
@@ -41,7 +41,7 @@ mod client_tests {
 
     #[tokio::test]
     async fn test_ranker_model_connection() {
-        let uri = "http://172.17.0.1:8511";
+        let uri = "http://172.17.0.1:8510";
 
         let client = RankerModelClient::new(uri).await;
 
