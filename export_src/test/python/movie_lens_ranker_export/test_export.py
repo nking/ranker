@@ -127,6 +127,10 @@ class ExportTest(unittest.TestCase):
             "n_node" :  fake_single.n_node,
             "n_edge" :  fake_single.n_edge,}
 
+        import numpy as np
+        np.set_printoptions(threshold=np.inf)
+        print(f'"instances": [\n{single_inputs}\n]\n')
+
         validation_inputs = {
             "serving_default": [single_inputs]
         }
@@ -145,6 +149,29 @@ class ExportTest(unittest.TestCase):
             # Users can also save the converted json to file.
             print(validation_reports[key].to_json(indent=2))
             assert(validation_reports[key].status.name == 'Pass')
+
+        single_inputs = {"node_candidate_mask":fake_single.nodes["candidate_mask"].tolist(),
+                         "node_ids" :fake_single.nodes["ids"].tolist(),
+                         "node_label" :fake_single.nodes["label"].tolist(),
+                         "node_type" :fake_single.nodes["type"].tolist(),
+                         "node_embeddings" :fake_single.nodes["embeddings"].tolist(),
+                         "edge_features" :fake_single.edges["rating"].tolist(),
+                         "receivers" :fake_single.receivers.tolist(),
+                         "senders" : fake_single.senders.tolist(),
+                         "n_node" : fake_single.n_node.tolist(),
+                         "n_edge" : fake_single.n_edge.tolist(),
+        }
+
+        import json
+        payload = {
+            "inputs": single_inputs
+        }
+
+        # Write the perfectly formatted JSON to a file
+        with open(os.path.join(get_bin_dir(), "test_request.json"), "w") as f:
+            json.dump(payload, f)
+        #then use:
+        #curl -X POST http://172.17.0.1:8511/v1/models/graph-ranker:predict -H "Content-Type: application/json" -d @bin/test_request.json
 
 if __name__ == '__main__':
     unittest.main()

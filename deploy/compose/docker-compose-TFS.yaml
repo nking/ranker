@@ -10,16 +10,16 @@ services:
       - "172.17.0.1:8500:8500" # gRPC port
       - "172.17.0.1:8501:8501" # REST API port
     environment:
-      - MODEL_NAME=query-model
+      - MODEL_NAME=query
     volumes:
-      - ./src/test/resources/model_repositories/saved_model_formats/bi-encoder/query-model:/models/query
+      - ./src/test/resources/model_repositories/saved_model_formats/bi-encoder/query:/models/query
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8501/v1/models/query-model" ]
+      test: [ "CMD", "curl", "-f", "http://localhost:8501/v1/models/query" ]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 5s
-    #curl -X POST http://172.17.0.1:8501/v1/models/query-model:predict -H "Content-Type: application/json" -d '{
+    #curl -X POST http://172.17.0.1:8501/v1/models/query:predict -H "Content-Type: application/json" -d '{
     #    "instances": [
     #        {
     #            "age": [25],
@@ -41,9 +41,13 @@ services:
     environment:
       - MODEL_NAME=graph-ranker
       - TF_ENABLE_XLA=1
-      - TF_XLA_FLAGS=--tf_xla_enable_xla_devices --tf_xla_cpu_global_jit --tf_xla_auto_jit=2
+      - TF_XLA_FLAGS= --tf_xla_enable_xla_devices --tf_xla_cpu_global_jit --tf_xla_auto_jit=2
     volumes:
       - ./src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker:/models/graph-ranker
+    command:
+      # This passes the flag directly to the tensorflow_model_server binary
+      - --xla_cpu_compilation_enabled=true
+      - --enable_model_warmup=true
     healthcheck:
       #health check is executed inside the container
       test: [ "CMD", "curl", "-f", "http://localhost:8501/v1/models/graph-ranker" ]
@@ -51,3 +55,5 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
+    #test with:
+    #curl -X POST http://172.17.0.1:8511/v1/models/graph-ranker:predict -H "Content-Type: application/json" -d @export_src/test/resources/test_graph_ranker_request.json
