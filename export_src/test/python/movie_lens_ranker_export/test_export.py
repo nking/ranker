@@ -3,11 +3,15 @@ import os
 
 import shutil
 
+import jax
 from tensorflow import saved_model as tf_saved_model
 from helper import *
 from movie_lens_ranker.train import create_fake_jagged_batch, create_dummy_super_padded_graph
-from movie_lens_ranker_export.export import export_models
+from movie_lens_ranker.util import calc_number_jax_graph_components
+from movie_lens_ranker.util_numba import build_graph_arrays
+from movie_lens_ranker_export.export import export_models, make_jax_module, create_serving_signature
 from movie_lens_ranker_export.restore_from_orbax import restore_model_from_checkpoint
+from orbax.export.validate import ValidationManager, ValidationReportOption
 
 
 class ExportTest(unittest.TestCase):
@@ -28,14 +32,6 @@ class ExportTest(unittest.TestCase):
         restore_dict = restore_model_from_checkpoint(checkpoint_uri=checkpoint_uri, replace_embeddings_gs_uri=embeddings_dir)
 
         batch_size = 256
-
-        export_models(
-            restore_dict['model'],
-            batch_size=batch_size,
-            max_history = restore_dict['config']['max_history'],
-            num_candidates=restore_dict['config']['num_candidates'],
-            embed_len=restore_dict['config']['embed_len'],
-            output_savedmodel_dir_uri = savedmodel_dir)
 
         user_id_range = (1, restore_dict['config']['num_users'])
         movie_id_range = (restore_dict['config']['num_users'] + 1, restore_dict['config']['num_users'] + restore_dict['config']['num_movies'])
@@ -58,6 +54,15 @@ class ExportTest(unittest.TestCase):
 
         num_candidates = restore_dict['config']['num_candidates']
 
+        export_models(
+            restore_dict['model'],
+            batch_size=batch_size,
+            max_history = restore_dict['config']['max_history'],
+            num_candidates=restore_dict['config']['num_candidates'],
+            embed_len=restore_dict['config']['embed_len'],
+            output_savedmodel_dir_uri = savedmodel_dir)
+
+
         #load the savedmodel to score some fake data
         loaded_saved_model = tf_saved_model.load(savedmodel_dir)
 
@@ -77,7 +82,7 @@ class ExportTest(unittest.TestCase):
             n_node = fake_single.n_node,
             n_edge = fake_single.n_edge,
         )
-        predictions_single = response['output_0']
+        predictions_single = response['outputs']
         print(f'predictions_single={predictions_single}', flush=True)
         print(type(predictions_single), predictions_single.dtype)
         self.assertEqual(num_candidates, predictions_single.shape[0])
@@ -94,9 +99,52 @@ class ExportTest(unittest.TestCase):
             n_node = fake_batch.n_node,
             n_edge = fake_batch.n_edge,
         )
-        predictions_batch = response['output_0']
+        predictions_batch = response['outputs']
         print(f'predictions_batch={predictions_batch}', flush=True)
         self.assertEqual(num_candidates, predictions_batch.shape[0])
+
+
+        jax_module = make_jax_module(restore_dict['model'],  restore_dict['config']['num_candidates'])
+
+        jax_graph_comp_dict_single = calc_number_jax_graph_components(1,
+                restore_dict['config']['max_history'], restore_dict['config']['num_candidates'], n_local_devices=1)
+
+        single_serving_config = create_serving_signature(
+            max_nodes=jax_graph_comp_dict_single['max_nodes'],
+            max_edges=jax_graph_comp_dict_single['max_edges'],
+            max_graphs=jax_graph_comp_dict_single['max_graphs'],
+            embed_len=restore_dict['config']['embed_len'],
+            signature_name="serving_default")
+
+        single_inputs = {"node_candidate_mask": fake_single.nodes["candidate_mask"],
+            "node_ids" : fake_single.nodes["ids"],
+            "node_label" : fake_single.nodes["label"],
+            "node_type" : fake_single.nodes["type"],
+            "node_embeddings" : fake_single.nodes["embeddings"],
+            "edge_features" : fake_single.edges["rating"],
+            "receivers" : fake_single.receivers,
+            "senders" :  fake_single.senders,
+            "n_node" :  fake_single.n_node,
+            "n_edge" :  fake_single.n_edge,}
+
+        validation_inputs = {
+            "serving_default": [single_inputs]
+        }
+
+        validation_mgr = ValidationManager(jax_module, [single_serving_config], validation_inputs)
+
+        report_options = ValidationReportOption(
+            floating_atol=1e-5,  # Absolute tolerance
+            floating_rtol=1e-5   # Relative tolerance
+        )
+
+        validation_reports = validation_mgr.validate(loaded_saved_model, report_option=report_options)
+
+        # `validation_reports` is a python dict and the key is TF SavedModel serving_key.
+        for key in validation_reports:
+            # Users can also save the converted json to file.
+            print(validation_reports[key].to_json(indent=2))
+            assert(validation_reports[key].status.name == 'Pass')
 
 if __name__ == '__main__':
     unittest.main()

@@ -92,14 +92,14 @@ def optimized_batch_and_pad(batch: Sequence[jraph.GraphsTuple], max_nodes: int, 
     # The padding edges MUST point to the first node of the padding graph (index `total_nodes`),
     # instead of index 0. If they point to 0, they connect to real data and corrupt node 0!
     senders_padded = np.concatenate([
-        np.concatenate([g.senders for g in graphs]) + repeated_offsets,
+        np.concatenate([g.senders for g in graphs], dtype=np.int32) + repeated_offsets,
         np.full(pad_n_edge, total_nodes, dtype=np.int32)
-    ])
+    ], dtype=np.int32)
     receivers_padded = np.concatenate([
-        np.concatenate([g.receivers for g in graphs]) + repeated_offsets,
+        np.concatenate([g.receivers for g in graphs], dtype=np.int32) + repeated_offsets,
         np.full(pad_n_edge, total_nodes, dtype=np.int32)
-    ])
-    
+    ], dtype=np.int32)
+
     # Fast Tree Map for feature padding (nodes, edges, globals)
     def pad_features(pad_size, *nests):
         batched_feats = np.concatenate(nests, axis=0)

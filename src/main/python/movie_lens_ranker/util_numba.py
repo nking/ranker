@@ -345,7 +345,7 @@ np.ndarray, np.ndarray, np.ndarray, int, int]:
     senders[n_real_history:n_real_history + n_candidates] = 0
 
     # Nodes (User + History + Candidates)
-    node_ids = np.empty(total_nodes, dtype=np.int64)
+    node_ids = np.empty(total_nodes, dtype=np.int32)
     node_ids[0] = user_id
     node_ids[1:1 + n_real_history] = history_movie_ids[:n_real_history]
     node_ids[1 + n_real_history:] = candidate_ids

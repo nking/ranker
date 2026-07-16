@@ -1,34 +1,38 @@
+Query Model deployment:
+- the query model is a TF SavedModel format and can be deployed
+  to TFS container tensorflow/serving:2.16.1 to match the TF
+  that was used to build it.
+- to deploy the model locally:
+  cd to base of ranker directory
+  docker compose --project-directory . -f deploy/compose/docker-compose-TFS.yaml up -d
+  can check the deployment: 
+    curl -X POST http://172.17.0.1:8501/v1/models/query-model:predict -H "Content-Type: application/json" -d '{
+      "instances": [
+            {
+                "age": [25],
+                "gender": ["F"],
+                "occupation": [10],
+                "timestamp": [1720880000],
+                "user_id": [999]
+            }
+        ]
+    }'
+- to communicate w/ the TFS server over gRPC, the tf proto files were copied from
+  https://github.com/tensorflow/serving/tree/master/tensorflow_serving
+  https://github.com/tensorflow/tensorflow/tree/master/tensorflow/core/framework
+- to compile the protocol buffers,
+  install protobuf-compiler
+  e.g. sudo apt protobuf-compiler, brew install protobuf, etc.
+i build.rs is invoked by cargo build, before the src files are loaded
 
-helpful information while trying different exports and deployment servings:
+Ranker model deployment:
 
----------------------------------------------------------------------------
-for the attempt to use saved_model and TFS serving:
+exports to NVIDIA's triton server.
 
-git checkout f501da4e0ba0a4c9b5f659f8cf631be574aad623
-git checkout development
+exporting to onxx
 
-the tf proto files were copied from
-https://github.com/tensorflow/serving/tree/master/tensorflow_serving
-https://github.com/tensorflow/tensorflow/tree/master/tensorflow/core/framework
-
-on your platform, install the protocol buffer compiler:
-    sudo apt install protobuf-compiler
-    or use brew install protobuf
-    etc...
-
-then, before cargo builds the src code, it invokes build.rs to compile the protocol buffers
-
-------------------------------------------------------------------------------------
-
-TFS container images were not able to load the entire saved_model graph.  it dropped the
-query model variables.  note that a trace is performed with real and fake data before saving
-the models and that the models work when loaded by python tensorflows.
-The problem seems to be that the TFS is TF C++ and somehow the variables aren't traced
-in a way it understands.
-
-the deployment for those is in ranker/deploy/compose/docker-compose-TFS.yaml
-
--------------------------------------------------------------------------------
+- the two-tower query model needs to be exported to onxx
+  and that is an embedded model 
 
 Then settled on NVIDIA's triton server.
 
@@ -53,4 +57,4 @@ then from the ranker directory:
 
 copied the protos into this project from
     https://github.com/triton-inference-server/common/tree/main/protobuf
-and modified build.rs for the grpc proto
+

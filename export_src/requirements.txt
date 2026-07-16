@@ -8,3 +8,6 @@ namex==0.1.0
 optree==0.19.1
 tensorflow==2.20.0
 termcolor==3.3.0
+ml_dtypes==0.5.4
+onnx==1.22.0
+tf2onnx==1.17.0

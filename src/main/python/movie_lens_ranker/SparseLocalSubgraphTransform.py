@@ -82,8 +82,8 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
                 edges={"rating": edge_features},
                 senders=senders,
                 receivers=receivers,
-                n_node=np.array([total_nodes]),
-                n_edge=np.array([total_edges]),
+                n_node=np.array([total_nodes], dtype=np.int32),
+                n_edge=np.array([total_edges], dtype=np.int32),
                 globals=None
             ))
         

@@ -1,5 +1,5 @@
 #USAGE
-#  docker compose --project-directory . -f deploy/compose/docker-compose-TFS-dont-use.yaml up -d
+#  docker compose --project-directory . -f deploy/compose/docker-compose-infer.yaml up -d
 #     the project_directory flag ensure the file paths are all relative to that directory
 services:
   bi-encoder:

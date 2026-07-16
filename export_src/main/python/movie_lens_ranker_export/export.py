@@ -1,11 +1,15 @@
 import json
 import os
 import jax
+from jax.experimental import jax2tf
+import jax.numpy as jnp
+
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = "false"
+
 import jraph
 from flax import nnx
 from orbax import export
-from orbax.export import ServingConfig
-from sqlalchemy.engine import create
+from orbax.export import ServingConfig, constants, JaxModule
 
 from movie_lens_ranker.model import GraphRanker
 from movie_lens_ranker.util import calc_number_jax_graph_components
@@ -54,6 +58,50 @@ def save_metadata(output_file_uri:str, batch_size:int, max_history:int, num_cand
     with open(output_file_uri, "w") as f:
         json.dump(metadata, f)
 
+def make_jax_module(trained_model: GraphRanker,  num_candidates:int) -> JaxModule :
+
+    # Split the NNX model into architecture (graphdef), weights (params), and everything else (rest).
+    # The '...' catches the key<fry> RNG states so they don't cause a non-exhaustive filter error.
+    graphdef, params, rest = nnx.split(trained_model, nnx.Param, ...)
+
+    #params2 = params = nnx.state(trained_model, nnx.Param) #same as params
+
+    # Define the pure apply function inside the scope so it has access to `graphdef`
+    def pure_apply_fn(params, inputs):
+        # Reconstruct the model using the static blueprint + the weights
+        model = nnx.merge(graphdef, params, rest)
+        model.eval()
+        graph_batch = jraph.GraphsTuple(
+            nodes={
+                'candidate_mask': inputs["node_candidate_mask"],
+                'ids': inputs["node_ids"],
+                'label': inputs["node_label"],
+                'type': inputs["node_type"],
+                "embeddings" : inputs["node_embeddings"]
+            },
+            edges={'rating': inputs["edge_features"]},
+            receivers=inputs["receivers"],
+            senders=inputs["senders"],
+            globals=None,
+            n_node=inputs["n_node"],
+            n_edge=inputs["n_edge"]
+        )
+        raw_scores = model(graph_batch)[:num_candidates]
+
+        # Force it into a contiguous JAX array (collapses lists/tuples of scalars)
+        predictions_array = jnp.asarray(raw_scores)
+
+        return {"outputs": predictions_array}
+
+    jax_module = export.JaxModule(
+        params=params,
+        apply_fn=pure_apply_fn,
+        trainable=False,
+        export_version=constants.ExportModelType.TF_SAVEDMODEL,
+    )
+
+    return jax_module
+
 def export_models(trained_model: GraphRanker, batch_size:int, max_history:int,
     num_candidates:int, embed_len:int,  output_savedmodel_dir_uri:str, n_local_devices:int=1):
     """
@@ -84,66 +132,39 @@ def export_models(trained_model: GraphRanker, batch_size:int, max_history:int,
         max_nodes=jax_graph_comp_dict_single['max_nodes'],
         max_edges=jax_graph_comp_dict_single['max_edges'],
         max_graphs=jax_graph_comp_dict_single['max_graphs'],
-        embed_len=embed_len, signature_name="serving_default")
+        embed_len=embed_len,
+        signature_name="serving_default")
 
     batch_serving_config = create_serving_signature(
         max_nodes=jax_graph_comp_dict_batch['max_nodes'],
         max_edges=jax_graph_comp_dict_batch['max_edges'],
         max_graphs=jax_graph_comp_dict_batch['max_graphs'],
-        embed_len=embed_len, signature_name="serving_batch")
+        embed_len=embed_len,
+        signature_name="serving_batch")
 
-    # Split the NNX model into architecture (graphdef), weights (params), and everything else (rest).
-    # The '...' catches the key<fry> RNG states so they don't cause a non-exhaustive filter error.
-    graphdef, params, rest = nnx.split(trained_model, nnx.Param, ...)
-
-    # Define the pure apply function inside the scope so it has access to `graphdef`
-    def pure_apply_fn(params, inputs):
-        # Reconstruct the model using the static blueprint + the weights
-        model = nnx.merge(graphdef, params, rest)
-        model.eval()
-
-        graph_batch = jraph.GraphsTuple(
-            nodes={
-                'candidate_mask': inputs["node_candidate_mask"],
-                'ids': inputs["node_ids"],
-                'label': inputs["node_label"],
-                'type': inputs["node_type"],
-                "embeddings" : inputs["node_embeddings"]
-            },
-            edges={'rating': inputs["edge_features"]},
-            receivers=inputs["receivers"],
-            senders=inputs["senders"],
-            globals=None,
-            n_node=inputs["n_node"],
-            n_edge=inputs["n_edge"]
-        )
-
-        return model(graph_batch)[:num_candidates]
-
-    # Pass *only* the params to JaxModule, not the whole trained_model
-    jax_module = export.JaxModule(
-        params=params,
-        apply_fn=pure_apply_fn,
-        trainable=False
-    )
+    jax_module = make_jax_module(trained_model,  num_candidates)
 
     export_manager = export.ExportManager(jax_module, [single_serving_config, batch_serving_config])
     export_manager.save(output_savedmodel_dir_uri)
 
-    save_metadata(output_file_uri=os.path.join(output_savedmodel_dir_uri, "metadata_single.json"),
+    assets_extra_dir = os.path.join(output_savedmodel_dir_uri, "assets.extra")
+    os.makedirs(assets_extra_dir, exist_ok=True)
+
+    save_metadata(output_file_uri=os.path.join(assets_extra_dir, "metadata_single.json"),
         batch_size=1,  max_history=max_history, num_candidates=num_candidates,
         max_nodes=jax_graph_comp_dict_single['max_nodes'],
         max_edges=jax_graph_comp_dict_single['max_edges'],
         max_graphs=jax_graph_comp_dict_single['max_graphs'],
         embed_len=embed_len, signature_name="serving_default")
 
-    save_metadata(output_file_uri=os.path.join(output_savedmodel_dir_uri, "metadata_batch.json"),
+    save_metadata(output_file_uri=os.path.join(assets_extra_dir, "metadata_batch.json"),
         batch_size=batch_size, max_history=max_history, num_candidates=num_candidates,
         max_nodes=jax_graph_comp_dict_batch['max_nodes'],
         max_edges=jax_graph_comp_dict_batch['max_edges'],
         max_graphs=jax_graph_comp_dict_batch['max_graphs'],
         embed_len=embed_len, signature_name="serving_batch")
 
+    #TODO: consider saving the json files to assets.extra directory (create it in assets.extra)
     print(f"saved model and metadata to {output_savedmodel_dir_uri}")
 
 
