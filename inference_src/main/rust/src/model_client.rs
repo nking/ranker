@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::error::Error;
-use tonic::transport::Channel;
+use tonic::transport::{Channel, Endpoint};
 // use crate:: means look inside this project
 use crate::graph_builder::{JraphGraph};
 use crate::pb::UserRequest;
@@ -23,8 +23,10 @@ pub struct RankerModelClient {
 }
 
 impl QueryModelClient {
-    pub async fn new(uri: &'static str) -> Self {
-        let channel = Channel::from_static(uri)
+    pub async fn new(uri: String) -> Self {
+        let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
+
+        let channel = endpoint
             .connect()
             .await
             .expect("Failed to connect to TFS for query model");
@@ -74,8 +76,10 @@ impl QueryModelClient {
 
 impl RankerModelClient {
 
-    pub async fn new(uri: &'static str) -> Self {
-        let channel = Channel::from_static(uri)
+    pub async fn new(uri: String) -> Self {
+        let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
+
+        let channel = endpoint
             //.max_decoding_message_size(10 * 1024 * 1024) // 10MB example
             .connect()
             .await.expect("Failed to connect to TFS for ranker model");

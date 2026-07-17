@@ -39,6 +39,11 @@ notify = "9.0.0-rc.4"
 
 usearch = "2.26.0"
 
+clap = { version = "4.6.2", features = ["derive", "env"] }
+tonic-health = "0.14.6"
+tempfile = "3.27.0"
+tokio-stream = "0.1.18"
+
 [build-dependencies]
 tonic-prost-build = "0.14.6"
 
@@ -62,7 +67,7 @@ path="../../test/rust/test/graph_builder_test.rs"
 
 [[test]]
 name = "client_tests"
-path="../../test/rust/test/client_test.rs"
+path= "../../test/rust/test/model_client_test.rs"
 
 [[test]]
 name = "embedding_ann_tests"
@@ -75,3 +80,11 @@ path="../../test/rust/test/util_test.rs"
 [[test]]
 name = "orchestrator_tests"
 path="../../test/rust/test/orchestrator_test.rs"
+
+[[test]]
+name = "app_config_tests"
+path="../../test/rust/test/app_config_test.rs"
+
+[[test]]
+name = "app_runner_tests"
+path="../../test/rust/test/app_runner_test.rs"

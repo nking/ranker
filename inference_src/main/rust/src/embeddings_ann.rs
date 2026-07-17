@@ -1,10 +1,7 @@
-use std::{fs};
+use std::{path::{Path, PathBuf}};
 use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 use usearch::ffi::Matches;
 use crate::embeddings_util::read_movie_embeddings;
-
-//TODO: make this settable by cli flag and by equiv of a properties file for use in deployment:
-const PERSISTED_INDEX_PATH: &'static str = "./target/movie_embeddings_indexer";
 
 pub struct Searcher {
     indexer : Index,
@@ -12,20 +9,60 @@ pub struct Searcher {
     num_catalog_movies : usize,
     embed_len : usize,
     top_k : usize,
+    persisted_index_path: PathBuf,
 }
 
 impl Searcher {
 
     // static constructor
-    pub fn new(movie_embeddings_uri: &str, top_k: usize) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(movie_embeddings_uri: &str, top_k: usize, persisted_index_path: impl AsRef<Path>)
+        -> Result<Self, Box<dyn std::error::Error+ Send + Sync>> {
+
         let (movie_embeddings_catalog, num_movies, embed_len) = read_movie_embeddings(&movie_embeddings_uri);
-        let indexer = Self::load(&movie_embeddings_catalog, embed_len);
-        match indexer {
-            Ok(indexer) => Ok(Self{
-                indexer: indexer, movie_embeddings_catalog : movie_embeddings_catalog,
-                num_catalog_movies: num_movies, embed_len : embed_len, top_k}),
-            Err(error) => {panic!("There was a problem loading the indexes: {:?}", error)}
+        let path_buf = persisted_index_path.as_ref().to_path_buf();
+        let indexer = if path_buf.exists() {
+            println!("Restoring index from {:?}", path_buf);
+            let path_str = path_buf.to_str().ok_or("Path contains invalid UTF-8 characters")?;
+            Index::restore(path_str)?
+        } else {
+            // Otherwise, build and save
+            println!("Building new index at {:?}", path_buf);
+            Self::build_and_save(&movie_embeddings_catalog, embed_len, &path_buf)?
+        };
+        Ok(Self{
+            indexer: indexer, movie_embeddings_catalog : movie_embeddings_catalog,
+            num_catalog_movies: num_movies, embed_len : embed_len, top_k: top_k,
+            persisted_index_path: path_buf,
+        })
+    }
+
+    fn build_and_save(catalog: &[f32], embed_len: usize, path: &Path)
+        -> Result<Index, Box<dyn std::error::Error + Send + Sync>> {
+
+        let num_catalog_movies = catalog.len() / embed_len;
+        let mut index: Index = Self::construct_index(embed_len, num_catalog_movies)?;
+
+        for (id, chunk) in catalog.chunks_exact(embed_len).enumerate() {
+            index.add(id as u64, chunk)?;
         }
+
+        index.save(path.to_str().unwrap())?;
+        Ok(index)
+    }
+
+    pub fn restore(&self) -> Result<Index, Box<dyn std::error::Error>> {
+        // 1. Check existence first
+        if !self.persisted_index_path.exists() {
+            return Err(Box::from("File does not exist."));
+        }
+
+        // 2. Convert to string safely (handle non-UTF-8 paths)
+        let path_str = self.persisted_index_path
+            .to_str()
+            .ok_or("Path contains invalid UTF-8 characters")?;
+
+        // 3. Restore and propagate errors with '?'
+        Ok(Index::restore(path_str)?)
     }
 
     pub fn get_num_catalog_movies(&self) -> usize {
@@ -35,38 +72,24 @@ impl Searcher {
         self.embed_len
     }
 
-    pub fn restore(&self) -> Result<Index, Box<dyn std::error::Error>> {
-        match fs::exists(&PERSISTED_INDEX_PATH) {
-            Ok(true) => Ok(Index::restore(&PERSISTED_INDEX_PATH)?),
-            Ok(false) => Err(Box::from("File does not exist.")),
-            Err(e) => Err(Box::from(format!("Error checking file: {e}"))),
-        }
+    pub fn get_persisted_index_path(&self) -> PathBuf {
+        self.persisted_index_path.clone()
     }
 
     pub fn get_movies_embedding_catalog_ref(&self) -> &Vec<f32> {
         &self.movie_embeddings_catalog
     }
 
-    fn construct_index(embed_len : usize, capacity: usize) -> Result<Index, Box<dyn std::error::Error>> {
+    fn construct_index(embed_len : usize, capacity: usize) -> Result<Index, Box<dyn std::error::Error + Send + Sync>> {
         let mut options = IndexOptions::default();
         options.dimensions = embed_len;
         options.metric = MetricKind::IP; // inner product
         options.quantization = ScalarKind::F32; // Use 32-bit floating point numbers
         options.connectivity = 16; //HNSW degree
 
-        let mut index = Index::new(&options)?;
+        let mut index: Index = Index::new(&options)?;
         index.reserve(capacity)?;
 
-        Ok(index)
-    }
-
-    pub fn load(movie_embeddings_catalog : &[f32], embed_len : usize) -> Result<Index, Box<dyn std::error::Error>> {
-        let num_catalog_movies = movie_embeddings_catalog.len() / embed_len;
-        let mut index = Self::construct_index(embed_len, num_catalog_movies)?;
-        for (id, chunk) in movie_embeddings_catalog.chunks_exact(embed_len).enumerate() {
-            index.add(id as u64, chunk)?;
-        }
-        index.save(&PERSISTED_INDEX_PATH).expect("serialize index to disk failed");
         Ok(index)
     }
 
@@ -88,7 +111,7 @@ impl Searcher {
     }
 }
 
-// all of the libraries have disk serialization:
+// all of the ANN libraries have disk serialization:
 //     USearch: Uses .save(path) and .load(path)
 // FAISS IVF-PQ has incredible memory savings if trying to squeeze in more to a single RAM machine
 //if on a disk with NVMe SSDs, USearch's memory-mapping can lead to good performance as long

@@ -3,6 +3,7 @@ mod orchestrator_tests {
     use std::collections::HashMap;
     use std::fs::File;
     use std::io::BufReader;
+    use std::path::PathBuf;
     use serde_json::Value;
     use tonic::{Response};
 
@@ -12,21 +13,23 @@ mod orchestrator_tests {
         // Tell Rust to literally include the code from helper.rs here
         include!("helper.rs");
     }
-    use helper::{get_param_json_uri, get_embeddings_uris};
+    use helper::{get_model_param_json_uri, get_embeddings_uris};
     use inference_engine::orchestrator::Orchestrator;
     use inference_engine::pb::recommender_service_server::RecommenderService;
     use crate::orchestrator_tests::helper::{get_train_val_test_liked_uris, DataSize};
 
     #[tokio::test]
     async fn test_orchestrator() {
-        let query_uri = "http://172.17.0.1:8500";
-        let ranker_uri = "http://172.17.0.1:8510";
+        let query_uri = String::from("http://172.17.0.1:8500");
+        let ranker_uri = String::from("http://172.17.0.1:8510");
         let ranker_n_local_devices = 1;
         let top_k : usize = 20;
 
+        let persisted_index_path: std::path::PathBuf = PathBuf::from("./target/movie_embeddings_indexer");
+
         let (_, movie_embeddings_uri) = get_embeddings_uris();
 
-        let params_json_uri = get_param_json_uri();
+        let params_json_uri = get_model_param_json_uri();
         let file = File::open(params_json_uri).unwrap();
         let reader = BufReader::new(file);
         // 3. Deserialize JSON directly into a HashMap
@@ -53,15 +56,16 @@ mod orchestrator_tests {
         ];
 
         let orchestrator = Orchestrator::new(
-            &query_uri,
-            &ranker_uri,
+            query_uri,
+            ranker_uri,
             &movie_embeddings_uri,
             ratings_uris,
             max_history,
             num_candidates,
             num_catalog_users,
             ranker_n_local_devices,
-            top_k
+            top_k,
+            persisted_index_path
         ).await.unwrap();
 
         let mock_request = UserRequest {

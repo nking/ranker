@@ -120,6 +120,7 @@ pub struct JraphGraph {
     pub candidate_mask: Vec<bool>,
 }
 
+#[allow(unused_variables)]
 pub fn build_padded_super_graph(
     user_ids: &[i32],
     history_movie_ids: &[i32],

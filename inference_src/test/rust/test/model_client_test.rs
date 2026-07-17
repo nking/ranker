@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod client_tests {
     use std::error::Error;
-    use inference_engine::client::{QueryModelClient, RankerModelClient};
+    use inference_engine::model_client::{QueryModelClient, RankerModelClient};
     use inference_engine::graph_builder::{create_fake_padded_super_batch, JraphGraph};
     use super::*;
     // Assuming your UserRequest is accessible here
@@ -14,7 +14,7 @@ mod client_tests {
 
     #[tokio::test]
     async fn test_query_model_connection() {
-        let uri = "http://172.17.0.1:8500";
+        let uri = String::from("http://172.17.0.1:8500");
 
         let client = QueryModelClient::new(uri).await;
 
@@ -41,7 +41,7 @@ mod client_tests {
 
     #[tokio::test]
     async fn test_ranker_model_connection() {
-        let uri = "http://172.17.0.1:8510";
+        let uri = String::from("http://172.17.0.1:8510");
 
         let client = RankerModelClient::new(uri).await;
 

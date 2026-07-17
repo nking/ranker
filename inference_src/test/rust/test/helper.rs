@@ -1,5 +1,5 @@
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use std::collections::HashMap;
 
 pub fn get_project_dir() -> Option<PathBuf> {
@@ -20,11 +20,13 @@ pub fn get_project_dir() -> Option<PathBuf> {
     None
 }
 
+#[allow(dead_code)]
 pub fn get_bin_dir() -> Option<PathBuf> {
     // Call the previous function and map the path if found
     get_project_dir().map(|proj_dir| proj_dir.join("bin"))
 }
 
+#[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum DataSize {
     Full,
@@ -32,6 +34,7 @@ pub enum DataSize {
     Tiny,
 }
 
+#[allow(dead_code)]
 pub fn get_train_val_test_liked_uris(
     data_size: DataSize,
     use_gcs_uri: bool,
@@ -69,6 +72,7 @@ pub fn get_train_val_test_liked_uris(
     out
 }
 
+#[allow(dead_code)]
 pub fn get_embeddings_uris() -> (String, String) {
     let mut user_embedding_uri : Option<PathBuf> = get_project_dir();
     if let Some(ref mut p) = user_embedding_uri {
@@ -82,7 +86,7 @@ pub fn get_embeddings_uris() -> (String, String) {
     (user_embedding_uri.unwrap().to_string_lossy().into_owned(),
     movie_embedding_uri.unwrap().to_string_lossy().into_owned())
 }
-
+#[allow(dead_code)]
 pub fn get_recommended_movies_uris() -> (String, String) {
     let movies_rec_uri = get_project_dir()
         .map(|p| p.join("src/test/resources/data/recommended_movies.parquet"))
@@ -96,7 +100,7 @@ pub fn get_recommended_movies_uris() -> (String, String) {
 
     (movies_rec_uri, movies_rec_ts_uri)
 }
-
+#[allow(dead_code)]
 pub fn get_movies_uri() -> String {
     let movies_uri = get_project_dir()
         .map(|p| p.join("src/test/resources/data/movies-00000-of-00001.parquet"))
@@ -106,14 +110,23 @@ pub fn get_movies_uri() -> String {
     movies_uri
 }
 
-pub fn get_param_json_uri() -> String {
+#[allow(dead_code)]
+pub fn get_model_param_json_uri() -> String {
     let params_uri = get_project_dir()
         .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/cross-encoder/metadata_single.json"))
         .map(|p| p.to_string_lossy().into_owned())
         .expect("Project directory not found");
     params_uri
 }
-
+#[allow(dead_code)]
+pub fn get_config_json_uri() -> String {
+    let params_uri = get_project_dir()
+        .map(|p| p.join("./inference_src/main/rust/config/default.json"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .expect("Project directory not found");
+    params_uri
+}
+#[allow(dead_code)]
 pub fn assert_slices_nearly_equal(a: &[f32], b: &[f32], epsilon: f32) {
     assert_eq!(a.len(), b.len(), "Slices have different lengths");
     for (i, (val_a, val_b)) in a.iter().zip(b.iter()).enumerate() {

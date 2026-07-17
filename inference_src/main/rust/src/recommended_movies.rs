@@ -19,6 +19,7 @@ pub struct RecommendedMovies {
     pub timestamps : Vec<i64>,
     num_users: usize,
     pad_value : i32,
+    #[allow(dead_code)]
     ts_pad_value : i64,
 }
 
@@ -42,6 +43,7 @@ impl RecommendedMovies {
         timestamps: &[i64],
         top_k: usize
     ) -> Vec<i32> {
+
         // Derive num_movies dynamically from the flat array length
         let num_movies = self.movie_ids.len() / (self.num_users);
 

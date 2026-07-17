@@ -15,7 +15,7 @@ mod user_history_tests {
     }
     use helper::{get_train_val_test_liked_uris, DataSize};
 
-    use inference_engine::user_history::{build_user_history, UserHistory, UserMapEntry};
+    use inference_engine::user_history::{build_user_history, UserHistory};
     use inference_engine::user_history::_testable_build_map_async;
 
     #[tokio::test]
@@ -36,11 +36,12 @@ mod user_history_tests {
 
         let ts : Vec<i64> = vec![956705600, 956705600];
 
-        let (movie_hist, ratings_hist) = user_history.get_history_before_timestamp(
+        let (movie_hist, _ratings_hist) = user_history.get_history_before_timestamp(
             &user_ids, &ts, max_history);
 
         assert_eq!(movie_hist.len(), user_ids.len() * max_history);
 
+        #[allow(unused_variables)]
         let (lookup, max_history_found) = _testable_build_map_async(&ratings_uris).await;
 
         let fixed_length = max_history;

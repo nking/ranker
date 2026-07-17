@@ -1,0 +1,18 @@
+{
+  "server_addr": "0.0.0.0:50051",
+  "query_uri": "http://172.17.0.1:8500",
+  "ranker_uri": "http://172.17.0.1:8510",
+  "params_json_path": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/metadata_single.json",
+  "movie_embeddings_path": "../../../src/test/resources/data/movie_emb-00000-of-00001.parquet",
+  "ratings_uris": [
+    "../../../src/test/resources/data/tiny/ratings_train_liked-00000-of-00001.parquet",
+    "../../../src/test/resources/data/tiny/ratings_train_3-00000-of-00001.parquet",
+    "../../../src/test/resources/data/tiny/ratings_train_disliked-00000-of-00001.parquet",
+    "../../../src/test/resources/data/tiny/ratings_val_liked-00000-of-00001.parquet",
+    "../../../src/test/resources/data/tiny/ratings_val_3-00000-of-00001.parquet",
+    "../../../src/test/resources/data/tiny/ratings_val_disliked-00000-of-00001.parquet"
+  ],
+  "ranker_n_local_devices": 1,
+  "top_k": 20,
+  "persisted_index_path": "./target/movie_embeddings_indexer"
+}

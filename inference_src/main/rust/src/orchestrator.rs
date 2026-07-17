@@ -1,6 +1,7 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use arc_swap::ArcSwap;
-use crate::client::{QueryModelClient, RankerModelClient};
+use crate::model_client::{QueryModelClient, RankerModelClient};
 use crate::embeddings_ann::Searcher;
 use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
 use crate::user_history::{build_user_history, UserHistory};
@@ -19,24 +20,29 @@ pub struct Orchestrator {
     searcher: ArcSwap<Searcher>, // updatable
     user_history: UserHistory,  // can be made updatable in future
     max_history: usize,
+    #[allow(dead_code)]
     num_candidates: usize,
     num_catalog_users: usize,
     ranker_n_local_devices : usize,
+    persisted_index_path: PathBuf,
 }
 
 impl Orchestrator {
     // Note: We make this async because connecting to gRPC takes time
-    pub async fn new(query_uri: &'static str, ranker_uri: &'static str,
+    pub async fn new(
+        query_uri: String,
+        ranker_uri: String,
         movie_embeddings_uri: &str,
         ratings_uris: Vec<&str>,
         max_history: usize,
         num_candidates: usize,
         num_catalog_users: usize,
         ranker_n_local_devices : usize,
-        top_k : usize
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+        top_k : usize,
+        persisted_index_path: impl AsRef<Path>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
 
-        let initial_searcher = Searcher::new(movie_embeddings_uri, top_k)?;
+        let initial_searcher = Searcher::new(movie_embeddings_uri, top_k, &persisted_index_path)?;
         let query_client = QueryModelClient::new(query_uri).await;
         let ranker_client = RankerModelClient::new(ranker_uri).await;
         let user_history: UserHistory = build_user_history(&ratings_uris, 2048).await;
@@ -49,20 +55,21 @@ impl Orchestrator {
             num_catalog_users: num_catalog_users,
             searcher: ArcSwap::from_pointee(initial_searcher),
             user_history: user_history,
-            ranker_n_local_devices: ranker_n_local_devices
+            ranker_n_local_devices: ranker_n_local_devices,
+            persisted_index_path: persisted_index_path.as_ref().to_path_buf(),
         })
     }
 
     pub async fn reload_embeddings(&self, movie_embeddings_uri: &str, top_k: usize) -> Result<(), Box<dyn std::error::Error>> {
 
         let uri_owned: String = movie_embeddings_uri.to_string();
-
+        let path = self.persisted_index_path.to_owned();
         // CPU Bound: Building a usearch index is heavy math.
         // We MUST offload this to tokio's blocking thread pool so we don't
         // starve the async workers handling incoming gRPC requests.
         let new_searcher = tokio::task::spawn_blocking(move || {
             // temporarily, consuming twice as much RAM with current and new indexer
-            Searcher::new(&uri_owned.as_str(), top_k).map_err(|e| e.to_string())
+            Searcher::new(&uri_owned.as_str(), top_k, &path).map_err(|e| e.to_string())
         }).await??;
 
         // The Swap: This takes nanoseconds.

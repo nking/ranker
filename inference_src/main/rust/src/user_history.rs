@@ -1,13 +1,13 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
-use tokio::runtime::Runtime;
 use object_store::ObjectStoreExt;
 use arrow_array::{Int32Array, Int64Array};
 use futures::stream::StreamExt;
 use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::arrow::async_reader::ParquetRecordBatchStreamBuilder;
 use std::cmp::min;
+use std::path::Path;
 use futures::future::join_all;
 use crate::util;
 
@@ -126,9 +126,15 @@ async fn build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEntry>
     let mut tasks = Vec::new();
 
     // The Map Phase: Spawn a concurrent task for each file
-    for file_uri in ratings_uris {
-        // We must clone the string so the background task owns the data
-        let uri = file_uri.to_string();
+    for ratings_uri in ratings_uris {
+
+        let _path = Path::new(ratings_uri);
+        // Resolve to absolute path
+        // If the path is relative, join it with current_dir to get a real location.
+        let absolute_path = std::fs::canonicalize(_path)
+            .expect("Failed to canonicalize path: File does not exist or access denied");
+
+        println!("DEBUG: Attempting to access file at: {:?}", absolute_path);
 
         let sem = semaphore.clone();
 
@@ -139,7 +145,7 @@ async fn build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEntry>
             // Each task gets its own independent HashMap (no locking needed!)
             let mut local_map: FxHashMap<i32, UserMapEntry> = FxHashMap::default();
 
-            let (storage, path) = util::parse_uri(&uri);
+            let (storage, path) = util::parse_uri(&absolute_path.to_str().expect("Path is not valid UTF-8"));
             let meta = storage.head(&path).await.expect("Failed to get file metadata");
             let reader = ParquetObjectReader::new(storage, meta.location).with_file_size(meta.size);
 
@@ -305,7 +311,7 @@ pub async fn build_user_history(ratings_uris: &[&str], max_history: usize) -> Us
     // Block the thread until the map is built and sorted
     let (map, longest_history)  = build_map_async(&ratings_uris).await;
 
-    print!("longest history read has length={}", longest_history);
+    print!("longest history read has length={}\n", longest_history);
 
     let pad_value : i32 = -1;
     let ts_pad_value: i64 = 2524608000; //year 2050
