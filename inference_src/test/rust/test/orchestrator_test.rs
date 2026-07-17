@@ -1,14 +1,11 @@
 #[cfg(test)]
 mod orchestrator_tests {
     use std::collections::HashMap;
-    use std::error::Error;
     use std::fs::File;
     use std::io::BufReader;
     use serde_json::Value;
-    use tonic::{Request, Response};
-    use inference_engine::client::{QueryModelClient, RankerModelClient};
-    use inference_engine::graph_builder::{create_fake_padded_super_batch, JraphGraph};
-    use super::*;
+    use tonic::{Response};
+
     // Assuming your UserRequest is accessible here
     use inference_engine::pb::{RankedMovies, UserRequest};
     mod helper {
@@ -18,14 +15,16 @@ mod orchestrator_tests {
     use helper::{get_param_json_uri, get_embeddings_uris};
     use inference_engine::orchestrator::Orchestrator;
     use inference_engine::pb::recommender_service_server::RecommenderService;
-    use crate::orchestrator_tests::helper::{get_movies_uri, get_train_val_test_liked_uris, DataSize};
+    use crate::orchestrator_tests::helper::{get_train_val_test_liked_uris, DataSize};
 
     #[tokio::test]
     async fn test_orchestrator() {
         let query_uri = "http://172.17.0.1:8500";
         let ranker_uri = "http://172.17.0.1:8510";
+        let ranker_n_local_devices = 1;
+        let top_k : usize = 20;
 
-        let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
+        let (_, movie_embeddings_uri) = get_embeddings_uris();
 
         let params_json_uri = get_param_json_uri();
         let file = File::open(params_json_uri).unwrap();
@@ -36,9 +35,6 @@ mod orchestrator_tests {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
         let num_candidates = dict.get("num_candidates")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
-        let embed_len = dict.get("embed_len")
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
         let num_catalog_users = dict.get("num_catalog_users")
@@ -63,7 +59,9 @@ mod orchestrator_tests {
             ratings_uris,
             max_history,
             num_candidates,
-            num_catalog_users
+            num_catalog_users,
+            ranker_n_local_devices,
+            top_k
         ).await.unwrap();
 
         let mock_request = UserRequest {
@@ -82,7 +80,10 @@ mod orchestrator_tests {
         assert!(results.is_ok(), "Prediction failed: {:?}", results.err());
         let response = results.unwrap().into_inner();
         println!("Got {} recommendations!", response.movie_ids.len());
-        
+        for i in 0..response.movie_ids.len() {
+            println!("{} {}", response.movie_ids[i], response.scores[i]);
+        }
+
     }
 
 }

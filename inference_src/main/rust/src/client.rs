@@ -59,7 +59,7 @@ impl QueryModelClient {
                 let raw_bytes = tensor_proto.tensor_content;
                 let mut embedding = Vec::with_capacity(raw_bytes.len() / 4);
                 for chunk in raw_bytes.chunks_exact(4) {
-                    let val = f32::from_le_bytes(chunk.try_into().unwrap());
+                    let val = f32::from_le_bytes(chunk.try_into()?);
                     embedding.push(val);
                 }
                 Ok(embedding)

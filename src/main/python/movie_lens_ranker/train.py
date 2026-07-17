@@ -4,7 +4,7 @@ and dataloader using SPMD paradigm.
 """
 import time
 from functools import partial
-from typing import Dict, Tuple, Union, Any, List, Sequence
+from typing import Tuple, Union, Any
 
 import mlflow
 import optax
@@ -12,7 +12,6 @@ from math import log
 import jax
 from jax.sharding import PartitionSpec as P
 from jax import shard_map, Array
-import numpy as np
 
 from vizier.service import pyvizier as vz
 from vizier.service.clients import Trial

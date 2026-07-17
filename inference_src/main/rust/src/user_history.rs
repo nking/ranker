@@ -95,10 +95,9 @@ impl UserHistory {
 }
 
 
-pub fn _testable_build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEntry>, usize) {
-    let rt = Runtime::new().unwrap();
+pub async fn _testable_build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEntry>, usize) {
 
-    let (map, longest_history)  = rt.block_on(build_map_async(ratings_uris));
+    let (map, longest_history)  = build_map_async(ratings_uris).await;
 
     (map, longest_history)
 }

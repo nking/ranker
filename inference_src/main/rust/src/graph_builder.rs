@@ -274,8 +274,11 @@ pub fn build_padded_super_graph(
 ///
 /// ```
 pub fn create_fake_padded_super_batch(batch_size: usize,
-    max_history: usize, num_candidates: usize, user_id_range: (usize, usize),
-    movie_id_range: (usize, usize), n_local_devices: usize,
+    max_history: usize,
+    num_candidates: usize,
+    user_id_range: (usize, usize),
+    movie_id_range: (usize, usize),
+    n_local_devices: usize,
     user_embeddings_uri : &String,
     movie_embeddings_uri : &String
     ) -> JraphGraph {

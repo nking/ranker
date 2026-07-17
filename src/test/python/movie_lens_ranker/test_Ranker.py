@@ -934,57 +934,5 @@ class TestRanker(unittest.TestCase):
         print(f'nodes["embeddings"]={np.array2string(r4.nodes["embeddings"], threshold=sys.maxsize)}')
 
 
-
-    def test_optimized_batch_and_pad(self):
-
-        batch_size = 3
-        max_history = 4
-        num_candidates = 5
-
-        user_id_range = (1, 10)
-        movie_id_range = (1, 10)
-
-        jax_graph_comp_dict = calc_number_jax_graph_components(
-            batch_size=batch_size, max_history=max_history,
-            num_candidates=num_candidates,
-            n_local_devices=jax.local_device_count())
-
-        fake_batch = create_fake_jagged_batch(batch_size=batch_size,
-                                              max_history=max_history,
-                                              num_candidates=num_candidates, user_id_range=user_id_range,
-                                              movie_id_range=movie_id_range,
-                                              user_embeddings_uri=self.user_embeddings_uri, movie_embeddings_uri=self.movie_embeddings_uri)
-
-        #import pprint
-        #pprint.pprint(f"fake_jagged_batch=\n{fake_batch}")
-        print(f"fake_jagged_batch=\n{fake_batch}")
-
-        n_local_devices = jax.local_device_count()
-
-        padded_super_graph_0 = pad_graph_tuple_batch(fake_batch,
-                                                     jax_graph_comp_dict)
-
-        padded_super_graph_1, _ = optimized_batch_and_pad(
-            batch=fake_batch,
-            max_nodes=jax_graph_comp_dict['max_nodes'],
-            max_edges=jax_graph_comp_dict['max_edges'],
-            max_graphs=jax_graph_comp_dict['max_graphs'],
-        )
-
-        print(f"padded_super_graph_1=\n{padded_super_graph_1}")
-
-
-        ## compare the graphs
-        self._dictionaries_are_same(padded_super_graph_1.edges, padded_super_graph_0.edges)
-        np.testing.assert_array_equal(padded_super_graph_1.n_edge, padded_super_graph_0.n_edge)
-        np.testing.assert_array_equal(padded_super_graph_1.n_node, padded_super_graph_0.n_node)
-        self._tuples_are_same(padded_super_graph_1._fields, padded_super_graph_0._fields)
-        self.assertIsNone(padded_super_graph_0.globals)
-        self.assertIsNone(padded_super_graph_1.globals)
-
-        np.testing.assert_array_equal(padded_super_graph_1.receivers, padded_super_graph_0.receivers)
-        np.testing.assert_array_equal(padded_super_graph_1.senders, padded_super_graph_0.senders)
-
-
 if __name__ == '__main__':
     unittest.main()

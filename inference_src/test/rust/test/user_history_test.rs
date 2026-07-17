@@ -18,8 +18,8 @@ mod user_history_tests {
     use inference_engine::user_history::{build_user_history, UserHistory, UserMapEntry};
     use inference_engine::user_history::_testable_build_map_async;
 
-    #[test]
-    pub fn test_user_history_load() {
+    #[tokio::test]
+    pub async fn test_user_history_load() {
         let ratings_map = get_train_val_test_liked_uris(DataSize::Tiny, false);
 
         let max_history = 2048;
@@ -30,7 +30,7 @@ mod user_history_tests {
             ratings_map.get("train_disliked").unwrap(),
         ];
 
-        let user_history : UserHistory = build_user_history(&ratings_uris, max_history);
+        let user_history : UserHistory = build_user_history(&ratings_uris, max_history).await;
 
         let user_ids : Vec<i32> = vec![6040, 6039];
 
@@ -41,7 +41,7 @@ mod user_history_tests {
 
         assert_eq!(movie_hist.len(), user_ids.len() * max_history);
 
-        let (lookup, max_history_found) = _testable_build_map_async(&ratings_uris);
+        let (lookup, max_history_found) = _testable_build_map_async(&ratings_uris).await;
 
         let fixed_length = max_history;
 
@@ -85,8 +85,6 @@ mod user_history_tests {
                 }
             }
         }
-
-        let tt = 2;
 
     }
 

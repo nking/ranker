@@ -1,21 +1,17 @@
-use std::ptr::null;
 use std::sync::Arc;
 use arc_swap::ArcSwap;
 use crate::client::{QueryModelClient, RankerModelClient};
 use crate::embeddings_ann::Searcher;
 use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
-use crate::states::{AppState, ServiceState};
 use crate::user_history::{build_user_history, UserHistory};
 
 // Now you can use them directly!
 use crate::pb::{UserRequest, RankedMovies, recommender_service_server::RecommenderService};
-use tonic::{Request, Response, Status};
+use tonic::{Request, Response};
 use usearch::ffi::Matches;
 use crate::util::sort_by_scores;
 
 // the number of local_devices attached to the ranker TFS.  e.g. = 2 for the kaggle T4x2 GPUs
-const ranker_n_local_devices : usize = 1;
-
 // max_history, num_candidates are hyper-parameters of the ranker_model
 pub struct Orchestrator {
     query_model: QueryModelClient,
@@ -25,6 +21,7 @@ pub struct Orchestrator {
     max_history: usize,
     num_candidates: usize,
     num_catalog_users: usize,
+    ranker_n_local_devices : usize,
 }
 
 impl Orchestrator {
@@ -35,9 +32,11 @@ impl Orchestrator {
         max_history: usize,
         num_candidates: usize,
         num_catalog_users: usize,
+        ranker_n_local_devices : usize,
+        top_k : usize
     ) -> Result<Self, Box<dyn std::error::Error>> {
 
-        let initial_searcher = Searcher::new(movie_embeddings_uri)?;
+        let initial_searcher = Searcher::new(movie_embeddings_uri, top_k)?;
         let query_client = QueryModelClient::new(query_uri).await;
         let ranker_client = RankerModelClient::new(ranker_uri).await;
         let user_history: UserHistory = build_user_history(&ratings_uris, 2048).await;
@@ -50,10 +49,11 @@ impl Orchestrator {
             num_catalog_users: num_catalog_users,
             searcher: ArcSwap::from_pointee(initial_searcher),
             user_history: user_history,
+            ranker_n_local_devices: ranker_n_local_devices
         })
     }
 
-    pub async fn reload_embeddings(&self, movie_embeddings_uri: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn reload_embeddings(&self, movie_embeddings_uri: &str, top_k: usize) -> Result<(), Box<dyn std::error::Error>> {
 
         let uri_owned: String = movie_embeddings_uri.to_string();
 
@@ -62,7 +62,7 @@ impl Orchestrator {
         // starve the async workers handling incoming gRPC requests.
         let new_searcher = tokio::task::spawn_blocking(move || {
             // temporarily, consuming twice as much RAM with current and new indexer
-            Searcher::new(&uri_owned.as_str()).map_err(|e| e.to_string())
+            Searcher::new(&uri_owned.as_str(), top_k).map_err(|e| e.to_string())
         }).await??;
 
         // The Swap: This takes nanoseconds.
@@ -96,7 +96,7 @@ impl RecommenderService for Orchestrator {
             .into_iter()
             .map(|x| x as i32 + 1 + self.num_catalog_users as i32)
             .collect();
-        
+
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
         let user_ids : Vec<i32> = vec![inner_req.user_id as i32];
@@ -113,15 +113,11 @@ impl RecommenderService for Orchestrator {
             searcher.get_num_catalog_movies(),
             searcher.get_embed_len(),
             searcher.get_movies_embedding_catalog_ref(),
-            &user_embeddings,  ranker_n_local_devices);
+            &user_embeddings,  self.ranker_n_local_devices);
 
         // Send to TFS Ranker model
         let final_response = self.ranker_model.get_candidate_ranks(
             padded_super_graph_arrays, searcher.get_embed_len()).await;
-
-        // candidate
-
-        //TODO: process the response
 
         match final_response {
             Ok(ranks) => {

@@ -14,9 +14,11 @@ mod embedding_ann_tests {
     #[tokio::test]
     async fn test_search() {
 
+        let top_k = 20;
+
         let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
 
-        let search = Searcher::new(&movie_embeddings_uri).unwrap();
+        let search = Searcher::new(&movie_embeddings_uri, top_k).unwrap();
 
         let query_embedding: Vec<f32> = vec![
             0.117549196, 0.238659769, -0.215364203, -0.0403997824, 0.315108567, -0.468034804,
@@ -30,7 +32,7 @@ mod embedding_ann_tests {
         let candidate_ids = &m.keys;
         let distances = &m.distances;
 
-        assert_eq!(embeddings_ann::TOPK,  candidate_ids.len());
+        assert_eq!(top_k,  candidate_ids.len());
 
         // check that restore doesn't  throw errors
         let indexer = search.restore().unwrap();
@@ -39,9 +41,11 @@ mod embedding_ann_tests {
     #[tokio::test]
     async fn test_search_batch() {
 
+        let top_k = 20;
+
         let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
 
-        let search = Searcher::new(&movie_embeddings_uri).unwrap();
+        let search = Searcher::new(&movie_embeddings_uri, top_k).unwrap();
 
         let query_embedding: Vec<f32> = vec![
             0.117549196, 0.238659769, -0.215364203, -0.0403997824, 0.315108567, -0.468034804,
@@ -58,7 +62,7 @@ mod embedding_ann_tests {
         for i in 0..m.len() {
             let candidate_ids = &m[i].keys;
             let distances = &m[i].distances;
-            assert_eq!(embeddings_ann::TOPK,  candidate_ids.len());
+            assert_eq!(top_k,  candidate_ids.len());
         }
 
 

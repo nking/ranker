@@ -6,25 +6,24 @@ use crate::embeddings_util::read_movie_embeddings;
 //TODO: make this settable by cli flag and by equiv of a properties file for use in deployment:
 const PERSISTED_INDEX_PATH: &'static str = "./target/movie_embeddings_indexer";
 
-pub const TOPK : usize = 20;
-
 pub struct Searcher {
     indexer : Index,
     movie_embeddings_catalog : Vec<f32>,
     num_catalog_movies : usize,
-    embed_len : usize
+    embed_len : usize,
+    top_k : usize,
 }
 
 impl Searcher {
 
     // static constructor
-    pub fn new(movie_embeddings_uri: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(movie_embeddings_uri: &str, top_k: usize) -> Result<Self, Box<dyn std::error::Error>> {
         let (movie_embeddings_catalog, num_movies, embed_len) = read_movie_embeddings(&movie_embeddings_uri);
         let indexer = Self::load(&movie_embeddings_catalog, embed_len);
         match indexer {
             Ok(indexer) => Ok(Self{
                 indexer: indexer, movie_embeddings_catalog : movie_embeddings_catalog,
-                num_catalog_movies: num_movies, embed_len : embed_len}),
+                num_catalog_movies: num_movies, embed_len : embed_len, top_k}),
             Err(error) => {panic!("There was a problem loading the indexes: {:?}", error)}
         }
     }
@@ -72,7 +71,7 @@ impl Searcher {
     }
 
     pub fn search(&self, query: &[f32]) -> Result<Matches, Box<dyn std::error::Error>> {
-        let r = self.indexer.search(&query, TOPK)?;
+        let r = self.indexer.search(&query, self.top_k)?;
         Ok(r)
     }
 
@@ -82,7 +81,7 @@ impl Searcher {
 
         for i in 0..num_queries {
             let q = &query[i*self.embed_len .. (i+1)*self.embed_len];
-            let r = self.indexer.search(&q, TOPK)?;
+            let r = self.indexer.search(&q, self.top_k)?;
             results.push(r);
         }
         Ok(results)
