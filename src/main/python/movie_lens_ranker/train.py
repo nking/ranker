@@ -457,7 +457,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             try:
                 for loop_idx, padded_super_graph_0 in enumerate(iterator):
                     # Apply the sharding/transfer logic in the background thread!
-                    if is_gpu:
+                    if is_gpu or multihost:
                         if multihost:
                             padded_super_graph = jax.tree_util.tree_map(
                                 lambda x: multihost_utils.host_local_array_to_global_array(
@@ -1054,7 +1054,7 @@ def run_test_phase(config: dict):
     # fixed top_k for consistent stats with retrieval and reranker
     config['top_k'] = 20
     
-    logging.info(f'test_fn config: {config}')
+    logging.info(f'run_test_phase config: {config}')
 
     worker_rank = jax.process_index()
     

@@ -1,23 +1,62 @@
 to run the code on kaggle:
 
-(1) upload local data to kaggle notebook as input datasets
+(1) make the ranker-app kaggle upload:
+    follow scripts/make_kaggle_upload.sh
+(2) upload local data to kaggle notebook as input datasets
  - make tarballs of the 3 db container images and the main app image
-    docker export $(docker create ranker-app:local) -o ranker-app.tar
-       unpack into a tmp directory and cd into it
-       find . -name "*[*" -o -name "*]*"
-       rm usr/bin/'['
-       tar -czvf ranker-app.tar .
-       zip ranker-app.zip ranker-app.tar
-       then on right-hand side of kaggle notebook, select input and upload
-       the file browser to select the zip file.  give it a name, submit 'create'
-    docker export $(docker create fsouza/fake-gcs-server:1.54.0) -o fake-gcs-server.tar
     docker export $(docker create postgres:12-alpine) -o pg-db.tar
+    docker export $(docker create fsouza/fake-gcs-server:1.54.0) -o fake-gcs-server.tar
     docker export $(docker create vizier-server:local) -o vizier-server.tar
-       and do the same with each of them to remove the usr/bin/'[' and usr/bin/'[[' files
- - zip and upload the array_records datasets needed
-   NOTE: those upload errors for file names are possibly the outcome from kaggle 
-   Path semantics for rust LocalFileSystem struct,
-   so can be worked around by renaming the zipped archive with a suffix like .bin
+
+    compress each of the tar archives
+    then rename them to <name.tar.gz>.bin
+
+    renaming them to *.bin bypasses a file filter check that fails
+    for various harmless file name patterns.
+
+make a TMP directory and cd into it
+    mkdir TMP
+    cd TMP
+
+activate the venv you've made with the kaggle cli installed in it:
+    e.g. conda activate kaggle_py313
+
+kaggle datasets init -p .
+
+for each dataset:
+
+copy the <name.tar.gz>.bin file into TMP.  TMP can only have the file
+to be uploaded and the dataset-metadata.json file in it.
+
+If creating the dataset:
+    kaggle datasets create -h
+
+else if updating, 
+    touch dataset-metadata.json
+
+edit the file dataset-metadata.json file for the upload
+    e.g.
+{
+  "title": "pg-db.tar",
+  "id": "nicholeasuniquename/pg-db.tar",
+  "licenses": [
+    {
+      "name": "CC0-1.0"
+    }
+  ]
+}
+
+for updates:
+
+kaggle datasets version -p . -m "Your update message"
+
+(3) prepare the datasets for upload
+   cd to base of project
+   cd tmp_mounts/fake-gcs-server/data && zip -r ../../../ml-ranker-dataset2.zip .
+   cd ../../../
+   mv ml-ranker-dataset2.zip TMP/
+   edit dataset-metadata.json for the dataset
+   add or update using kaggle cli
 
 (2) install proot on kaggle
 
