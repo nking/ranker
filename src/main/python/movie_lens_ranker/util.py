@@ -3,6 +3,8 @@ import os
 import shutil
 from collections import defaultdict
 from typing import Tuple, Dict, List, Union, Any
+
+import fsspec
 import jax
 import jax.numpy as jnp
 import psutil
@@ -349,6 +351,12 @@ def read_user_movie_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str
     :param batch_size:
     :return: tconcatenated row of zeros, user embeddings, movie embeddings,
     """
+    err = uri_access_error(user_embeddings_uri)
+    if err is not None:
+        raise ValueError(f"{err}")
+    err = uri_access_error(movie_embeddings_uri)
+    if err is not None:
+        raise ValueError(f"{err}")
     user_emb = _read_embeddings(user_embeddings_uri, batch_size=batch_size)
     movie_emb = _read_embeddings(movie_embeddings_uri, batch_size=batch_size)
     zero_row = jnp.zeros((1, user_emb.shape[1]))
@@ -423,6 +431,9 @@ def read_movies_array_record(movies_uri:str, batch_size:int=1048) -> List[int]:
     :param batch_size: batch size to use in reading the array_record.
     :return: a list of movie_ids
     """
+    err = uri_access_error(movies_uri)
+    if err is not None:
+        raise ValueError(f"{err}")
     movie_ids = []
     reader = None
     try:
@@ -471,6 +482,9 @@ def build_history_lookup(ratings_uri_list: Union[str, List[str]], batch_size: in
     lookup = defaultdict(
         lambda: {"ts": [], "movie_id": [], "rating": []})
     for ratings_uri in ratings_uri_list:
+        err = uri_access_error(ratings_uri)
+        if err is not None:
+            raise ValueError(f"{err}")
         reader = None
         try:
             reader = array_record_module.ArrayRecordReader(ratings_uri)
@@ -506,6 +520,29 @@ def build_history_lookup(ratings_uri_list: Union[str, List[str]], batch_size: in
     
     return lookup2, max_history
 
+def uri_access_error(uri: str) -> str:
+    """
+    Safely checks if a file exists locally or on GCS.
+    Fails fast on malformed URIs.
+    """
+    if not uri:
+        return "Provided URI is empty."
+
+    try:
+        # url_to_fs handles both local paths and 'gs://' prefixes seamlessly
+        fs, fs_path = fsspec.core.url_to_fs(uri)
+
+        # Performs a lightweight check (e.g., HEAD request for GCS)
+        if fs.exists(fs_path):
+            return None
+        else:
+            return f"File not found at URI: {uri}"
+    except ValueError as ve:
+        # Catches specifically malformed URIs that fsspec cannot parse
+        return f"Malformed URI provided ({uri}): {ve}"
+    except Exception as e:
+        # Catches network errors, permissions issues, etc.
+        return f"Failed to validate URI ({uri}): {e}"
 
 def calc_number_jax_graph_components(batch_size: int, max_history: int,
         num_candidates: int,  n_local_devices:int) -> Dict[str, int]:
