@@ -15,3 +15,49 @@ test metrics:
 
 see file opt_gpu_notes.txt for the gradual improvements in reducing runtime.
 the file is a work in progress.
+
+--------
+Note that in training a batch size of 256, and choosing k=20 out of them and
+the batch of N items having only 1 positive (==relevant item) and the rest
+being negative, we can estimate NDCG@20 for randomly choosing any of the N:
+  random:
+    prob of the single positive landing at any rank: (1/N)
+
+    E[NDCG@20] = (1/N) * sum_{i=1,k}( 1/log2(i+1) )
+               = 0.0275
+  best:
+    always has the single relevant at position 1:
+    
+    E[NDCG@20] = 1.0
+
+For inference, we have top_k items and all are relevant and have different ranks.  
+We want to calculate what NDCG@top_k would be for random ordering of the list.
+
+   random: 
+       each item has a probabaility of (1/top_k) of landing at any rank i.
+
+       mu_20 = the avg relevance score of the top_k=20 items = (1/top_k) * sum_{k=1,top_k}(rel_k}
+           = (1/top_k) * arithmetics series for adding 1 to 1 through top_k
+           = (1/top_k) * (a_0*n + (n*(n-1)/2)*d) where a_0=1, n=top_k, d=1
+           = (1/20.) * 210.
+           = 10.5
+
+       the total discount factor = (sum_{i=1,top_k}( 1/log2(i+1) )
+           = 7.04
+
+       for a random shuffle, every position is expected to have the mean relevant mu_20.
+       E[NDCG@20] = mu_20 * tot_discount
+                  = 10.5 * 7.04
+                  = 73.92
+
+       the ideal DCG@20, if no ground truth is known, must be estimated.
+         options:
+            (1) assume the top_k=20 are all relevant, then
+                  score them to rank them using one of the following:
+                  human labels,
+                  user clicks,
+                  LLM judged relevance grades.
+            (2) give the top_k retrieved to an LLM for scoring.
+            (3) use binary scores = 1 user clicks and user purchases,
+              
+

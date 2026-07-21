@@ -89,6 +89,10 @@ def get_canonical_mlflow_run_name(config: Dict[str, Any]) -> str:
         run_name = f"train_{config.get('train_id',0)}"
     elif config['phase'].find('test') == 0:
         run_name = f"test_{config.get('test_id',0)}"
+    elif config['phase'].find("export-train-results") == 0:
+        run_name = f"train_{config.get('train_id',0)}"
+    elif config['phase'].find("export-test-results") == 0:
+        run_name = f"test_{config.get('test_id',0)}"
     else:
         raise ValueError(f"Invalid phase={config['phase']}")
     return run_name

@@ -29,7 +29,7 @@ from movie_lens_ranker.train import run_train_phase, run_test_phase
 from movie_lens_ranker.util import get_recognized_keys, \
     app_runner_is_missing_minimum_required_keys, \
     destringify_mlflow_params, get_cpu_stats, is_running_on_gpu, \
-    create_dirs_if_is_filepath
+    create_dirs_if_is_filepath, get_canonical_mlflow_run_name
 
 FLAGS = flags.FLAGS
 
@@ -487,12 +487,13 @@ def run_export_results(config: Dict[str, Any]):
     """
     given a dictionary which includes vizier mappings: study_name, project_id, vizier_endpoint
     and MLFlow mappings: mlflow_tracking_uri, extract the best found hyperparameters from the
-    HPO tuning and the resulting metrics and write to the given output uris output_hyperparams_uri and output_metrics_uri.
+    HPO tuning or training or test phase and the resulting metrics and write to the
+    given output  output_metrics_uri and if phase is hpo tuning, also needs to have key
+    output_hyperparams_uri.
     Note that the files will be json dictionaries.
     :param config: a dictionary which includes vizier mappings: study_name, project_id, vizier_endpoint
     and MLFlow mappings: mlflow_tracking_uri
-    :param output_hyperparams_uri: uri to write the best found hyper-parameters to
-    :param output_metrics_uri: uri to write the metrics dictionary from the best-hyper parameters run.
+
     """
     
     for key in ("study_name", "project_id", "vizier_endpoint", "mlflow_tracking_uri", "output_metrics_uri"):
@@ -508,9 +509,15 @@ def run_export_results(config: Dict[str, Any]):
     if phase == "export-hpo-results":
         pass
     elif phase == "export-train-results":
-        srch = 'train_%'
+        if "train_id" in config:
+            srch = get_canonical_mlflow_run_name(config)
+        else:
+            srch = 'train_%'
     elif phase == "export-test-results":
-        srch = 'test_%'
+        if "test_id" in config:
+            srch = get_canonical_mlflow_run_name(config)
+        else:
+            srch = 'test_%'
     else:
         raise ValueError(f"unrecognized phase for run_export_results: {phase}")
     
@@ -565,9 +572,12 @@ def run_export_results(config: Dict[str, Any]):
                 f'ERROR while trying to write to {config["output_hyperparams_uri"]}: {e}.  Check for permission errors')
             raise e
     else:
-        experiment = mlflow.get_experiment_by_name(config['mlflow_experiment_name'])
+        #TODO: this section needs improvements for getting the correct mlrun.  should be its own testable method
+        exp_name = config.get('mlflow_experiment_name', config['study_name'])
+        logging.info(f'looking for experiment name {exp_name} for phase={phase}')
+        experiment = mlflow.get_experiment_by_name(exp_name)
         if experiment is None:
-            raise LookupError(f"Experiment {config['mlflow_experiment_name']} not found.")
+            raise LookupError(f"Experiment {exp_name} not found.")
         #default ordering is descending start_time, run_id
         runs = mlflow.search_runs(
             experiment_ids=[experiment.experiment_id],
@@ -575,7 +585,10 @@ def run_export_results(config: Dict[str, Any]):
             output_format="list"
         )
         if runs is None or len(runs) == 0:
-            raise LookupError(f"No runs found for experiment_name={config['mlflow_experiment_name']} and run ={srch}")
+            raise LookupError(f"No runs found for experiment_name={exp_name}, experiment_id={experiment.experiment_id} and run ={srch}")
+        for iii, r in enumerate(runs):
+            logging.info(f"found run_name={r.info.run_name}, end_time={r.info.end_time}, status={r.info.status}, "
+                         f"experiment_id={r.info.experiment_id}, run_id={r.info.run_id}, user_id='{r.info.user_id}")
         mlflow_run = runs[0]
         mlflow_run_id = mlflow_run.info.run_id
         if phase == "export-test-results":
@@ -585,6 +598,7 @@ def run_export_results(config: Dict[str, Any]):
     if phase != "export-test-results":
         #get the metrics:
         mlflow_client = MlflowClient(tracking_uri=config['mlflow_tracking_uri'])
+        logging.info(f'getting metrics history for mlflow_run_id={mlflow_run_id}')
         for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
             for key_t in (f"train_{key}", f"val_{key}"):
                 metrics_dict[key_t] = {'x': [], 'y': []}
