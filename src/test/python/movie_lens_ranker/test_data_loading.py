@@ -32,7 +32,7 @@ class TestDataLoading(unittest.TestCase):
     def setUp(self):
         # (user_id, (tuple of negative movie_ids))
         self.negatives_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/train_negatives.array_record")
+            "src/test/resources/data/ratings_train_disliked.array_record")
         
         self.recommendations_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/recommended_movies.array_record")

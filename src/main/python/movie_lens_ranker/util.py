@@ -351,12 +351,6 @@ def read_user_movie_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str
     :param batch_size:
     :return: tconcatenated row of zeros, user embeddings, movie embeddings,
     """
-    err = uri_access_error(user_embeddings_uri)
-    if err is not None:
-        raise ValueError(f"{err}")
-    err = uri_access_error(movie_embeddings_uri)
-    if err is not None:
-        raise ValueError(f"{err}")
     user_emb = _read_embeddings(user_embeddings_uri, batch_size=batch_size)
     movie_emb = _read_embeddings(movie_embeddings_uri, batch_size=batch_size)
     zero_row = jnp.zeros((1, user_emb.shape[1]))
@@ -371,6 +365,9 @@ def _read_embeddings(embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
     :param batch_size:
     :return: 2D array of embeddings
     """
+    err = uri_access_error(embeddings_uri)
+    if err is not None:
+        raise ValueError(f"{err}")
     ids = []
     embeddings = []
     reader = None

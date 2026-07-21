@@ -48,7 +48,7 @@ def main(_):
         "recommendations_ts_uri": "gs://data/recommended_movies_timestamps.array_record",
         "ratings_train_uri": "gs://data/small/ratings_train_liked.array_record",
         "ratings_val_uri": "gs://data/small/ratings_val_liked.array_record",
-        "train_negatives_uri": "gs://data/train_negatives.array_record",
+        "train_negatives_uri": "gs://data/ratings_train_disliked.array_record",
         "val_negatives_uri": "gs://data/val_negatives.array_record",
         "movie_embeddings_uri": "gs://data/movie_emb-00000-of-00001.array_record",
         "user_embeddings_uri": "gs://data/user_emb-00000-of-00001.array_record",

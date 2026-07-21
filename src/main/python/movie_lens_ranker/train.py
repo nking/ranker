@@ -28,6 +28,8 @@ from movie_lens_ranker.BatchSampler import BatchSampler
 
 import orbax.checkpoint as ocp
 
+from movie_lens_ranker.data_contracts import validate_movies, validate_embedding, validate_movie_recommendations, \
+    validate_movie_recommendations_timestamps, validate_ratings
 from movie_lens_ranker.data_loading import create_train_and_val_dataloaders, \
     create_test_dataloader
 from movie_lens_ranker.model import GraphRanker
@@ -808,7 +810,20 @@ def run_train_phase(config: dict, trial:Trial=None, save_checkpoints:bool=False)
     for key in req_keys:
         if key not in config:
             raise LookupError(f"config is missing {key}")
-    
+
+    #fail quickly if data are not valid
+    validate_movies(config['movies_uri'])
+    validate_embedding(config['user_embeddings_uri'])
+    validate_embedding(config['movie_embeddings_uri'])
+    validate_movie_recommendations(config['recommendations_uri'])
+    validate_movie_recommendations_timestamps(config['recommendations_ts_uri'])
+    validate_ratings(config['ratings_train_liked_uri'])
+    validate_ratings(config['ratings_train_3_uri'])
+    validate_ratings(config['ratings_train_disliked_uri'])
+    validate_ratings(config['ratings_val_liked_uri'])
+    validate_ratings(config['ratings_val_3_uri'])
+    validate_ratings(config['ratings_val_disliked_uri'])
+
     worker_rank = jax.process_index()
 
     logging.info(f'worker_{worker_rank}: train_fn')
@@ -1069,7 +1084,11 @@ def run_test_phase(config: dict):
     for key in req_keys:
         if key not in config:
             raise LookupError(f"config is missing {key}")
-    
+
+    validate_ratings(config['ratings_test_liked_uri'])
+    validate_ratings(config['ratings_test_3_uri'])
+    validate_ratings(config['ratings_test_disliked_uri'])
+
     if config['phase'] == 'test-best':
         restore_dict = restore_items_from_checkpoint(checkpoint_uri=config['best_checkpoint_uri'])
     else:
@@ -1111,7 +1130,21 @@ def run_test_phase(config: dict):
             *model_params_trainable_keys}:
             if key in restore_dict['config']:
                 config[key] = restore_dict['config'][key]
-        
+
+
+        #fail quickly if data are not valid
+        validate_movies(config['movies_uri'])
+        validate_embedding(config['user_embeddings_uri'])
+        validate_embedding(config['movie_embeddings_uri'])
+        validate_movie_recommendations(config['recommendations_uri'])
+        validate_movie_recommendations_timestamps(config['recommendations_ts_uri'])
+        validate_ratings(config['ratings_train_liked_uri'])
+        validate_ratings(config['ratings_train_3_uri'])
+        validate_ratings(config['ratings_train_disliked_uri'])
+        validate_ratings(config['ratings_val_liked_uri'])
+        validate_ratings(config['ratings_val_3_uri'])
+        validate_ratings(config['ratings_val_disliked_uri'])
+
         max_history = config['max_history']
         num_candidates = config['num_candidates']
         batch_size = config['batch_size']

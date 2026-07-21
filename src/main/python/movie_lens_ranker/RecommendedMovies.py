@@ -16,7 +16,7 @@ class RecommendedMovies (object):
         :param movie_rec_ts_file_uri: file of timestamps of movies recommended for each user in format such that each row is
         user_id, [timestamps] and the row for a user_id in this file is complementary to the row of same user_id in
         movie_rec_file_path and both lists of movie_ids and timestamps are ordered to represent the same movies.
-        notr that recommended movies which have not been seen should have a timestamp larger than feasibly in the
+        note that recommended movies which have not been seen should have a timestamp larger than feasibly in the
         watch history, like ts_2050 = 2524608000 used by the retrieval project.
         """
         self.pad_value = -1
