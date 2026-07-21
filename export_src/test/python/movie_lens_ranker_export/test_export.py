@@ -1,14 +1,8 @@
 import unittest
-import os
-
-import shutil
-
-import jax
 from tensorflow import saved_model as tf_saved_model
 from helper import *
-from movie_lens_ranker.train import create_fake_jagged_batch, create_dummy_super_padded_graph
+from movie_lens_ranker.train import create_dummy_super_padded_graph
 from movie_lens_ranker.util import calc_number_jax_graph_components
-from movie_lens_ranker.util_numba import build_graph_arrays
 from movie_lens_ranker_export.export import export_models, make_jax_module, create_serving_signature
 from movie_lens_ranker_export.restore_from_orbax import restore_model_from_checkpoint
 from orbax.export.validate import ValidationManager, ValidationReportOption
@@ -18,7 +12,9 @@ class ExportTest(unittest.TestCase):
 
     def test_export(self):
 
-        checkpoint_uri = os.path.join(get_project_dir(), "export_src/test/resources/orbax_checkpoint/")
+        checkpoint_uri = os.path.join(get_project_dir(),
+                "src/test/resources/checkpoint-bucket/best/kaggle-hpo/train_0/")
+        checkpoint_uri = os.path.abspath(checkpoint_uri)
         savedmodel_dir = os.path.join(get_bin_dir(), "savedmodels", "1")
         try:
             os.rmdir(savedmodel_dir)

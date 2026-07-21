@@ -1,11 +1,11 @@
 {
     "version": 2,
     "last_seen_indices": {
-        "0": 27118,
-        "1": 27119
+        "0": 2,
+        "1": 1
     },
-    "last_worker_index": -1,
+    "last_worker_index": 0,
     "worker_count": 2,
-    "sampler": "BatchSampler(num_records=463020, num_epochs=15,batch_size=256, shuffle=True, seed=12345shard_options=ShardByJaxProcess(shard_index=0, shard_count=1, drop_remainder=False))",
-    "data_source": "RandomAccessArrayRecordDataSource /tmp/gcs_data/data/ratings_train_liked.array_record"
+    "sampler": "BatchSampler(num_records=1000, num_epochs=1,batch_size=256, shuffle=True, seed=12345shard_options=ShardByJaxProcess(shard_index=0, shard_count=1, drop_remainder=False))",
+    "data_source": "RandomAccessArrayRecordDataSource /tmp/gcs_data/data/small/ratings_train_liked.array_record"
 }

@@ -669,11 +669,10 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
     
     worker_rank = jax.process_index()
 
-    if "num_users" not in config:
+    if "num_users" not in config or 'embed_len' not in config:
         num_users, num_movies, embed_len = get_num_users_movies(
             user_embeddings_uri=config['user_embeddings_uri'],
             movie_embeddings_uri=config['movie_embeddings_uri'])
-
         config['num_users'] = num_users
         config['num_movies'] = num_movies
         config['embed_len'] = embed_len
@@ -783,7 +782,8 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         
     return {"rngs": rngs, "model": model, "optimizer": optimizer,
         'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader,
-        'num_users': config['num_users'], 'num_movies': config['num_movies'], 'embed_len' : config['embed_len']}
+        'num_users': config['num_users'], 'num_movies': config['num_movies'],
+        'embed_len' : config['embed_len']}
 
 def run_train_phase(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tuple[float, str]:
     """
@@ -842,6 +842,7 @@ def run_train_phase(config: dict, trial:Trial=None, save_checkpoints:bool=False)
     optimizer = _dict['optimizer']
     train_dataloader = _dict['train_dataloader']
     val_dataloader = _dict['val_dataloader']
+
     num_users = _dict['num_users']
     num_movies = _dict['num_movies']
     embed_len = _dict['embed_len']
