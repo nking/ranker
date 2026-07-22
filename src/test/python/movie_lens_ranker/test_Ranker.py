@@ -82,7 +82,7 @@ import psycopg2
 import time
 
 import jax.distributed
-from array_record.python import array_record_module
+import array_record.python as array_record
 
 from absl import flags
 
@@ -90,7 +90,7 @@ from helper import *
 from movie_lens_ranker.train import *
 from movie_lens_ranker.util import set_flags_from_dict, \
     destringify_mlflow_params
-from movie_lens_ranker.util_plots import plot_mlflow_metrics, \
+from movie_lens_ranker.util_plots import plot_metrics_dict, \
     get_mlflow_metrics_by_exp_name
 
 from movie_lens_ranker.app_runner_inner import main as app_runner
@@ -520,7 +520,7 @@ class TestRanker(unittest.TestCase):
         for run_id, d in metrics_dicts.items():
             if metrics_dict is None or (len(d['train_loss']['x']) > len(metrics_dict['train_loss']['x'])):
                 metrics_dict = d
-        plot_metrics(metrics_dict)
+        plot_metrics_dict(metrics_dict, get_bin_dir())
         pngs = glob.glob(os.path.join(get_bin_dir(), "*.png"))
         self.assertIsNotNone(pngs)
         self.assertTrue(len(pngs) > 0)
@@ -898,7 +898,7 @@ class TestRanker(unittest.TestCase):
         #6040::6948::5::956704191
         #6040::8475::5::956704191
 
-        reader = array_record_module.ArrayRecordReader(ratings_uri_dict['train_liked'])
+        reader = array_record.array_record_module.ArrayRecordReader(ratings_uri_dict['train_liked'])
         batch_bytes = reader.read([x for x in range(3, 3+batch_size)])  # a single list of encodings, each being a list of 4 integers
         batch = np.array([msgpack.unpackb(b, use_list=False) for b in batch_bytes])  # list of tuples of 4 integers
         reader.close()
