@@ -1,17 +1,16 @@
 
-best objective NDCG@20: 0.485
+best objective NDCG@20: 0.457
 
-{'top_k': 20, 'num_layers': 2, 'num_heads': 4, 'hidden_dim': 64, 'max_history': 40,
-'num_candidates': 50,
-'learning_rate': 0.0012288137536312306, 'weight_decay': 0.0014642115993417438,
-'out_dim': 32, 'edge_embed_dim': 16, 'dropout_rate': 0.1}
+{'top_k': 20, 'learning_rate': 0.0005, 'weight_decay': 0.0001, 'out_dim': 32,
+'hidden_dim': 64, 'num_layers': 2, 'num_heads': 4, 'edge_embed_dim': 8,
+'dropout_rate': 0.1,
+'max_history': 200, 'num_candidates': 40, 'num_epochs': 40, 'batch_size': 64,}
 
 test metrics:
 "test_ndcg_20": 0.45671870854665647,
 "test_mrr_20": 0.33051742008834517,
 "test_recall_20": 0.89453125
 "test_loss": 3.001099795665381
-
 
 see file opt_gpu_notes.txt for the gradual improvements in reducing runtime.
 the file is a work in progress.

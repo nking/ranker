@@ -437,72 +437,34 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     log_interval = 10
     if (TOTAL_RECORDS // n_local_devices)//TRAIN_BATCH_SIZE > 100:
         log_interval = 100
-    
+
+    from flax.jax_utils import prefetch_to_device
+
+    def apply_sharding(iterator):
+        """Yields batches mapped to the correct device layout."""
+        for batch in iterator:
+            if multihost:
+                yield jax.tree_util.tree_map(
+                    lambda x: multihost_utils.host_local_array_to_global_array(x, data_mesh, data_pspec),
+                    batch
+                )
+            elif is_on_gpu:
+                yield jax.tree_util.tree_map(
+                    lambda x: jax.device_put(x, data_sharding),
+                    batch
+                )
+            else:
+                yield batch
+
+    sharded_iter = apply_sharding(train_dataloader_iter)
+
     if is_on_gpu:
-        from flax.jax_utils import prefetch_to_device
-        device_iterator = prefetch_to_device(train_dataloader_iter, size=2)
+        device_iterator = enumerate(prefetch_to_device(sharded_iter, size=2))
     else:
-        device_iterator = train_dataloader_iter
-    
-    import threading
-    import queue
-    
-    def build_sharded_prefetcher(iterator, is_gpu, multihost, data_mesh,
-            data_pspec, data_sharding, prefetch_size=2):
-        """
-        Asynchronously pulls padded batches from Grain, applies NamedSharding,
-        and pushes them to device VRAM in a background thread.
-        """
-        batch_queue = queue.Queue(maxsize=prefetch_size)
-        
-        def prefetch_worker():
-            try:
-                for loop_idx, padded_super_graph_0 in enumerate(iterator):
-                    # Apply the sharding/transfer logic in the background thread!
-                    if is_gpu or multihost:
-                        if multihost:
-                            padded_super_graph = jax.tree_util.tree_map(
-                                lambda x: multihost_utils.host_local_array_to_global_array(
-                                    x, data_mesh, data_pspec),
-                                padded_super_graph_0
-                            )
-                        else:
-                            padded_super_graph = jax.tree_util.tree_map(
-                                lambda x: jax.device_put(x, data_sharding),
-                                padded_super_graph_0
-                            )
-                    else:
-                        padded_super_graph = padded_super_graph_0
-                    batch_queue.put((loop_idx, padded_super_graph))
-            except Exception as e:
-                batch_queue.put(e)
-            finally:
-                batch_queue.put(None)
-        # Start the worker thread
-        threading.Thread(target=prefetch_worker, daemon=True).start()
-        # Yield the batches to the main training loop
-        while True:
-            item = batch_queue.get()
-            if item is None:
-                break
-            if isinstance(item, Exception):
-                raise item
-            yield item
-            
-    #an atempt to keep the gpu busier:
-    device_iterator = build_sharded_prefetcher(
-        iterator=train_dataloader_iter,
-        is_gpu=is_on_gpu,
-        multihost=multihost,
-        data_mesh=data_mesh,
-        data_pspec=data_pspec,
-        data_sharding=data_sharding,
-        prefetch_size=2
-    )
-    
+        device_iterator = enumerate(sharded_iter)
+
     last_epoch = 0
     for loop_idx, padded_super_graph in device_iterator:
-        
         if use_debug:
             logging.info(f"START_BATCH_TIME: {time.time()}")
         

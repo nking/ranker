@@ -90,9 +90,9 @@ study_name = 'GraphRanker_tuning_xmngr_2'
 project_id = 'tune-xmngr-01'
 docker_bridge_gateway = "172.17.0.1"
 
-env_unittests_config = dotenv_values("../../.env_unittests")
+env_xmngr_2_config = dotenv_values("../../.env_xmanager_pipeline")
 
-mlflow_experiment_tracking_uri = f"postgresql://{env_unittests_config.get('POSTGRES_USER')}:{env_unittests_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db"
+mlflow_experiment_tracking_uri = f"postgresql://{env_xmngr_2_config.get('POSTGRES_USER')}:{env_xmngr_2_config.get('POSTGRES_PASSWORD')}@{docker_bridge_gateway}:5432/mlflow_db"
 
 async def check_await_status(handle):
     try:
@@ -159,7 +159,7 @@ def main(_):
         # though producetion code in cloud is usally configured to 1 GPU per container so set the xla flag above to 1.
         
         env_config = {
-            **env_unittests_config,
+            **env_xmngr_2_config,
             # relative to based dir where xmanager invoked
             'PYTHONUNBUFFERED': '1',
             # 'JAX_COORDINATOR_ADDRESS': f'{docker_bridge_gateway}:8888',
@@ -217,7 +217,7 @@ def main(_):
                     path=os.path.abspath('../../'),
                     dockerfile='Dockerfile_offline_cpu',
                 ),
-                executor_spec=xm_local.Local.Spec()
+                executor_spec=xm_local.Local.Spec(),
             ),
         ])[0]
         

@@ -1,3 +1,6 @@
+#USAGE
+#  docker compose --project-directory . -f deploy/compose/docker-compose.yaml up -d
+#     the project_directory flag ensure the file paths are all relative to that directory
 include:
    - path: ./deploy/compose/docker-compose-dbs.yaml
      project_directory: .

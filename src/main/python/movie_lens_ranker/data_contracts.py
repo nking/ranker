@@ -1,4 +1,6 @@
 import json
+import logging
+
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError, create_model
 from array_record.python import array_record_module
 import msgpack
@@ -48,6 +50,7 @@ class RatingsRecord(BaseModel):
 
 
 def validate_movies(movies_uri:str, batch_size=256, read_count:int=10):
+    logging.info(f"validate_movies {movies_uri}")
     adapter = TypeAdapter(list[MovieRecord])
     column_keys = ["movie_id", "title", "genres"]
     _validate_array_record(resource_uri=movies_uri, adapter=adapter, column_keys=column_keys,
@@ -55,6 +58,7 @@ def validate_movies(movies_uri:str, batch_size=256, read_count:int=10):
 
 
 def validate_embedding(embedding_uri:str, batch_size=256, read_count:int=10):
+    logging.info(f"validate_embedding {embedding_uri}")
     adapter = TypeAdapter(list[BaseEmbeddingRecord])
     column_keys = ["id", "embedding"]
     _validate_array_record(resource_uri=embedding_uri, adapter=adapter, column_keys=column_keys,
@@ -62,6 +66,7 @@ def validate_embedding(embedding_uri:str, batch_size=256, read_count:int=10):
 
 
 def validate_movie_recommendations(movie_recommendations_uri:str, batch_size=256, read_count:int=10):
+    logging.info(f"validate_movie_recommendations {movie_recommendations_uri}")
     adapter = TypeAdapter(list[RecommendedMoviesRecord])
     column_keys = ["user_id", "movie_ids"]
     _validate_array_record(resource_uri=movie_recommendations_uri, adapter=adapter, column_keys=column_keys,
@@ -69,6 +74,7 @@ def validate_movie_recommendations(movie_recommendations_uri:str, batch_size=256
 
 
 def validate_movie_recommendations_timestamps(movie_rec_ts_uri:str, batch_size=256, read_count:int=10):
+    logging.info(f"validate_movie_recommendations_timestamps {movie_rec_ts_uri}")
     adapter = TypeAdapter(list[RecommendedMoviesTimestampsRecord])
     column_keys = ["user_id", "timestamps"]
     _validate_array_record(resource_uri=movie_rec_ts_uri, adapter=adapter, column_keys=column_keys,
@@ -76,6 +82,7 @@ def validate_movie_recommendations_timestamps(movie_rec_ts_uri:str, batch_size=2
 
 
 def validate_ratings(ratings_uri:str, batch_size=256, read_count:int=10):
+    logging.info(f"validate_ratings {ratings_uri}")
     adapter = TypeAdapter(list[RatingsRecord])
     column_keys = ["user_id", "movie_id", "rating", "timestamp"]
     _validate_array_record(resource_uri=ratings_uri, adapter=adapter, column_keys=column_keys,

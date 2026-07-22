@@ -520,7 +520,7 @@ class TestRanker(unittest.TestCase):
         for run_id, d in metrics_dicts.items():
             if metrics_dict is None or (len(d['train_loss']['x']) > len(metrics_dict['train_loss']['x'])):
                 metrics_dict = d
-        plot_mlflow_metrics(metrics_dict)
+        plot_metrics(metrics_dict)
         pngs = glob.glob(os.path.join(get_bin_dir(), "*.png"))
         self.assertIsNotNone(pngs)
         self.assertTrue(len(pngs) > 0)

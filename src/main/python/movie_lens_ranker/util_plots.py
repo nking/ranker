@@ -2,7 +2,9 @@ import glob
 import os
 from typing import Dict
 
-import polars as pl
+import fsspec
+import json
+import plotly.graph_objects as go
 from urllib.parse import urlparse
 from pathlib import Path
 
@@ -56,22 +58,58 @@ def get_mlflow_metrics_by_exp_name(mlflow_tracking_uri: str,
         dict_of_dicts[run_id] = metrics_dict
     return dict_of_dicts
 
-def plot_mlflow_metrics(metrics_dict:dict):
-   
+def plot_metrics_dict(metrics_dict: dict, out_dir: str):
+
+    os.makedirs(out_dir, exist_ok=True)
+
     for key in ["loss", 'ndcg_20', 'recall_20', 'mrr_20']:
-        df = pl.DataFrame({
-            'epoch': metrics_dict[f'train_{key}']['x'],
-            'train': metrics_dict[f'train_{key}']['y'],
-            'val': metrics_dict[f'val_{key}']['y'],
-        })
-        
-        df_long = df.unpivot(index="epoch", on=["train", "val"])
-        df_long = df_long.rename({"value": key})
-        chart = df_long.plot.line(
-            x="epoch",
-            y=key,
-            color="variable"  # This creates the legend automatically
-        ).encode(tooltip=["epoch", "variable", key] )
-        chart.save(os.path.join(get_bin_dir(), f"{key}.png"), ppi=200)
-        
-    
+        # Extract Polars Series directly out of the dictionary
+        epochs = metrics_dict[f'train_{key}']['x']
+        train_vals = metrics_dict[f'train_{key}']['y']
+        val_vals = metrics_dict[f'val_{key}']['y']
+
+        # Build the figure with zero memory overhead
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=epochs, y=train_vals, mode='lines', name='train'))
+        fig.add_trace(go.Scatter(x=epochs, y=val_vals, mode='lines', name='val'))
+
+        fig.update_layout(
+            title={
+                'text': f"{key.upper()} over Epochs",
+                'font': {'size': 22}
+            },
+            xaxis={
+                'title': 'epoch',
+                'title_font': {'size': 18},
+                'tickfont': {'size': 14}
+            },
+            yaxis={
+                'title': key,
+                'title_font': {'size': 18},
+                'tickfont': {'size': 14}
+            },
+            legend={
+                'font': {'size': 16}
+            },
+            template="plotly_white",
+            width=800,
+            height=500
+        )
+
+        # Save to PNG
+        out_path = os.path.join(out_dir, f"{key}.png")
+        fig.write_image(out_path, scale=2) # scale=2 doubles resolution (~200 PPI)
+
+        #render in notebook:
+        #fig.show(renderer="iframe")
+def plot_metrics(json_path: str, out_dir:str):
+    try:
+
+        with fsspec.open(json_path, mode='r') as f:
+            content = f.read()
+            metrics_dict = json.loads(content)
+
+        plot_metrics_dict(metrics_dict=metrics_dict, out_dir=out_dir)
+
+    except Exception as ex:
+        print(f'Error: {ex}')
