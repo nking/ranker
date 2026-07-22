@@ -2,7 +2,7 @@ import jax
 from flax import nnx
 import orbax.checkpoint as ocp
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from functools import partial
 
@@ -13,7 +13,9 @@ from movie_lens_ranker.util import calc_number_jax_graph_components
 
 from movie_lens_ranker.util_np import optimized_batch_and_pad
 
-def restore_model_from_checkpoint(checkpoint_uri:str, replace_embeddings_gs_uri:str=None) -> Dict[str, Any]:
+def restore_model_from_checkpoint(checkpoint_uri:str,
+    replace_embeddings_prefixes : List[str],
+    replace_embeddings_prefixes_with : str) -> Dict[str, Any]:
 
     model_mesh = get_model_mesh()
 
@@ -34,10 +36,9 @@ def restore_model_from_checkpoint(checkpoint_uri:str, replace_embeddings_gs_uri:
     restored_config = mngr.restore(epoch, args=ocp.args.Composite(config=ocp.args.JsonRestore()))
     config = restored_config['config']
 
-    if replace_embeddings_gs_uri:
-        #replace gs:// with
-        config['user_embeddings_uri'] = config['user_embeddings_uri'].replace("gs://", replace_embeddings_gs_uri)
-        config['movie_embeddings_uri'] = config['movie_embeddings_uri'].replace("gs://", replace_embeddings_gs_uri)
+    for prefix in replace_embeddings_prefixes:
+        config['user_embeddings_uri'] = config['user_embeddings_uri'].replace(prefix, replace_embeddings_prefixes_with)
+        config['movie_embeddings_uri'] = config['movie_embeddings_uri'].replace(prefix, replace_embeddings_prefixes_with)
 
     _dict = _build_model_only(config, rngs=nnx.Rngs(config.get('seed', 0)))
     model = _dict['model']

@@ -7,7 +7,6 @@ from movie_lens_ranker_export.export import export_models, make_jax_module, crea
 from movie_lens_ranker_export.restore_from_orbax import restore_model_from_checkpoint
 from orbax.export.validate import ValidationManager, ValidationReportOption
 
-
 class ExportTest(unittest.TestCase):
 
     def test_export(self):
@@ -25,28 +24,32 @@ class ExportTest(unittest.TestCase):
         #tmp_mounts is the directory holding the directories backing the dbs
         embeddings_dir = os.path.join(get_project_dir(), "tmp_mounts/fake-gcs-server/")
 
-        restore_dict = restore_model_from_checkpoint(checkpoint_uri=checkpoint_uri, replace_embeddings_gs_uri=embeddings_dir)
+        restore_dict = restore_model_from_checkpoint(checkpoint_uri=checkpoint_uri,
+            replace_embeddings_prefixes=['gs://', '/tmp/gcs_data'], replace_embeddings_prefixes_with=embeddings_dir)
 
         batch_size = 256
 
         user_id_range = (1, restore_dict['config']['num_users'])
         movie_id_range = (restore_dict['config']['num_users'] + 1, restore_dict['config']['num_users'] + restore_dict['config']['num_movies'])
 
+        movie_embeddings_uri : str = restore_dict['config']['movie_embeddings_uri']
+        user_embeddings_uri : str = restore_dict['config']['user_embeddings_uri']
+
         fake_single = create_dummy_super_padded_graph(batch_size=1,
                                               max_history=restore_dict['config']['max_history'],
                                               num_candidates=restore_dict['config']['num_candidates'],
                                               user_id_range=user_id_range,
                                               movie_id_range=movie_id_range,
-                                              movie_embeddings_uri = restore_dict['config']['movie_embeddings_uri'],
-                                              user_embeddings_uri = restore_dict['config']['user_embeddings_uri'])
+                                              movie_embeddings_uri = movie_embeddings_uri,
+                                              user_embeddings_uri = user_embeddings_uri)
 
         fake_batch = create_dummy_super_padded_graph(batch_size=batch_size,
                                               max_history=restore_dict['config']['max_history'],
                                               num_candidates=restore_dict['config']['num_candidates'],
                                           user_id_range=user_id_range,
                                           movie_id_range=movie_id_range,
-                                          movie_embeddings_uri = restore_dict['config']['movie_embeddings_uri'],
-                                          user_embeddings_uri = restore_dict['config']['user_embeddings_uri'])
+                                          movie_embeddings_uri = movie_embeddings_uri,
+                                          user_embeddings_uri = user_embeddings_uri)
 
         num_candidates = restore_dict['config']['num_candidates']
 

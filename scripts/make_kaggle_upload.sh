@@ -16,7 +16,7 @@ rm -rf pypro* req* src
 #rename to avoid parsing problems on kaggle side:
 mv ra.tar.gz ra.tar.bin
 #create dataset-metadata.json:
-conda activate kaggle_py312
+conda activate kaggle_py313
 kaggle datasets init -p .
 
 #then edit title and id for the name of the kaggle dataset:

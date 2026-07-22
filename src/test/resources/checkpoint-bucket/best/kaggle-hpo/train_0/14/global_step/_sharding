@@ -1,1 +1,0 @@
-{"Z2xvYmFsX3N0ZXA=":"{\"sharding_type\": \"NamedSharding\", \"shape\": [1, 2], \"axis_names\": [\"processes\", \"local_devices\"], \"axis_types\": [\"AxisType.Auto\", \"AxisType.Auto\"], \"partition_spec\": [], \"device_mesh\": {\"mesh\": [[{\"id\": 0}, {\"id\": 1}]]}}"}

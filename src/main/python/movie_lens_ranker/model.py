@@ -24,8 +24,7 @@ class GraphRanker(nnx.Module):
         self.edge_embed_dim = edge_embed_dim
         #self.embed_in_dim = user_movie_embeds.shape[1]
         self.embed_in_dim = emb_in_dim
-        #self.user_movie_embeddings = nnx.Variable(user_movie_embeds)
-        
+
         self.K = num_candidates
         
         # 6 embeddings: 0 (No Rating/Candidate), 1, 2, 3, 4, 5 (Ratings)
