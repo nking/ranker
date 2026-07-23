@@ -1,5 +1,7 @@
 import json
 import os
+from typing import Dict, Union
+
 import jax
 from jax.experimental import jax2tf
 import jax.numpy as jnp
@@ -43,21 +45,17 @@ def create_serving_signature(max_nodes:int, max_edges:int, max_graphs:int, embed
         ])
     return serving_config
 
-def save_metadata(output_file_uri:str, batch_size:int, max_history:int, num_candidates:int,
-    max_nodes:int, max_edges:int, max_graphs:int, embed_len:int, num_catalog_users : int,
-    num_catalog_movies: int,
+def save_metadata(output_file_uri:str, batch_size:int,
+    max_nodes:int, max_edges:int, max_graphs:int,
+    params:Dict[str, Union[str, int]],
     signature_name:str):
     metadata = {
         "signature_name" : signature_name,
         "batch_size": batch_size,
-        "max_history": max_history,
-        "num_candidates": num_candidates,
         "max_nodes" : max_nodes,
         "max_edges" : max_edges,
         "max_graphs" : max_graphs,
-        "num_catalog_users" : num_catalog_users,
-        "num_catalog_movies" : num_catalog_movies,
-        "embed_len" : embed_len
+        **params
     }
     with open(output_file_uri, "w") as f:
         json.dump(metadata, f)
@@ -106,27 +104,36 @@ def make_jax_module(trained_model: GraphRanker,  num_candidates:int) -> JaxModul
 
     return jax_module
 
-def export_models(trained_model: GraphRanker, batch_size:int, max_history:int,
-    num_candidates:int, embed_len:int,  output_savedmodel_dir_uri:str,
-    num_catalog_users: int, num_catalog_movies:int, n_local_devices:int=1):
+def export_models(trained_model: GraphRanker, batch_size:int,
+    params: Dict[str, Union[str, int]], output_savedmodel_dir_uri:str,
+    n_local_devices:int=1):
     """
     export the model to TF SavedModel format along with a method to apply the model on the data.
     makes an export with a signature for  single inference mode and a batch inference mode.
-    :param embed_len:
     :param output_savedmodel_dir_uri: uri for the directory to save the model to.  Note that the
         version number should already be included in the uri as the last part of the path.
            e.g.  /absolute/path/to/your/model_export_dir/1
     :exception
     :param trained_model:
     :param batch_size: batch_size used for model training
-    :param max_history: max_history used for model training
-    :param num_candidates: num_candidates used for model training
-    :param num_catalog_users: number of users in the catalog of embeddings.  Note that in recomendation_systems project
+    :param params: dictionary with keys:
+        "max_history" : max length of user history used for model training
+        "num_candidates"  : the number of candidates to rank
+        "embed_len" : the lengths of the embeddings
+        "num_catalog_users" : number of users in the catalog of embeddings
+        "num_catalog_movies" : number of movies in the catalog of embeddings
+        "model_version" : version of the trained GraphRanker model
+        "trained_at_timestamp" : timestamp for the start of the model training
+    Note that in recomendation_systems project
           the user ids are renumbered if needed to be between 1 and num_users,
           then the movie_ids are renumbered to be between num_users + 1 and num_users + 1 + num_movies.
 
     :return:
     """
+
+    max_history = params['max_history']
+    num_candidates = params['num_candidates']
+    embed_len = params['embed_len']
 
     jax_graph_comp_dict_batch = calc_number_jax_graph_components(batch_size,
         max_history, num_candidates, n_local_devices=n_local_devices)
@@ -160,23 +167,19 @@ def export_models(trained_model: GraphRanker, batch_size:int, max_history:int,
     os.makedirs(assets_extra_dir, exist_ok=True)
 
     save_metadata(output_file_uri=os.path.join(assets_extra_dir, "metadata_single.json"),
-        batch_size=1,  max_history=max_history, num_candidates=num_candidates,
+        batch_size=1,
+        params=params,
         max_nodes=jax_graph_comp_dict_single['max_nodes'],
         max_edges=jax_graph_comp_dict_single['max_edges'],
         max_graphs=jax_graph_comp_dict_single['max_graphs'],
-        embed_len=embed_len,
-        num_catalog_users=num_catalog_users,
-        num_catalog_movies=num_catalog_movies,
         signature_name="serving_default")
 
     save_metadata(output_file_uri=os.path.join(assets_extra_dir, "metadata_batch.json"),
-        batch_size=batch_size, max_history=max_history, num_candidates=num_candidates,
+        batch_size=batch_size,
+                  params=params,
         max_nodes=jax_graph_comp_dict_batch['max_nodes'],
         max_edges=jax_graph_comp_dict_batch['max_edges'],
         max_graphs=jax_graph_comp_dict_batch['max_graphs'],
-        embed_len=embed_len,
-        num_catalog_users=num_catalog_users,
-        num_catalog_movies=num_catalog_movies,
         signature_name="serving_batch")
 
     #TODO: consider saving the json files to assets.extra directory (create it in assets.extra)

@@ -393,6 +393,11 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             },
             options=ocp.CheckpointManagerOptions(max_to_keep=1)
         )
+        #store the model version from pyproject.toml and a timestamp
+        from importlib import metadata
+        config_dict['model_version'] = metadata.version("movie_lens_ranker")
+        config_dict['trained_at_timestamp'] = int(time.time())
+        #config_dict['git_commit_hash'] = TODO: pass this in to app_runner.py as an app flag
 
     ndcg_text = f'ndcg_{top_k}'
     mrr_text = f'mrr_{top_k}'

@@ -13,6 +13,9 @@ class ExportTest(unittest.TestCase):
 
         checkpoint_uri = os.path.join(get_project_dir(),
                 "src/test/resources/checkpoint-bucket/best/kaggle-hpo/train_0/")
+        #checkpoint_uri = os.path.join(get_project_dir(),
+        #    "tmp_mounts/fake-gcs-server/checkpoint-bucket/best/GraphRanker_tuning_unittest4/train_2345/")
+
         checkpoint_uri = os.path.abspath(checkpoint_uri)
         savedmodel_dir = os.path.join(get_bin_dir(), "savedmodels", "1")
         try:
@@ -53,14 +56,19 @@ class ExportTest(unittest.TestCase):
 
         num_candidates = restore_dict['config']['num_candidates']
 
+        #TODO: refactor num_users to num_catalog_users and num_movies to num_catalog_movies throughout code
+        #TODO: add git_commit_hash
+        param_keys = {"max_history", "num_candidates", "embed_len",
+                      #"num_catalog_users", "num_catalog_movies" ,
+                      "model_version", "trained_at_timestamp" }
+        params = {key : restore_dict['config'][key] for key in param_keys}
+        params["num_catalog_users"] = restore_dict['config']['num_users']
+        params['num_catalog_movies'] = restore_dict['config']['num_movies']
+
         export_models(
-            restore_dict['model'],
+            trained_model=restore_dict['model'],
             batch_size=batch_size,
-            max_history = restore_dict['config']['max_history'],
-            num_candidates=restore_dict['config']['num_candidates'],
-            embed_len=restore_dict['config']['embed_len'],
-            num_catalog_users=restore_dict['config']['num_users'],
-            num_catalog_movies=restore_dict['config']['num_movies'],
+            params = params,
             output_savedmodel_dir_uri = savedmodel_dir)
 
 
