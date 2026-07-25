@@ -67,7 +67,7 @@ def get_recognized_keys():
         *mlflow_config_keys,
         *model_params_trainable_keys,
         *hpo_config_keys,
-        *{'connections_check', 'debug'}
+        *{'connections_check', 'debug', 'git_commit_hash'}
     }
 
 def app_runner_is_missing_minimum_required_keys(config: Dict[str, Any]) -> bool:
@@ -308,6 +308,7 @@ def define_flags():
     flags.DEFINE_integer("connections_check", default=0,
         help="set to 1 to run connections check before phase.  "
              "additionally, if JAX_PLATFORM_NAME=gpu there will be a check for expected number of GPUs found")
+    flags.DEFINE_string("git_commit_hash", default=None, help="git commit hash for this running code.")
 
 def stringify_mlflow_params(config:dict):
     return {k: json.dumps(v) for k, v in config.items() if
@@ -715,3 +716,48 @@ def create_dirs_if_is_filepath(a_uri:str):
         return
     file_path = Path(a_uri)
     file_path.parent.mkdir(parents=True, exist_ok=True)
+
+def get_git_commit_hash() -> str :
+    if os.path.exists("./git_commit_hash.txt"):
+        with open("./git_commit_hash.txt", "r") as file:
+            return file.readline().strip()
+    else:
+        return _get_git_commit_hash_if_match()
+
+def _get_git_commit_hash_if_match():
+    try:
+        # Check if the directory is a git repository
+        # 'git rev-parse --is-inside-work-tree' returns 'true' if inside a git repo
+        is_git = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        if is_git.returncode != 0 or is_git.stdout.strip() != "true":
+            return None
+
+        # Get the remote repository URL
+        # 'git config --get remote.origin.url' retrieves the origin URL
+        remote_url = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        if remote_url.returncode != 0 or remote_url.stdout.strip() != "git@github.com:nking/ranker.git":
+            return None
+
+        # Get the current commit hash (git rev-parse HEAD)
+        rev_parse = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        if rev_parse.returncode == 0:
+            return rev_parse.stdout.strip()
+        else:
+            return None
+    except FileNotFoundError:
+        return None

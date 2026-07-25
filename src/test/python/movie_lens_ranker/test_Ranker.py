@@ -740,6 +740,8 @@ class TestRanker(unittest.TestCase):
             'val_dataloader', 'rngs', 'global_step', 'config'}
         for key in expected_keys:
             self.assertTrue(key in restore_dict)
+
+        self.assertIsNotNone(restore_dict['config']['git_commit_hash'])
         
         return restore_dict, runs[0]
     

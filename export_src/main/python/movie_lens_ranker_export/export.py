@@ -124,6 +124,7 @@ def export_models(trained_model: GraphRanker, batch_size:int,
         "num_catalog_movies" : number of movies in the catalog of embeddings
         "model_version" : version of the trained GraphRanker model
         "trained_at_timestamp" : timestamp for the start of the model training
+        "git_commit_hash": optional, git commit hash for the training code.
     Note that in recomendation_systems project
           the user ids are renumbered if needed to be between 1 and num_users,
           then the movie_ids are renumbered to be between num_users + 1 and num_users + 1 + num_movies.

@@ -2,6 +2,7 @@
 echo "invoke from project root directory"
 mkdir TMP
 cp requirements-kaggle-gpu.txt TMP/
+git rev-parse HEAD > TMP/git_commit_hash.txt
 cp pyproject.toml TMP/
 cp -rf src TMP/
 rm -rf TMP/src/drafts

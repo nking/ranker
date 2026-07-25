@@ -29,7 +29,7 @@ from movie_lens_ranker.train import run_train_phase, run_test_phase
 from movie_lens_ranker.util import get_recognized_keys, \
     app_runner_is_missing_minimum_required_keys, \
     destringify_mlflow_params, get_cpu_stats, is_running_on_gpu, \
-    create_dirs_if_is_filepath, get_canonical_mlflow_run_name
+    create_dirs_if_is_filepath, get_canonical_mlflow_run_name, get_git_commit_hash
 
 FLAGS = flags.FLAGS
 
@@ -721,7 +721,11 @@ def main(_):
         logging.info(f'all args received from flags: {config}')
     
     config = {k:v for k, v in config.items() if k in get_recognized_keys()}
-    
+
+    git_commit_hash = get_git_commit_hash()
+    if git_commit_hash:
+        config['git_commit_hash'] = git_commit_hash
+
     try:
         
         if is_running_on_gpu():
