@@ -1,4 +1,3 @@
-- finish end to end inference request
 - make the code for inputs to monitoring:
    input data
    input features
@@ -12,6 +11,10 @@
         - earth movers distance
         - jenson-shannon divergence
    - also see notes below to use tfdv etc
+
+-- download antigravity for linux
+   and wire it up to use local Gemma model
+
 
 - consider using a CliffordNet layer instead of the GATv2.
   - requires a change in the bi-encoder to make embeddings

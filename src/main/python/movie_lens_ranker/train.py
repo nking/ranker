@@ -2,6 +2,8 @@
 tune, train, test functions for a multi-host, multi-process Jax AI Stack model
 and dataloader using SPMD paradigm.
 """
+import collections
+import itertools
 import time
 from functools import partial
 from typing import Tuple, Union, Any
@@ -443,10 +445,28 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     if (TOTAL_RECORDS // n_local_devices)//TRAIN_BATCH_SIZE > 100:
         log_interval = 100
 
-    from flax.jax_utils import prefetch_to_device
+    def async_prefetch_buffer(iterator, buffer_size=2):
+        """Keeps Python ahead of device compute to allow JAX async transfers."""
+        if buffer_size <= 0:
+            yield from iterator
+            return
+
+        queue = collections.deque()
+        iterator = iter(iterator) # Ensure it's evaluated as an iterator
+
+        for item in itertools.islice(iterator, buffer_size):
+            queue.append(item)
+
+        for next_item in iterator:
+            yield queue.popleft()
+            queue.append(next_item)
+
+        while queue:
+            yield queue.popleft()
 
     def apply_sharding(iterator):
-        """Yields batches mapped to the correct device layout."""
+        """Yields batches mapped to the correct device layout.  the jax operations are asynchronous.
+        """
         for batch in iterator:
             if multihost:
                 yield jax.tree_util.tree_map(
@@ -463,10 +483,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
 
     sharded_iter = apply_sharding(train_dataloader_iter)
 
-    if is_on_gpu:
-        device_iterator = enumerate(prefetch_to_device(sharded_iter, size=2))
-    else:
-        device_iterator = enumerate(sharded_iter)
+    #the sharded_iter is an aysncjax put onto gpu, so we can proceed to load buffer_size loads
+    device_iterator = enumerate(async_prefetch_buffer(sharded_iter, buffer_size=2))
 
     last_epoch = 0
     for loop_idx, padded_super_graph in device_iterator:
