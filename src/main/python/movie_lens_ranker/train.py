@@ -420,17 +420,16 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     else:
         train_dataloader_iter = restored_train_dataloader_iter
         if restored_global_step is None:
-            raise RuntimeError('globalrestored_global_step_step cannot be None if restored_train_dataloader_iter because restore is implicit')
+            raise RuntimeError('restored_global_step_step cannot be None if restored_train_dataloader_iter because restore is implicit')
         start_batch_idx = restored_global_step // (TRAIN_BATCH_SIZE * NUM_TRAIN_SHARDS)
     
     #NOTE: cannot improve efficiency for this outer loop because gradient loss needs to
     # be calculated and updated for each iteration.
     
-    global_data_pspec = P(('processes', 'local_devices'))
+    #global_data_pspec = P(('processes', 'local_devices'))
     model_mesh = get_model_mesh()
     
     data_mesh = jax.sharding.Mesh(jax.devices(), axis_names=('data',))
-    data_pspec = jax.sharding.PartitionSpec(('data'))
     data_sharding = jax.sharding.NamedSharding(data_mesh, P("data"))
     
     jax_graph_comp_dict = calc_number_jax_graph_components(config_dict['batch_size'],
@@ -445,46 +444,40 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     if (TOTAL_RECORDS // n_local_devices)//TRAIN_BATCH_SIZE > 100:
         log_interval = 100
 
-    def async_prefetch_buffer(iterator, buffer_size=2):
-        """Keeps Python ahead of device compute to allow JAX async transfers."""
-        if buffer_size <= 0:
-            yield from iterator
-            return
-
+    def async_device_prefetcher(numpy_iterator, buffer_size=2):
+        """
+        Thread-free prefetcher relying on JAX's native asynchronous C++ dispatch.
+        """
         queue = collections.deque()
-        iterator = iter(iterator) # Ensure it's evaluated as an iterator
 
-        for item in itertools.islice(iterator, buffer_size):
-            queue.append(item)
+        def _enqueue(n):
+            for cpu_batch in itertools.islice(numpy_iterator, n):
+                # jax.device_put returns instantly
+                if multihost:
+                    device_batch = jax.tree_util.tree_map(
+                        lambda x: multihost_utils.host_local_array_to_global_array(x, data_mesh, P("data")),
+                        cpu_batch
+                    )
+                elif is_on_gpu:
+                    device_batch = jax.tree_util.tree_map(
+                        lambda x: jax.device_put(x, data_sharding),
+                        cpu_batch
+                    )
+                else:
+                    device_batch = cpu_batch
 
-        for next_item in iterator:
-            yield queue.popleft()
-            queue.append(next_item)
+                queue.append(device_batch)
 
+        # Fill the initial buffer (stage the first 2 batches onto the GPUs)
+        _enqueue(buffer_size)
+
+        # As the training loop consumes a batch, immediately stage the next one
         while queue:
             yield queue.popleft()
-
-    def apply_sharding(iterator):
-        """Yields batches mapped to the correct device layout.  the jax operations are asynchronous.
-        """
-        for batch in iterator:
-            if multihost:
-                yield jax.tree_util.tree_map(
-                    lambda x: multihost_utils.host_local_array_to_global_array(x, data_mesh, data_pspec),
-                    batch
-                )
-            elif is_on_gpu:
-                yield jax.tree_util.tree_map(
-                    lambda x: jax.device_put(x, data_sharding),
-                    batch
-                )
-            else:
-                yield batch
-
-    sharded_iter = apply_sharding(train_dataloader_iter)
+            _enqueue(1)
 
     #the sharded_iter is an aysncjax put onto gpu, so we can proceed to load buffer_size loads
-    device_iterator = enumerate(async_prefetch_buffer(sharded_iter, buffer_size=2))
+    device_iterator = enumerate(async_device_prefetcher(train_dataloader_iter, buffer_size=2))
 
     last_epoch = 0
     for loop_idx, padded_super_graph in device_iterator:

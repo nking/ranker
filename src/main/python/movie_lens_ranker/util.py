@@ -647,7 +647,7 @@ def get_gpu_stats() -> str:
             
             # Format identically to your previous nvidia-smi output
             stats_list.append(
-                f"{i}, {gpu_util} %, {used_mib} MiB, {total_mib} MiB")
+                f"GPU {i}, used: {gpu_util} %, {used_mib} MiB, total: {total_mib} MiB")
         
         return " | ".join(stats_list)
     

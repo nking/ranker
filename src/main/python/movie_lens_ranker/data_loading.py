@@ -171,7 +171,7 @@ def _create_dataloader(
     # Hide GPUs from the next processes to be spawned
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     logging.info("Instantiating Grain DataLoader (hiding GPUs from child workers)...")
-    
+
     # NOTE that train_history_dict, etc. are passed by reference to the MapTransforms
     dataloader = DataLoader(
         data_source=datasource,
@@ -193,6 +193,7 @@ def _create_dataloader(
                 n_local_devices=len(jax.local_devices())),
         ],
         worker_count=worker_count,
+        worker_buffer_size=2,
         shard_options=shard_opts,
         read_options=read_opts,
     )
