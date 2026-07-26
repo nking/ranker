@@ -13,13 +13,13 @@ rm -rf TMP/src/main/python/movie_lens_ranker/__pycache__
 cd TMP
 tar -cvf ra.tar .
 gzip ra.tar
-rm -rf pypro* req* src
+rm -rf pypro* req* src requirements-kaggle-gpu.txt
 #rename to avoid parsing problems on kaggle side:
 mv ra.tar.gz ra.tar.bin
 #create dataset-metadata.json:
 conda activate kaggle_py313
-kaggle datasets init -p .
 
+#kaggle datasets init -p .
 #then edit title and id for the name of the kaggle dataset:
 # "title": "ranker-app3",
 # "id": "your_kaggle_user_name/ranker-app3",

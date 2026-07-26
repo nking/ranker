@@ -442,7 +442,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     log_interval = 10
     if (TOTAL_RECORDS // n_local_devices)//TRAIN_BATCH_SIZE > 100:
         log_interval = 100
-
+    
     def async_device_prefetcher(numpy_iterator, buffer_size=2):
         """
         Thread-free prefetcher relying on JAX's native asynchronous C++ dispatch.
