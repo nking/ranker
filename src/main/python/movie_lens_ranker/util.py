@@ -702,6 +702,10 @@ def get_cpu_stats() -> str:
     # System Load Average (1-minute queue depth)
     # Excellent indicator of thread over-scheduling/thrashing
     load_1min, _, _ = os.getloadavg()
+
+    # under-utilized:  (load_1min/float(os.cpu_count())) < 0.7`
+    # moderate load:  (load_1min/float(os.cpu_count())) between 1.0 and 2.0
+    # severe thrashing load:  (load_1min/float(os.cpu_count())) > 5.0
     
     # Format a clean string that matches your current logging architecture
     stats_msg = (
