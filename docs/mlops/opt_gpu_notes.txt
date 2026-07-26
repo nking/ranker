@@ -59,7 +59,57 @@ Update after running on Kaggle with those changes:
 a pipeline run of 10 HPO trials with num_epochs=15, followed by train for 15 epochs and test
     took 3 hrs, 45 min
 
+That prefetching of buffer size=2 used python threads, which produced a deadlock after the
+first lucky successful pipeline run on Kaggle.
+python thread GIL deadlocked with C++ XLA client's strict locking rules regarding the CUDA context.
 
+The fix:
+I changed the prefetching to a python generator with a queue, no python threads.
+The result is about 3 times slower epoch runtime unfortunately due to sequential
+loading even though jax device put is asynchronous.
+   previously, the elapsed time for 15 epochs was about 1100 sec.
+      => 73 sec per epoch
+   now, the elapsed time for 20 epochs is about 7180 sec.
+      => 359 sec per epoch
+         so can only run 6 trials of 20 epochs in 12 hours now.
+
+TODO: consider options to bring the runtime back down.
+ - only the main python thread should touch the XLA, JAX, or CUDA contexts.
+ - one approach is to use rust in between grain dataloader and the loading onto GPU.
+     in rust: release the python GIL using py.allow_threads(|| {...}) then
+     construct the padded super graph.  use pyO3 rust-numpy or DLPack protocol.
+     the memory allocated by rust is in C-contiguous format and passed as
+     a raw pointer back to python.  jax supports dlpack so can ingest the memory buffer
+     with zero-copy overhead.
+     the python main thread uses jax.device_put() to schedule the PCIe non-blocking
+     transfer.
+     To maintain a buffer of 2 batches actively queued for the GPU without using
+     any background Python threads, your main training loop simply needs to
+     maintain a rotating queue of rust futures.
+     gpu_batch_curr = jax.device_put(cpu_batch_0)
+     gpu_batch_next = jax.device_put(cpu_batch_1)
+   worth the savings in GPU time for a product whose train pipeline
+   will be used over long period of time in CI/CD pipeline...
+ - another approach is that  C++ component could replace the super padded graph assembly in the
+       background, freeing up the python main thread to focus on the
+       GPU transfer queue.
+     - could use pybind11 to build a C++ python extension and
+       use DLPack to pass memory arrays from C++ to JAX w/o copying or serialization.
+     - on python main thread grain handles reading data, shuffling etc
+       yielding numpu arrays
+     - the custom C++ Extension for background graph assembly
+       is exposed to python via Pybind11.
+       - it immed uses py::gil_scoped_release.
+       - now python is unlocked an movied to next task, so this
+         extension can use std::thread pools to form the final
+         dense graph of raw C++ memory buffers (std::vector<float>) etc
+         then the assembled buffers are pushed into a standared
+         C++ queu protected by a mutex.
+     - python training loop calls .get_next_batch() on the C++ object
+       which passes the memory pointer via a DLPack PyCapsule.
+     - python weaps it into a jax array batch
+       and uses jax.device_put or similar to load onto GPU
+     - python invokes c++ delete of relevant memory after eval_step
 
 
 
