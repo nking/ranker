@@ -230,7 +230,7 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) ->
     return metrics_dict
 
 def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterator,
-        top_k: int, jax_graph_comp_dict:Dict[str, int]) -> Tuple[Dict, int]:
+        top_k: int) -> Tuple[Dict, Any]:
     """
     calc metrics for val dataset. Note, if this method consumes too much memory, use the
     _epoch_validation_chunked instead.   Note that the method uses SPMD paradigm.
@@ -243,9 +243,8 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
     :return: a dictionary of the globally averaged metrics "loss", "mrr", "ndcg", "recall", the number of samples used
     """
     data_mesh = jax.sharding.Mesh(jax.devices(), axis_names=('data',))
-    data_pspec = jax.sharding.PartitionSpec(('data'))
-    model_pspec = P(('processes', 'local_devices'))
-    model_mesh = get_model_mesh()
+    #model_pspec = P(('processes', 'local_devices'))
+    #model_mesh = get_model_mesh()
     global_avg_metrics_batches = {"loss":[], "mrr":[], "ndcg":[], "recall":[]}
     n_samples_tot = 0
     
@@ -256,20 +255,14 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
     @partial(shard_map, mesh=data_mesh, in_specs=P(), out_specs=P())
     def aggregate_metric(scalar_metric):
         return jax.lax.pmean(scalar_metric, axis_name='data')
-    
-    for padded_super_graph_0 in val_dataloader_iter:
-        
-        #actually is max_graphs which includes padding:
-        n_samples_tot += len(padded_super_graph_0.n_node)
-        
-        #shard the data to local devices:
-        #padded_super_graph = jax.device_put(padded_super_graph_0, data_sharding)
-        padded_super_graph = jax.tree_util.tree_map(
-            lambda x: multihost_utils.host_local_array_to_global_array(
-                x, data_mesh, data_pspec),
-            padded_super_graph_0
-        )
-        
+
+    device_iterator = enumerate(_async_device_prefetcher(val_dataloader_iter, buffer_size=2))
+
+    for loop_idx, padded_super_graph in device_iterator:
+
+        #each n_node in array is (1 + n_real_history + n_candidates)
+        n_samples_tot += sum(padded_super_graph.n_node)
+
         val_metrics = eval_step(model, padded_super_graph, top_k)
         
         # val_metrics['ndcg'] is now an array of shape (Num_Batches,)
@@ -314,6 +307,43 @@ def pad_graph_tuple_batch(graph_tuple_batch: jraph.GraphsTuple, jax_graph_comp_d
         n_graph=max_graphs
     )
     return padded_super_graph_0
+
+def _async_device_prefetcher(numpy_iterator, buffer_size=2):
+    """
+    Thread-free prefetcher relying on JAX's native asynchronous C++ dispatch.
+    """
+    multihost = jax.process_count() > 1
+    is_on_gpu = is_running_on_gpu()
+    data_mesh = jax.sharding.Mesh(jax.devices(), axis_names=('data',))
+    data_sharding = jax.sharding.NamedSharding(data_mesh, P("data"))
+
+    queue = collections.deque()
+
+    def _enqueue(n):
+        for cpu_batch in itertools.islice(numpy_iterator, n):
+            # jax.device_put returns instantly
+            if multihost:
+                device_batch = jax.tree_util.tree_map(
+                    lambda x: multihost_utils.host_local_array_to_global_array(x, data_mesh, P("data")),
+                    cpu_batch
+                )
+            elif is_on_gpu:
+                device_batch = jax.tree_util.tree_map(
+                    lambda x: jax.device_put(x, data_sharding),
+                    cpu_batch
+                )
+            else:
+                device_batch = cpu_batch
+
+            queue.append(device_batch)
+
+    # Fill the initial buffer (stage the first 2 batches onto the GPUs)
+    _enqueue(buffer_size)
+
+    # As the training loop consumes a batch, immediately stage the next one
+    while queue:
+        yield queue.popleft()
+        _enqueue(1)
 
 def _train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
@@ -434,7 +464,6 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     jax_graph_comp_dict = calc_number_jax_graph_components(config_dict['batch_size'],
         config_dict['max_history'], config_dict['num_candidates'], n_local_devices=n_local_devices)
     
-    multihost = jax.process_count() > 1
     is_on_gpu = is_running_on_gpu()
     
     use_debug = ("debug" in config_dict and config_dict["debug"])
@@ -442,41 +471,9 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     log_interval = 10
     if (TOTAL_RECORDS // n_local_devices)//TRAIN_BATCH_SIZE > 100:
         log_interval = 100
-    
-    def async_device_prefetcher(numpy_iterator, buffer_size=2):
-        """
-        Thread-free prefetcher relying on JAX's native asynchronous C++ dispatch.
-        """
-        queue = collections.deque()
-
-        def _enqueue(n):
-            for cpu_batch in itertools.islice(numpy_iterator, n):
-                # jax.device_put returns instantly
-                if multihost:
-                    device_batch = jax.tree_util.tree_map(
-                        lambda x: multihost_utils.host_local_array_to_global_array(x, data_mesh, P("data")),
-                        cpu_batch
-                    )
-                elif is_on_gpu:
-                    device_batch = jax.tree_util.tree_map(
-                        lambda x: jax.device_put(x, data_sharding),
-                        cpu_batch
-                    )
-                else:
-                    device_batch = cpu_batch
-
-                queue.append(device_batch)
-
-        # Fill the initial buffer (stage the first 2 batches onto the GPUs)
-        _enqueue(buffer_size)
-
-        # As the training loop consumes a batch, immediately stage the next one
-        while queue:
-            yield queue.popleft()
-            _enqueue(1)
 
     #the sharded_iter is an aysncjax put onto gpu, so we can proceed to load buffer_size loads
-    device_iterator = enumerate(async_device_prefetcher(train_dataloader_iter, buffer_size=2))
+    device_iterator = enumerate(_async_device_prefetcher(train_dataloader_iter, buffer_size=2))
 
     last_epoch = 0
     for loop_idx, padded_super_graph in device_iterator:
@@ -510,7 +507,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             
             # val_dataloader is also sharded, so don't isolate this to only shard 0.
             # Also, this is synced across all shards, so all shards have same conditional logic for global_avg_val_metrics below here
-            global_avg_val_metrics, n_val_samples = _epoch_validation(model, iter(val_dataloader), top_k, jax_graph_comp_dict)
+            global_avg_val_metrics, n_val_samples = _epoch_validation(model, iter(val_dataloader), top_k)
             model.train()
             
             global_avg_val_loss = global_avg_val_metrics["loss"]
@@ -1158,11 +1155,8 @@ def run_test_phase(config: dict):
         if not isinstance(test_dataloader._sampler, BatchSampler):
             raise ValueError(
                 "test_dataloader sampler must be an instance of BatchSampler")
-        
-        jax_graph_comp_dict = calc_number_jax_graph_components(batch_size,
-            max_history, num_candidates, n_local_devices=jax.local_device_count())
-        
-        global_test_metrics, n_val_samples = _epoch_validation(model, iter(test_dataloader), config['top_k'], jax_graph_comp_dict)
+
+        global_test_metrics, n_val_samples = _epoch_validation(model, iter(test_dataloader), config['top_k'])
     
         out_dict = {f"test_{key}_{config['top_k']}" : value for key, value in global_test_metrics.items()}
         #to be consitent w/ train, change the loss label:
@@ -1269,22 +1263,17 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
     restored_model = restore_dict['model']
     restored_model.eval()
     model.eval()
-    
-    jax_graph_comp_dict = calc_number_jax_graph_components(
-        restore_dict['config']['batch_size'],
-        restore_dict['config']['max_history'],
-        restore_dict['config']['num_candidates'], n_local_devices=jax.local_device_count())
-    
+
     import copy
     loader_current = copy.deepcopy(val_data_loader)
     loader_restored = copy.deepcopy(val_data_loader)
     
     # iter(x) makes a new iterator state
-    global_avg_val_metrics_current, n_val_samples_current = _epoch_validation(model, iter(loader_current), top_k, jax_graph_comp_dict)
+    global_avg_val_metrics_current, n_val_samples_current = _epoch_validation(model, iter(loader_current), top_k)
     
     multihost_utils.sync_global_devices( "sync_barrier_for_model_validation")
     
-    global_avg_val_metrics_restored, n_val_samples_restored = _epoch_validation(restored_model, iter(loader_restored), top_k, jax_graph_comp_dict)
+    global_avg_val_metrics_restored, n_val_samples_restored = _epoch_validation(restored_model, iter(loader_restored), top_k)
     
     multihost_utils.sync_global_devices( "sync_barrier_for_restored_model_validation")
     
