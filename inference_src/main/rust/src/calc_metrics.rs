@@ -74,9 +74,10 @@ impl Evaluator {
 
                 // Assuming schema order: user_id (0), movie_id (1), rating (2), timestamp (3)
                 // Parquet usually maps large integers to INT64 (`get_long`)
-                let uid = row.get_long(0)? as usize;
-                let mid = row.get_long(1)? as usize;
-                let rat = row.get_long(2)? as usize;
+                let uid = row.get_int(0)? as usize;
+                let mid = row.get_int(1)? as usize;
+                let rat = row.get_int(2)? as usize;
+                //let ts = row.get_long(3)? as usize;
 
                 ratings_history
                     .entry(uid)

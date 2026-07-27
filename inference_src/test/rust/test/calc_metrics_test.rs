@@ -1,9 +1,5 @@
 #[cfg(test)]
 mod calc_metrics_tests {
-    use std::collections::HashSet;
-    //use std::error::Error;
-    use inference_engine::util::{calc_number_jax_graph_components, sort_by_scores};
-    //use super::*;
     mod helper {
         // Tell Rust to literally include the code from helper.rs here
         include!("helper.rs");
@@ -13,6 +9,7 @@ mod calc_metrics_tests {
     use std::path::PathBuf;
     use std::fs::File;
     use std::collections::HashMap;
+    use std::io::BufReader;
     use serde_json::Value;
     use inference_engine::calc_metrics::{Evaluator};
 
@@ -21,29 +18,29 @@ mod calc_metrics_tests {
 
         let mut file_patterns : Option<PathBuf> = get_project_dir();
         if let Some(ref mut p) = file_patterns {
-            p.push("src/test/resources/data/src/test/resources/data/ratings_test*.parquet");
+            p.push("src/test/resources/data/ratings_test*.parquet");
         }
 
         let params_json_uri = get_model_param_json_uri();
         let file = File::open(params_json_uri).unwrap();
         let reader = BufReader::new(file);
         let dict: HashMap<String, Value> = serde_json::from_reader(reader).unwrap();
-        let max_history = dict.get("max_history")
+        let _max_history = dict.get("max_history")
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
         let num_candidates = dict.get("num_candidates")
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
-        let num_catalog_users = dict.get("num_catalog_users")
+        let _num_catalog_users = dict.get("num_catalog_users")
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
 
         let top_k = 20;
+        let n_draws = 3;
 
-        let evaluator = Evaluator::new(top_k=top_k, num_candidates=num_candidates,
-            n_draws = 3, rating_threshold = 3);
+        let evaluator = Evaluator::new(top_k, num_candidates, n_draws);
 
-        match evaluator.evaluate(file_patterns) {
+        match evaluator.evaluate(file_patterns.unwrap().to_str().to_owned().unwrap()) {
             Ok(stats) => {
                 println!("=== Evaluation Results (K=20) ===");
                 println!("{:<12} | {:<8} | {:<8} | {:<8} | {:<8}", "Metric", "Mean", "Median", "MAD", "MAD-Std");
