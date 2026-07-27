@@ -34,6 +34,7 @@ prost-types = "0.14.4"
 
 arc-swap = "1.9.2"
 
+glob = "0.3.4"
 rand = "0.8"
 notify = "9.0.0-rc.4"
 
@@ -88,3 +89,7 @@ path="../../test/rust/test/app_config_test.rs"
 [[test]]
 name = "app_runner_tests"
 path="../../test/rust/test/app_runner_test.rs"
+
+[[test]]
+name = "calc_metrics_tests"
+path="../../test/rust/test/calc_metrics_test.rs"

@@ -5,6 +5,7 @@ pub mod graph_builder;
 
 pub mod embeddings_util;
 
+pub mod calc_metrics;
 pub mod util;
 pub mod model_client;
 pub mod orchestrator;
