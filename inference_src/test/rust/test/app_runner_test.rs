@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod app_runner_tests {
-    use tokio::net::TcpListener;
+    //use tokio::net::TcpListener;
     use tokio::sync::oneshot;
-    use tokio::time::{sleep, Duration};
+    //use tokio::time::{sleep, Duration};
     use inference_engine::pb::recommender_service_client::RecommenderServiceClient;
     use inference_engine::pb::UserRequest;
 

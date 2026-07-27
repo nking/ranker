@@ -25,6 +25,7 @@ pub struct Orchestrator {
     num_catalog_users: usize,
     ranker_n_local_devices : usize,
     persisted_index_path: PathBuf,
+    top_k : usize
 }
 
 impl Orchestrator {
@@ -42,7 +43,7 @@ impl Orchestrator {
         persisted_index_path: impl AsRef<Path>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
 
-        let initial_searcher = Searcher::new(movie_embeddings_uri, top_k, &persisted_index_path)?;
+        let initial_searcher = Searcher::new(movie_embeddings_uri, num_candidates, &persisted_index_path)?;
         let query_client = QueryModelClient::new(query_uri).await;
         let ranker_client = RankerModelClient::new(ranker_uri).await;
         let user_history: UserHistory = build_user_history(&ratings_uris, 2048).await;
@@ -57,10 +58,11 @@ impl Orchestrator {
             user_history: user_history,
             ranker_n_local_devices: ranker_n_local_devices,
             persisted_index_path: persisted_index_path.as_ref().to_path_buf(),
+            top_k: top_k,
         })
     }
 
-    pub async fn reload_embeddings(&self, movie_embeddings_uri: &str, top_k: usize) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn reload_embeddings(&self, movie_embeddings_uri: &str, num_candidates: usize) -> Result<(), Box<dyn std::error::Error>> {
 
         let uri_owned: String = movie_embeddings_uri.to_string();
         let path = self.persisted_index_path.to_owned();
@@ -69,7 +71,7 @@ impl Orchestrator {
         // starve the async workers handling incoming gRPC requests.
         let new_searcher = tokio::task::spawn_blocking(move || {
             // temporarily, consuming twice as much RAM with current and new indexer
-            Searcher::new(&uri_owned.as_str(), top_k, &path).map_err(|e| e.to_string())
+            Searcher::new(&uri_owned.as_str(), num_candidates, &path).map_err(|e| e.to_string())
         }).await??;
 
         // The Swap: This takes nanoseconds.
@@ -84,6 +86,20 @@ impl Orchestrator {
 
 #[tonic::async_trait]
 impl RecommenderService for Orchestrator {
+    /// given USerRequest, gets the num_candidates approximate nearest neighbors for user,
+    /// scores then and returns them sorted.
+    ///
+    /// # Arguments
+    ///
+    /// * `req`:
+    ///
+    /// returns: Result<Response<RankedMovies>, Status>
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
     async fn predict(&self, req: Request<UserRequest>) ->Result<Response<RankedMovies>, tonic::Status> {
 
         let inner_req = req.into_inner();
@@ -93,6 +109,7 @@ impl RecommenderService for Orchestrator {
             .map_err(|e| tonic::Status::internal(format!("user embedding: {}", e)))?;
         let user_embeddings = user_embedding;
 
+        // finds num_candidates approx nearest neighbors
         let searcher = self.searcher.load();
         let nearest : Matches = searcher.search(&user_embeddings)
             .map_err(|e| tonic::Status::internal(format!("Vector search failed: {}", e)))?;
@@ -130,8 +147,8 @@ impl RecommenderService for Orchestrator {
             Ok(ranks) => {
                 let (sorted_ids, sorted_scores) = sort_by_scores(&candidate_ids, &ranks);
                 let r = RankedMovies{
-                    movie_ids: sorted_ids,
-                    scores: sorted_scores,
+                    movie_ids: sorted_ids[0..self.top_k].to_vec(),
+                    scores: sorted_scores[0..self.top_k].to_vec(),
                 };
                 Ok(Response::new(r))
             },

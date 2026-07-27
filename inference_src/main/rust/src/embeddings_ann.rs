@@ -8,14 +8,14 @@ pub struct Searcher {
     movie_embeddings_catalog : Vec<f32>,
     num_catalog_movies : usize,
     embed_len : usize,
-    top_k : usize,
+    num_candidates: usize,
     persisted_index_path: PathBuf,
 }
 
 impl Searcher {
 
     // static constructor
-    pub fn new(movie_embeddings_uri: &str, top_k: usize, persisted_index_path: impl AsRef<Path>)
+    pub fn new(movie_embeddings_uri: &str, num_candidates: usize, persisted_index_path: impl AsRef<Path>)
         -> Result<Self, Box<dyn std::error::Error+ Send + Sync>> {
 
         let (movie_embeddings_catalog, num_movies, embed_len) = read_movie_embeddings(&movie_embeddings_uri);
@@ -31,7 +31,7 @@ impl Searcher {
         };
         Ok(Self{
             indexer: indexer, movie_embeddings_catalog : movie_embeddings_catalog,
-            num_catalog_movies: num_movies, embed_len : embed_len, top_k: top_k,
+            num_catalog_movies: num_movies, embed_len : embed_len, num_candidates,
             persisted_index_path: path_buf,
         })
     }
@@ -40,7 +40,7 @@ impl Searcher {
         -> Result<Index, Box<dyn std::error::Error + Send + Sync>> {
 
         let num_catalog_movies = catalog.len() / embed_len;
-        let mut index: Index = Self::construct_index(embed_len, num_catalog_movies)?;
+        let index: Index = Self::construct_index(embed_len, num_catalog_movies)?;
 
         for (id, chunk) in catalog.chunks_exact(embed_len).enumerate() {
             index.add(id as u64, chunk)?;
@@ -87,14 +87,14 @@ impl Searcher {
         options.quantization = ScalarKind::F32; // Use 32-bit floating point numbers
         options.connectivity = 16; //HNSW degree
 
-        let mut index: Index = Index::new(&options)?;
+        let index: Index = Index::new(&options)?;
         index.reserve(capacity)?;
 
         Ok(index)
     }
 
     pub fn search(&self, query: &[f32]) -> Result<Matches, Box<dyn std::error::Error>> {
-        let r = self.indexer.search(&query, self.top_k)?;
+        let r = self.indexer.search(&query, self.num_candidates)?;
         Ok(r)
     }
 
@@ -104,7 +104,7 @@ impl Searcher {
 
         for i in 0..num_queries {
             let q = &query[i*self.embed_len .. (i+1)*self.embed_len];
-            let r = self.indexer.search(&q, self.top_k)?;
+            let r = self.indexer.search(&q, self.num_candidates)?;
             results.push(r);
         }
         Ok(results)

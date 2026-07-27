@@ -6,21 +6,35 @@ mod embedding_ann_tests {
         include!("helper.rs");
     }
 
+    use std::collections::HashMap;
+    use std::fs::File;
+    use std::io::BufReader;
     use std::path::PathBuf;
+    use serde_json::Value;
     use usearch::ffi::Matches;
+    use inference_engine::app_config::AppConfig;
     use inference_engine::embeddings_ann::Searcher;
     use crate::embedding_ann_tests::helper::{get_embeddings_uris};
 
     #[tokio::test]
     async fn test_search() {
 
-        let top_k = 20;
+        // get num_candidates from the default config for this model
+        let config_path = "./config/default.json";
+        let config = AppConfig::load_from_file(config_path).unwrap();
+        let file = File::open(&config.params_json_path).unwrap();
+        let reader = BufReader::new(file);
+        let dict: HashMap<String, Value> = serde_json::from_reader(reader).unwrap();
+
+        let _max_history = dict.get("max_history").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let num_candidates = dict.get("num_candidates").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let _num_catalog_users = dict.get("num_catalog_users").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
         let (_user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
 
         let persisted_index_path: std::path::PathBuf = PathBuf::from("./target/movie_embeddings_indexer");
 
-        let search = Searcher::new(&movie_embeddings_uri, top_k, persisted_index_path).unwrap();
+        let search = Searcher::new(&movie_embeddings_uri, num_candidates, persisted_index_path).unwrap();
 
         let query_embedding: Vec<f32> = vec![
             0.117549196, 0.238659769, -0.215364203, -0.0403997824, 0.315108567, -0.468034804,
@@ -34,7 +48,7 @@ mod embedding_ann_tests {
         let candidate_ids = &m.keys;
         let _distances = &m.distances;
 
-        assert_eq!(top_k,  candidate_ids.len());
+        assert_eq!(num_candidates,  candidate_ids.len());
 
         // check that restore doesn't  throw errors
         let _indexer = search.restore().unwrap();
@@ -43,13 +57,23 @@ mod embedding_ann_tests {
     #[tokio::test]
     async fn test_search_batch() {
 
-        let top_k = 20;
+        // get num_candidates from the default config for this model
+        let config_path = "./config/default.json";
+        let config = AppConfig::load_from_file(config_path).unwrap();
+        let file = File::open(&config.params_json_path).unwrap();
+        let reader = BufReader::new(file);
+        let dict: HashMap<String, Value> = serde_json::from_reader(reader).unwrap();
+
+        let _max_history = dict.get("max_history").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let num_candidates = dict.get("num_candidates").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let _num_catalog_users = dict.get("num_catalog_users").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+
 
         let (_user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
 
         let persisted_index_path: std::path::PathBuf = PathBuf::from("./target/movie_embeddings_indexer");
 
-        let search = Searcher::new(&movie_embeddings_uri, top_k, persisted_index_path).unwrap();
+        let search = Searcher::new(&movie_embeddings_uri, num_candidates, persisted_index_path).unwrap();
 
         let query_embedding: Vec<f32> = vec![
             0.117549196, 0.238659769, -0.215364203, -0.0403997824, 0.315108567, -0.468034804,
@@ -66,7 +90,7 @@ mod embedding_ann_tests {
         for i in 0..m.len() {
             let candidate_ids = &m[i].keys;
             let _distances = &m[i].distances;
-            assert_eq!(top_k,  candidate_ids.len());
+            assert_eq!(num_candidates,  candidate_ids.len());
         }
 
 

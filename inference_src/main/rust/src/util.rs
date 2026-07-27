@@ -94,7 +94,7 @@ pub fn calc_number_jax_graph_components(batch_size: usize, max_history: usize,
 }
 
 pub fn next_64(x : usize) -> usize {
-    64 * ((x + 63) / 64)
+    64 * (1 + (x / 64))
 }
 
 pub fn sort_by_scores(ids : &[i32], scores : &[f32]) -> (Vec<i32>, Vec<f32>) {

@@ -169,6 +169,9 @@ pub fn build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len
     let max_nodes = padded_super_graph.node_ids.len() as i64;
     //let max_graphs = padded_super_graph.n_edge.len() as i64;
 
+    println!("max_nodes: {}, max_edges: {}, max_graphs: {}", max_nodes,
+        padded_super_graph.senders.len() as i64, padded_super_graph.n_edge.len() as i64);
+
     let mut inputs = HashMap::new();
 
     // Graph Structure (Usually single-element Vecs or small arrays)

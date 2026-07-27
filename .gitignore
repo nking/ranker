@@ -19,13 +19,14 @@ hpo_results.txt
 
 **/user.bazelrc
 
+bin/
+
 TMP?/
 mlruns/
 *.bak
 *.sw?
 
 tmp_mounts/
-.env
 .env_db
 
 orchestration/k8s/vendor/

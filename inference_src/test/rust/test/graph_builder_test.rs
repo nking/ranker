@@ -16,7 +16,6 @@ mod graph_builder_tests {
     }
 
     use arrow_array::{Int32Array, Int64Array};
-    use parquet::file::reader::{FileReader, SerializedFileReader};
     use std::fs::File;
     use std::path::Path;
     use parquet::arrow::arrow_reader::{ParquetRecordBatchReaderBuilder, ParquetRecordBatchReader};
@@ -24,10 +23,10 @@ mod graph_builder_tests {
     //use tokio::runtime::Runtime;
 
     use helper::{get_train_val_test_liked_uris, DataSize};
-    use inference_engine::embeddings_util::{get_number_of_users, read_movie_embeddings, read_user_embeddings, get_user_embeddings};
+    use inference_engine::embeddings_util::{read_movie_embeddings, read_user_embeddings, get_user_embeddings};
     use inference_engine::graph_builder::{build_enriched_padded_supergraph, create_fake_padded_super_batch, JraphGraph};
     use inference_engine::user_history::{build_user_history, UserHistory};
-    use crate::graph_builder_tests::helper::{assert_slices_nearly_equal, get_embeddings_uris};
+    use crate::graph_builder_tests::helper::{get_embeddings_uris};
 
     #[test]
     pub fn test_create_fake_batch() {
@@ -200,8 +199,8 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
         // to compare results to python test_ranker.py method test_create_inference_batch()
 
         let max_history = 4;
-        let batch_size = 2;
-        let num_candidates = 5;
+        let _batch_size = 2;
+        let _num_candidates = 5;
         let n_local_devices = 1;
 
         let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
@@ -244,9 +243,9 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
         // recently built with updated timestamp, age, etc
         // and graph builder performs look-ups for chosen user_history and candidate_ids
         //let user_emb : Vec<f32> = vec![];
-        let rows = rows.len();
-        let cols = embed_len;
-        let mut rng = rand::thread_rng();
+        let _rows = rows.len();
+        let _cols = embed_len;
+        let _rng = rand::thread_rng();
 
         // Generate 32 (2 * 16) random numbers
         let user_embeddings : Vec<f32> = get_user_embeddings(&user_ids, &user_embeddings_catalog, embed_len);

@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod util_tests {
     use std::collections::HashSet;
-    use std::error::Error;
-    use inference_engine::util::sort_by_scores;
-    use super::*;
+    //use std::error::Error;
+    use inference_engine::util::{calc_number_jax_graph_components, sort_by_scores};
+    //use super::*;
     mod helper {
         // Tell Rust to literally include the code from helper.rs here
         include!("helper.rs");
@@ -39,5 +39,18 @@ mod util_tests {
             set.insert(id);
         }
         assert_eq!(set.len(), ids.len());
+    }
+
+    #[test]
+    pub fn test_calc_number_jax_graph_components() {
+        let max_history : usize = 40;
+        let num_candidates : usize = 50;
+        let batch_size : usize = 1;
+        let num_local_devices : usize = 1;
+        let (max_nodes,  max_edges, max_graphs) =
+            calc_number_jax_graph_components(batch_size, max_history, num_candidates, num_local_devices);
+        assert_eq!(max_nodes, 128);
+        assert_eq!(max_edges, 128);
+        assert_eq!(max_graphs, 3);
     }
 }

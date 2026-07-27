@@ -5,7 +5,7 @@ mod recommended_movies_tests {
         // Tell Rust to literally include the code from helper.rs
         include!("helper.rs");
     }
-    use helper::{get_project_dir, get_recommended_movies_uris};
+    use helper::{get_recommended_movies_uris};
 
     use inference_engine::recommended_movies::{build_recommended_movies};
 
@@ -22,7 +22,7 @@ mod recommended_movies_tests {
         let num_movies = recommended_movies.movie_ids.len() / num_users;
         assert_eq!(recommended_movies.movie_ids.len(), num_users * num_movies);
 
-        let ts : i64 = 978133414; //first timestamp from test dataset
+        //let ts : i64 = 978133414; //first timestamp from test dataset
         let top_k : usize = 20;
 
         let user_ids = vec![1, 3];
