@@ -25,3 +25,6 @@ the model_repositories contents:
 - the cross-encoder graph-ranker model was built from
   export_src/test/python/movie_lens_ranker_export/test_export.py
 
+the checkpoint-bucket contents were trained on Kaggle T4x2 GPUs:
+   https://www.kaggle.com/code/nicholeasuniquename/ranker-cross-encoder-w-gatv2
+

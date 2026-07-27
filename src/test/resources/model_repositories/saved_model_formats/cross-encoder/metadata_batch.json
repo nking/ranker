@@ -1,1 +1,1 @@
-{"signature_name": "serving_batch", "batch_size": 256, "max_history": 60, "num_candidates": 60, "max_nodes": 31040, "max_edges": 30784, "max_graphs": 258, "num_catalog_users": 6040, "num_catalog_movies": 3883, "embed_len": 16}
+{"signature_name": "serving_batch", "batch_size": 256, "max_nodes": 23360, "max_edges": 23104, "max_graphs": 258, "max_history": 40, "trained_at_timestamp": 1785094587, "model_version": "0.1.0", "num_candidates": 50, "embed_len": 16, "num_catalog_users": 6040, "num_catalog_movies": 3883}
