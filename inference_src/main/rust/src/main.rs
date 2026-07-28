@@ -6,6 +6,7 @@ use inference_engine::app_runner::AppRunner;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
+    // "server_addr": "0.0.0.0:50051"
     let config_path = "./config/default.json";
 
     let config = AppConfig::load_from_file(config_path)?;

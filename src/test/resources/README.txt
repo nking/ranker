@@ -28,3 +28,7 @@ the model_repositories contents:
 the checkpoint-bucket contents were trained on Kaggle T4x2 GPUs:
    https://www.kaggle.com/code/nicholeasuniquename/ranker-cross-encoder-w-gatv2
 
+users.bin was written in the project 
+github.com/nking/recommender_systems.git
+in file src/test/python/movie_lens_tfx/write_users_bin.py
+

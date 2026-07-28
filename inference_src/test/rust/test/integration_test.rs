@@ -1,5 +1,13 @@
 #[cfg(test)]
 mod integration_tests {
+    mod helper {
+        // Tell Rust to literally include the code from helper.rs here
+        include!("helper.rs");
+    }
 
+    #[tokio::test]
+    async fn test_main() {
+
+    }
 
 }

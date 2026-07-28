@@ -28,6 +28,8 @@ prost = "0.14.4"
 once_cell = "1.21.4"
 serde_json = "1.0.150"
 
+memmap2 = "0.9.11"
+
 tonic-build = "0.14.6"
 tonic-prost = "0.14.6"
 prost-types = "0.14.4"
@@ -93,3 +95,7 @@ path="../../test/rust/test/app_runner_test.rs"
 [[test]]
 name = "calc_metrics_tests"
 path="../../test/rust/test/calc_metrics_test.rs"
+
+[[test]]
+name = "user_db_tests"
+path="../../test/rust/test/user_db_test.rs"
