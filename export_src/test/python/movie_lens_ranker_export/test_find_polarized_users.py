@@ -8,10 +8,7 @@ import unittest
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from urllib.parse import urlparse
-
 from helper import get_project_dir, get_bin_dir
-from movie_lens_ranker.util_plots import plot_metrics_dict
 
 def get_single_genre_polarized_users(
         train_val_files: list[str],
