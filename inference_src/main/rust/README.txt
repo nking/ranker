@@ -1,6 +1,14 @@
+
+The tests in this sub-project under inference_src require the bi-encoder Query model and
+the cross-encoder ranking model to be deployed.
+see ranker/deploy/compose/docker-compose-TFS.yaml
+for how to deploy the models.
+
+Details on the deployments:
+
 Query Model deployment:
 - the query model is a TF SavedModel format and can be deployed
-  to TFS container tensorflow/serving:2.16.1 to match the TF
+  to TFS container tensorflow/serving:2.16.1 to match the TF version
   that was used to build it.
 - to deploy the model locally:
   cd to base of ranker directory
@@ -23,14 +31,14 @@ Query Model deployment:
 - to compile the protocol buffers,
   install protobuf-compiler
   e.g. sudo apt protobuf-compiler, brew install protobuf, etc.
-i build.rs is invoked by cargo build, before the src files are loaded
+  build.rs is invoked by cargo build, before the src files are loaded
 
 Ranker model deployment:
 see docker-compose-TFS.yaml
 
 =======================================
-graph-ranker bulk inferrence could benefit from a GPU
-so in that case, use NVIDIA's triton container:
+graph-ranker "bulk inferrence" could benefit from a GPU or TPU
+for GPU, can use NVIDIA's triton docker container:
    nvcr.io/nvidia/tritonserver:26.04-py3
 
    it requires a different model repository structure and a config.pb.txt

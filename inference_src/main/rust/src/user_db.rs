@@ -52,10 +52,10 @@ impl UserDb {
         };
 
         // Parse age (4 bytes, Little Endian)
-        let age = i64::from_le_bytes(chunk[1..5].try_into().unwrap());
+        let age = u32::from_le_bytes(chunk[1..5].try_into().unwrap());
 
         // Parse occupation (4 bytes, Little Endian)
-        let occupation = i64::from_le_bytes(chunk[5..9].try_into().unwrap());
+        let occupation = u32::from_le_bytes(chunk[5..9].try_into().unwrap());
 
         //let timestamp2003: i64 = 1044144000;
         let timestamp2001 : i64 = 956703932;
@@ -64,8 +64,8 @@ impl UserDb {
         Some(Request::new(UserRequest {
             user_id,
             gender,
-            occupation,
-            age,
+            occupation: i64::from(occupation),
+            age : i64::from(age),
             timestamp,
         }))
     }

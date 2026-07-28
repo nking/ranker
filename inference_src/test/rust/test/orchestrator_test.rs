@@ -13,36 +13,35 @@ mod orchestrator_tests {
         // Tell Rust to literally include the code from helper.rs here
         include!("helper.rs");
     }
-    use helper::{get_model_param_json_uri, get_embeddings_uris};
+    use inference_engine::app_config::AppConfig;
     use inference_engine::orchestrator::Orchestrator;
     use inference_engine::pb::recommender_service_server::RecommenderService;
-    use crate::orchestrator_tests::helper::{get_train_val_test_liked_uris, DataSize};
+    use crate::orchestrator_tests::helper::{get_config_json_uri, get_train_val_test_liked_uris, DataSize};
 
     #[tokio::test]
     async fn test_orchestrator() {
-        let query_uri = String::from("http://172.17.0.1:8500");
-        let ranker_uri = String::from("http://172.17.0.1:8510");
-        let ranker_n_local_devices = 1;
-        let top_k : usize = 20;
 
-        let persisted_index_path: std::path::PathBuf = PathBuf::from("./target/movie_embeddings_indexer");
+        let config_path = get_config_json_uri();
+        let config = AppConfig::load_from_file(&config_path).unwrap();
 
-        let (_, movie_embeddings_uri) = get_embeddings_uris();
+        let query_uri = config.query_uri.clone();
+        let ranker_uri = config.ranker_uri.clone();
+        let ranker_n_local_devices = config.ranker_n_local_devices;
+        let top_k = config.top_k;
+        let user_db_path: PathBuf = config.user_db_path.clone();
+        let persisted_index_path : PathBuf = config.persisted_index_path.clone();
+        let params_json_uri : String = config.params_json_path;
 
-        let params_json_uri = get_model_param_json_uri();
+        let movie_embeddings_uri : String = config.movie_embeddings_path;
+
         let file = File::open(params_json_uri).unwrap();
         let reader = BufReader::new(file);
-        // 3. Deserialize JSON directly into a HashMap
-        let dict: HashMap<String, Value> = serde_json::from_reader(reader).unwrap();
-        let max_history = dict.get("max_history")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
-        let num_candidates = dict.get("num_candidates")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
-        let num_catalog_users = dict.get("num_catalog_users")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
+        let dict: HashMap<String, Value> = serde_json::from_reader(reader)
+            .expect("reading json file of model params into a dictionary");
+
+        let max_history = dict.get("max_history").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let num_candidates = dict.get("num_candidates").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let num_catalog_users = dict.get("num_catalog_users").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
         // we want to be able to test against this recommender, so don't include the test uris
         let ratings_map = get_train_val_test_liked_uris(DataSize::Tiny, false);
@@ -65,7 +64,8 @@ mod orchestrator_tests {
             num_catalog_users,
             ranker_n_local_devices,
             top_k,
-            persisted_index_path
+            persisted_index_path,
+            user_db_path
         ).await.unwrap();
 
         let mock_request = UserRequest {

@@ -12,6 +12,7 @@
     "../../../src/test/resources/data/tiny/ratings_val_3-00000-of-00001.parquet",
     "../../../src/test/resources/data/tiny/ratings_val_disliked-00000-of-00001.parquet"
   ],
+  "user_db_path":"../../../src/test/resources/data/users.bin",
   "ranker_n_local_devices": 1,
   "top_k": 20,
   "persisted_index_path": "./target/movie_embeddings_indexer"

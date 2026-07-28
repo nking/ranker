@@ -2,6 +2,7 @@ use std::sync::Arc;
 use object_store::ObjectStore;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::local::LocalFileSystem;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Helper to split URI into ObjectStore backend and ObjectStore Path
 /// # Arguments
@@ -97,12 +98,49 @@ pub fn next_64(x : usize) -> usize {
     64 * (1 + (x / 64))
 }
 
+/// given and array of ids and an array of scores, both of same length, make an ascending
+/// sort of both arrays by the values in scores array.
+///
+/// # Arguments
+///
+/// * `ids`:
+/// * `scores`:
+///
+/// returns: (Vec<i32, Global>, Vec<f32, Global>)
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
 pub fn sort_by_scores(ids : &[i32], scores : &[f32]) -> (Vec<i32>, Vec<f32>) {
     let mut indices: Vec<usize> = (0..ids.len()).collect();
     indices.sort_by(|&a, &b| scores[b].total_cmp(&scores[a]));
     let sorted_ids: Vec<i32> = indices.clone().into_iter().map(|idx| ids[idx]).collect();
     let sorted_scores: Vec<f32> = indices.into_iter().map(|idx| scores[idx]).collect();
     (sorted_ids, sorted_scores)
+}
+
+/// get timestamp in seconds for "now".  timestamp is the number of seconds since
+/// January 1st, 1970 at UTC.
+/// 
+/// returns: u64
+pub fn timestamp_now()-> u64 {
+
+    let now = SystemTime::now();
+
+    // Calculate duration since the epoch
+    let since_the_epoch = now
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+
+    // Get the timestamp in seconds
+    let timestamp_secs = since_the_epoch.as_secs();
+
+    // Get the timestamp in milliseconds
+    //let timestamp_millis = since_the_epoch.as_millis();
+
+    timestamp_secs
 }
 
 

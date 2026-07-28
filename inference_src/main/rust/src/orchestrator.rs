@@ -7,9 +7,10 @@ use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
 use crate::user_history::{build_user_history, UserHistory};
 
 // Now you can use them directly!
-use crate::pb::{UserRequest, RankedMovies, recommender_service_server::RecommenderService};
-use tonic::{Request, Response};
+use crate::pb::{UserRequest, RankedMovies, recommender_service_server::RecommenderService, RankOnlyRequest};
+use tonic::{Request, Response, Status};
 use usearch::ffi::Matches;
+use crate::user_db::UserDb;
 use crate::util::sort_by_scores;
 
 // the number of local_devices attached to the ranker TFS.  e.g. = 2 for the kaggle T4x2 GPUs
@@ -20,6 +21,7 @@ pub struct Orchestrator {
     searcher: ArcSwap<Searcher>, // updatable
     user_history: UserHistory,  // can be made updatable in future
     max_history: usize,
+    user_db: UserDb,
     #[allow(dead_code)]
     num_candidates: usize,
     num_catalog_users: usize,
@@ -41,12 +43,15 @@ impl Orchestrator {
         ranker_n_local_devices : usize,
         top_k : usize,
         persisted_index_path: impl AsRef<Path>,
+        user_db_path : impl AsRef<Path>
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
 
         let initial_searcher = Searcher::new(movie_embeddings_uri, num_candidates, &persisted_index_path)?;
         let query_client = QueryModelClient::new(query_uri).await;
         let ranker_client = RankerModelClient::new(ranker_uri).await;
+
         let user_history: UserHistory = build_user_history(&ratings_uris, 2048).await;
+        let user_db : UserDb = UserDb::new(user_db_path).expect("Failed to initialize UserDb from binary path");
 
         Ok(Self {
             query_model: query_client,
@@ -59,6 +64,7 @@ impl Orchestrator {
             ranker_n_local_devices: ranker_n_local_devices,
             persisted_index_path: persisted_index_path.as_ref().to_path_buf(),
             top_k: top_k,
+            user_db: user_db,
         })
     }
 
@@ -82,6 +88,50 @@ impl Orchestrator {
 
         Ok(())
     }
+
+    async fn make_ranker_request(&self, user_id : i32, timestamp: i64,
+        user_embedding : Vec<f32>, candidate_ids : Vec<i32>) ->Result<Response<RankedMovies>, Status> {
+
+        let user_ids : Vec<i32> = vec![user_id];
+        let timestamps: Vec<i64> = vec![timestamp];
+
+        // finds num_candidates approx nearest neighbors
+        let searcher = self.searcher.load();
+
+        let labels: Vec<i32> = vec![1; candidate_ids.len()];
+
+        let padded_super_graph_arrays : JraphGraph = build_enriched_padded_supergraph(
+            &user_ids,
+            &timestamps,
+            &candidate_ids,
+            &labels,
+            &self.user_history,
+            self.max_history,
+            self.num_catalog_users,
+            searcher.get_num_catalog_movies(),
+            searcher.get_embed_len(),
+            searcher.get_movies_embedding_catalog_ref(),
+            &user_embedding,  self.ranker_n_local_devices);
+
+        // Send to TFS Ranker model
+        let final_response = self.ranker_model.get_candidate_ranks(
+            padded_super_graph_arrays, searcher.get_embed_len()).await;
+
+        match final_response {
+            Ok(ranks) => {
+                let (sorted_ids, sorted_scores) = sort_by_scores(&candidate_ids, &ranks);
+                let r = RankedMovies{
+                    movie_ids: sorted_ids[0..self.top_k].to_vec(),
+                    scores: sorted_scores[0..self.top_k].to_vec(),
+                };
+                Ok(Response::new(r))
+            },
+            Err(e) => {
+                Err(Status::internal(format!("ranking request failed: {}", e)))
+            }
+        }
+    }
+
 }
 
 #[tonic::async_trait]
@@ -100,19 +150,18 @@ impl RecommenderService for Orchestrator {
     /// ```
     ///
     /// ```
-    async fn predict(&self, req: Request<UserRequest>) ->Result<Response<RankedMovies>, tonic::Status> {
+    async fn predict(&self, req: Request<UserRequest>) ->Result<Response<RankedMovies>, Status> {
 
-        let inner_req = req.into_inner();
+        let user_req = req.into_inner();
 
         // Get user_embedding from TFS Query model
-        let user_embedding = self.query_model.get_user_embedding(&inner_req).await
-            .map_err(|e| tonic::Status::internal(format!("user embedding: {}", e)))?;
-        let user_embeddings = user_embedding;
+        let user_embedding = self.query_model.get_user_embedding(&user_req).await
+            .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
 
         // finds num_candidates approx nearest neighbors
         let searcher = self.searcher.load();
-        let nearest : Matches = searcher.search(&user_embeddings)
-            .map_err(|e| tonic::Status::internal(format!("Vector search failed: {}", e)))?;
+        let nearest : Matches = searcher.search(&user_embedding)
+            .map_err(|e| Status::internal(format!("Vector search failed: {}", e)))?;
 
         // candidate_ids are in "reference frame" of 0 to num_catalog_movies  - 1, so translate to
         // reference frame num_catalog_users + 1 to num_catalog_users + 1 + num_catalog_movies
@@ -121,40 +170,33 @@ impl RecommenderService for Orchestrator {
             .map(|x| x as i32 + 1 + self.num_catalog_users as i32)
             .collect();
 
-        let labels: Vec<i32> = vec![1; candidate_ids.len()];
+        self.make_ranker_request(user_req.user_id as i32, user_req.timestamp,
+            user_embedding, candidate_ids).await
 
-        let user_ids : Vec<i32> = vec![inner_req.user_id as i32];
-        let timestamps = vec![inner_req.timestamp];
+    }
 
-        let padded_super_graph_arrays : JraphGraph = build_enriched_padded_supergraph(
-            &user_ids,
-            &timestamps,
-            &candidate_ids,
-            &labels,
-            &self.user_history,
-            self.max_history,
-            self.num_catalog_users,
-            searcher.get_num_catalog_movies(),
-            searcher.get_embed_len(),
-            searcher.get_movies_embedding_catalog_ref(),
-            &user_embeddings,  self.ranker_n_local_devices);
+    async fn rank_only(&self, request: Request<RankOnlyRequest>) -> Result<Response<RankedMovies>, Status> {
 
-        // Send to TFS Ranker model
-        let final_response = self.ranker_model.get_candidate_ranks(
-            padded_super_graph_arrays, searcher.get_embed_len()).await;
+        /*
+        RankOnlyRequest has:
+            pub user_id: i32,
+            pub timestamp: i64,
+            pub candidate_ids: ::prost::alloc::vec::Vec<i32>,
+         */
+        let rank_req = request.into_inner();
 
-        match final_response {
-            Ok(ranks) => {
-                let (sorted_ids, sorted_scores) = sort_by_scores(&candidate_ids, &ranks);
-                let r = RankedMovies{
-                    movie_ids: sorted_ids[0..self.top_k].to_vec(),
-                    scores: sorted_scores[0..self.top_k].to_vec(),
-                };
-                Ok(Response::new(r))
-            },
-            Err(e) => {
-                Err(tonic::Status::internal(format!("ranking request failed: {}", e)))
-            }
-        }
+        // populate a UserRequest with age, gender and occupation.  The UserRequest is needed to get a user_embedding
+        let user_req_opt = self.user_db.get_request(rank_req.user_id as i64);
+        assert!(user_req_opt.is_some(), "User ID {} should exist in database", rank_req.user_id);
+        let tonic_req = user_req_opt.unwrap();
+        // Extract the inner UserRequest from tonic::Request using .get_ref()
+        let user_req = tonic_req.get_ref();
+
+        let user_embedding = self.query_model.get_user_embedding(&user_req).await
+            .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
+
+        self.make_ranker_request(rank_req.user_id, rank_req.timestamp,
+            user_embedding, rank_req.candidate_ids).await
+
     }
 }

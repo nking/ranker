@@ -38,11 +38,11 @@ impl QueryModelClient {
     pub async fn get_user_embedding(&self, request: &UserRequest) -> Result<Vec<f32>, Box<dyn Error>> {
         let predict_req: PredictRequest = build_query_model_inputs(request);
 
-        println!(
+        /*println!(
             "DEBUG: Sending request for model: {}",
             predict_req.model_spec.as_ref().unwrap().name
         );
-        println!("Sending gRPC request to TF Serving for Query Embedding Model...");
+        println!("Sending gRPC request to TF Serving for Query Embedding Model...");*/
 
         // Send the request
         let response = self.client.clone().predict(predict_req).await?;
@@ -50,7 +50,7 @@ impl QueryModelClient {
         let inner_response = response.into_inner();
 
         //debug:
-        println!("serving Response for query model: {:#?}", inner_response);
+        //println!("serving Response for query model: {:#?}", inner_response);
 
         if let Some((_key, tensor_proto)) = inner_response.outputs.into_iter().next() {
 
@@ -90,14 +90,14 @@ impl RankerModelClient {
 
         let predict_req : PredictRequest = build_graph_ranker_proto_inputs(padded_super_graph, embed_len);
 
-        println!("Sending gRPC request to TF Serving for GraphRanker...");
+        //println!("Sending gRPC request to TF Serving for GraphRanker...");
 
         let response = self.client.clone().predict(predict_req).await?;
 
         let inner_response = response.into_inner();
 
         //debug
-        println!("Triton Response for ranker model: {:#?}", inner_response);
+        //println!("Triton Response for ranker model: {:#?}", inner_response);
 
         // 32-bit floats for the scores
         if let Some((_key, tensor_proto)) = inner_response.outputs.into_iter().next() {
@@ -169,8 +169,8 @@ pub fn build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len
     let max_nodes = padded_super_graph.node_ids.len() as i64;
     //let max_graphs = padded_super_graph.n_edge.len() as i64;
 
-    println!("max_nodes: {}, max_edges: {}, max_graphs: {}", max_nodes,
-        padded_super_graph.senders.len() as i64, padded_super_graph.n_edge.len() as i64);
+    //println!("max_nodes: {}, max_edges: {}, max_graphs: {}", max_nodes,
+    //    padded_super_graph.senders.len() as i64, padded_super_graph.n_edge.len() as i64);
 
     let mut inputs = HashMap::new();
 

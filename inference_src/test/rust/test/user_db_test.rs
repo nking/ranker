@@ -6,21 +6,17 @@ mod user_db_tests {
         include!("helper.rs");
     }
 
-    use std::path::PathBuf;
-    use helper::{get_project_dir};
-
+    use inference_engine::app_config::AppConfig;
     use inference_engine::user_db::{UserDb};
 
     #[tokio::test]
     pub async fn test_user_db_load() {
 
-        let mut path : Option<PathBuf> = get_project_dir();
-        if let Some(ref mut p) = path {
-            p.push("src/test/resources/data/users.bin");
-        }
+        let config_path = "./config/default.json";
+        let config = AppConfig::load_from_file(config_path).unwrap();
+        let user_db_path = config.user_db_path;
 
-        let user_db : UserDb = UserDb::new(path.unwrap()).unwrap();
-
+        let user_db : UserDb = UserDb::new(user_db_path).unwrap();
 
         //UserID::Gender::Age::Occupation::Zip-code
         //1::F::1::10::48067

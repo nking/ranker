@@ -19,7 +19,15 @@ message RankedMovies {
   repeated float scores = 2;
 }
 
+message RankOnlyRequest {
+  // Include fields needed to bypass the searcher, such as:
+  int32 user_id = 1;
+  int64 timestamp = 2;
+  repeated int32 candidate_ids = 3;
+}
+
 // Tonic will generate the RecommenderService trait from this
 service RecommenderService {
   rpc Predict (UserRequest) returns (RankedMovies);
+  rpc RankOnly(RankOnlyRequest) returns (RankedMovies); // New Endpoint
 }

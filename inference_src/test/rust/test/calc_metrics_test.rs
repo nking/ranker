@@ -1,5 +1,30 @@
 #[cfg(test)]
 mod calc_metrics_tests {
+    use tokio::sync::oneshot;
+    use tokio::task::JoinHandle;
+    use std::error::Error;
+
+    struct TestServerGuard {
+        tx_shutdown: Option<oneshot::Sender<()>>,
+        server_handle: Option<JoinHandle<()>>,
+    }
+
+    impl Drop for TestServerGuard {
+        fn drop(&mut self) {
+            // Trigger the shutdown signal
+            if let Some(tx) = self.tx_shutdown.take() {
+                let _ = tx.send(());
+            }
+
+            // Safely block and join the background server thread using block_in_place
+            if let Some(handle) = self.server_handle.take() {
+                let _ = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(handle)
+                });
+            }
+        }
+    }
+
     mod helper {
         // Tell Rust to literally include the code from helper.rs here
         include!("helper.rs");
@@ -11,13 +36,15 @@ mod calc_metrics_tests {
     use std::collections::HashMap;
     use std::io::BufReader;
     use serde_json::Value;
-    use inference_engine::calc_metrics::{Evaluator};
+    use inference_engine::app_config::AppConfig;
+    use inference_engine::app_runner::AppRunner;
+    use inference_engine::calc_metrics::{Evaluator, MetricStats};
 
-    #[test]
-    pub fn test_calc_metrics() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_calc_metrics() {
 
-        let mut file_patterns : Option<PathBuf> = get_project_dir();
-        if let Some(ref mut p) = file_patterns {
+        let mut test_file_patterns: Option<PathBuf> = get_project_dir();
+        if let Some(ref mut p) = test_file_patterns {
             p.push("src/test/resources/data/ratings_test*.parquet");
         }
 
@@ -35,24 +62,70 @@ mod calc_metrics_tests {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
 
-        let top_k = 20;
-        let n_draws = 3;
+        let config_path = "./config/default.json";
+        let config = AppConfig::load_from_file(config_path).unwrap();
 
-        let evaluator = Evaluator::new(top_k, num_candidates, n_draws);
+        let top_k = config.top_k;
+        let n_draws = 10;
 
-        match evaluator.evaluate(file_patterns.unwrap().to_str().to_owned().unwrap()) {
-            Ok(stats) => {
-                println!("=== Evaluation Results (K=20) ===");
-                println!("{:<12} | {:<8} | {:<8} | {:<8} | {:<8}", "Metric", "Mean", "Median", "MAD", "MAD-Std");
-                println!("{:-<56}", "");
-                println!("{:<12} | {:.4}   | {:.4}   | {:.4}   | {:.4}", "NDCG", stats.mean.ndcg, stats.median.ndcg, stats.mad.ndcg, stats.mad_std.ndcg);
-                println!("{:<12} | {:.4}   | {:.4}   | {:.4}   | {:.4}", "MRR", stats.mean.mrr, stats.median.mrr, stats.mad.mrr, stats.mad_std.mrr);
-                println!("{:<12} | {:.4}   | {:.4}   | {:.4}   | {:.4}", "Recall", stats.mean.recall, stats.median.recall, stats.mad.recall, stats.mad_std.recall);
-                println!("{:<12} | {:.4}   | {:.4}   | {:.4}   | {:.4}", "Precision", stats.mean.precision, stats.median.precision, stats.mad.precision, stats.mad_std.precision);
-                println!("{:<12} | {:.4}   | {:.4}   | {:.4}   | {:.4}", "F1-Score", stats.mean.f1, stats.median.f1, stats.mad.f1, stats.mad_std.f1);
+        //let user_db_path = &config.user_db_path;
+
+        let runner = AppRunner::new(config.to_owned());
+
+        let (tx_shutdown, rx_shutdown) = oneshot::channel::<()>();
+        let (tx_addr, rx_addr) = oneshot::channel::<std::net::SocketAddr>();
+        // Spawn the server in a background Tokio task
+        let server_handle = tokio::spawn(async move {
+            let shutdown_future = async {
+                rx_shutdown.await.ok();
+            };
+            runner.run(shutdown_future, Some(tx_addr)).await.expect("Server crashed");
+        });
+        let addr = rx_addr.await.expect("Failed to receive server address");
+        // Initialize the RAII Guard.
+        // It will automatically trigger shutdown and join if the test finishes or panics.
+        let _server_guard = TestServerGuard {
+            tx_shutdown: Some(tx_shutdown),
+            server_handle: Some(server_handle),
+        };
+
+        let endpoint = format!("http://{}", addr);
+
+        let evaluator = Evaluator::new(top_k, num_candidates, n_draws,
+            endpoint).await;
+
+        match evaluator {
+            Ok(evaluator) => {
+                let results : Result<MetricStats, Box<dyn Error>>
+                    = evaluator.evaluate(test_file_patterns.unwrap().to_str().unwrap()).await;
+                match results {
+                    Ok(stats) => {
+                        println!("=== Evaluation Results (K=20) ===");
+                        println!("{:<12} | {:<8} | {:<8} | {:<8} | {:<8}", "Metric", "Mean", "Median", "MAD", "MAD-Std");
+                        println!("{:-<56}", "");
+                        println!("{:<12} | {:.4}   | {:.4}   | {:.4}   | {:.4}", "NDCG", stats.mean.ndcg, stats.median.ndcg, stats.mad.ndcg, stats.mad_std.ndcg);
+                        println!("{:<12} | {:.4}   | {:.4}   | {:.4}   | {:.4}", "MRR", stats.mean.mrr, stats.median.mrr, stats.mad.mrr, stats.mad_std.mrr);
+                        println!("{:<12} | {:.4}   | {:.4}   | {:.4}   | {:.4}", "Recall", stats.mean.recall, stats.median.recall, stats.mad.recall, stats.mad_std.recall);
+                        println!("{:<12} | {:.4}   | {:.4}   | {:.4}   | {:.4}", "Precision", stats.mean.precision, stats.median.precision, stats.mad.precision, stats.mad_std.precision);
+                        println!("{:<12} | {:.4}   | {:.4}   | {:.4}   | {:.4}", "F1-Score", stats.mean.f1, stats.median.f1, stats.mad.f1, stats.mad_std.f1);
+                    }
+                    Err(e) => eprintln!("Evaluation Failed: {}", e),
+                }
             }
-            Err(e) => eprintln!("Evaluation Failed: {}", e),
+            Err(e) => eprintln!("Evaluator construction Failed: {}", e),
         }
 
+        // server is shutdown by the guard when this method is out of scope
+
+        /*
+        == Evaluation Results (K=20) ===
+        Metric       | Mean     | Median   | MAD      | MAD-Std
+        --------------------------------------------------------
+        NDCG         | 0.6857   | 0.6912   | 0.1242   | 0.1842
+        MRR          | 0.8465   | 0.9500   | 0.0500   | 0.0741
+        Recall       | 0.4768   | 0.4666   | 0.0457   | 0.0678
+        Precision    | 0.6459   | 0.6600   | 0.1400   | 0.2076
+        F1-Score     | 0.5273   | 0.5485   | 0.0463   | 0.0687
+        */
     }
 }

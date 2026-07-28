@@ -5,11 +5,17 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use std::collections::HashMap;
 use std::fs::File;
+use util::timestamp_now;
+use tonic::Status;
+use crate::pb::RankOnlyRequest;
+use crate::util;
+use crate::pb::recommender_service_client::RecommenderServiceClient;
+use tonic::transport::Channel;
 
 #[derive(Debug, Clone)]
 pub struct Interaction {
-    pub movie_id: usize,
-    pub rating: usize,
+    pub movie_id: i32,
+    pub rating: i32,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -33,17 +39,25 @@ pub struct Evaluator {
     pub top_k: usize,
     pub num_candidates: usize,
     pub n_draws: usize,
-    pub rating_threshold: usize,
+    pub rating_threshold: i32,
+    pub server_endpoint: String,
+    // note that the client is shutdown by its own Drop trait when Evaluator goes out of scope
+    client: RecommenderServiceClient<Channel>,
 }
 
 impl Evaluator {
-    pub fn new(top_k: usize, num_candidates: usize, n_draws: usize) -> Self {
-        Self {
+    pub async fn new(top_k: usize, num_candidates: usize, n_draws: usize, server_endpoint : impl Into<String>)
+        -> Result<Self, tonic::transport::Error> {
+        let endpoint = server_endpoint.into();
+        let client = RecommenderServiceClient::connect(endpoint.clone()).await?;
+        Ok(Self {
             top_k,
             num_candidates,
             n_draws,
             rating_threshold: 3,
-        }
+            server_endpoint: endpoint,
+            client: client
+        })
     }
 
     /// -----------------------------------------------------------------------
@@ -52,16 +66,35 @@ impl Evaluator {
     /// You will fill this out with your gRPC or JSON-RPC implementation.
     /// It takes a user_id and a list of candidate movie_ids, and returns the
     /// top K movie_ids sorted descending by score.
-    fn get_top_k_scored_candidates(&self, _user_id: usize, candidate_ids: &[usize]) -> Vec<usize> {
-        // TODO: Implement gRPC/JSON-RPC request here.
-        // Simulated response for now: just return the first K items.
-        candidate_ids.iter().take(self.top_k).copied().collect()
+    pub async fn get_top_k_scored_candidates(&self, user_id: i32, candidate_ids: Vec<i32>) -> Result<Vec<i32>, Status> {
+
+        /*
+        form a RankOnlyRequest:
+            pub user_id: i32,
+            pub timestamp: i64,
+            pub candidate_ids: ::prost::alloc::vec::Vec<i32>,
+         */
+        let ts = timestamp_now();
+        let req = RankOnlyRequest {
+            user_id : user_id, timestamp: ts as i64, candidate_ids: candidate_ids
+        };
+
+        let mut active_client = self.client.clone();
+
+        let grpc_request = tonic::Request::new(req);
+
+        let response = active_client
+            .rank_only(grpc_request)
+            .await
+            .map_err(|err| Status::internal(format!("ranking request failed: {}", err)))?;
+
+        Ok(response.into_inner().movie_ids)
     }
 
     /// Reads all parquet files matching the pattern using the native parquet crate
-    fn load_data(&self, file_pattern: &str) -> Result<HashMap<usize, Vec<Interaction>>, Box<dyn std::error::Error>> {
+    fn load_data(&self, file_pattern: &str) -> Result<HashMap<i32, Vec<Interaction>>, Box<dyn std::error::Error>> {
 
-        let mut ratings_history: HashMap<usize, Vec<Interaction>> = HashMap::new();
+        let mut ratings_history: HashMap<i32, Vec<Interaction>> = HashMap::new();
 
         for entry in glob(file_pattern)? {
             let path = entry?;
@@ -74,9 +107,9 @@ impl Evaluator {
 
                 // Assuming schema order: user_id (0), movie_id (1), rating (2), timestamp (3)
                 // Parquet usually maps large integers to INT64 (`get_long`)
-                let uid = row.get_int(0)? as usize;
-                let mid = row.get_int(1)? as usize;
-                let rat = row.get_int(2)? as usize;
+                let uid = row.get_int(0)? as i32;
+                let mid = row.get_int(1)? as i32;
+                let rat = row.get_int(2)? as i32;
                 //let ts = row.get_long(3)? as usize;
 
                 ratings_history
@@ -128,12 +161,15 @@ impl Evaluator {
     }
 
     /// Runs the Monte Carlo evaluation process
-    pub fn evaluate(&self, file_pattern: &str) -> Result<MetricStats, Box<dyn std::error::Error>> {
+    pub async fn evaluate(&self, file_pattern: &str) -> Result<MetricStats, Box<dyn std::error::Error>> {
         let ratings_history = self.load_data(file_pattern)?;
         let mut rng = thread_rng();
-        let mut user_averaged_metrics: Vec<Metrics> = Vec::with_capacity(ratings_history.len());
 
-        for (user_id, history) in ratings_history.into_iter() {
+        let total_count = ratings_history.len();
+        let mut user_averaged_metrics: Vec<Metrics> = Vec::with_capacity(total_count);
+
+        for  (user_id, history) in ratings_history.into_iter() {
+
             if history.len() < self.num_candidates {
                 continue;
             }
@@ -157,8 +193,9 @@ impl Evaluator {
                 }
 
                 //  Extract IDs and pass to the Inference method
-                let candidate_ids: Vec<usize> = candidates.iter().map(|c| c.movie_id).collect();
-                let ranked_movie_ids = self.get_top_k_scored_candidates(user_id, &candidate_ids);
+                let candidate_ids: Vec<i32> = candidates.iter().map(|c| c.movie_id).collect();
+
+                let ranked_movie_ids = self.get_top_k_scored_candidates(user_id, candidate_ids).await?;
 
                 //TODO: this could be improved by making a candidates hashmap for the search ("find")
                 // Map the returned IDs back to the ground truth Interactions
