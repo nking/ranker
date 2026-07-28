@@ -18,6 +18,12 @@ https://github.com/nking/retrieval.git
 part 3 can be found at:
 https://github.com/nking/reranker.git
 
+A Kaggle notebook has been made to train this project's models 
+on Kaggle T4x2 GPUs:
+    https://www.kaggle.com/code/nicholeasuniquename/ranker-cross-encoder-w-gatv2/
+and the saved checkcpoint and exported saved model are present in
+this project's src/test/resource branch
+
 --------------------------------------------------
 some details about the model
 
