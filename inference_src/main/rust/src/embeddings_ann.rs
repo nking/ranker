@@ -93,18 +93,19 @@ impl Searcher {
         Ok(index)
     }
 
-    pub fn search(&self, query: &[f32]) -> Result<Matches, Box<dyn std::error::Error>> {
-        let r = self.indexer.search(&query, self.num_candidates)?;
+    pub fn search(&self, query: &[f32], k : Option<usize>) -> Result<Matches, Box<dyn std::error::Error>> {
+        let n = k.unwrap_or(self.num_candidates);
+        let r = self.indexer.search(&query, n)?;
         Ok(r)
     }
 
-    pub fn search_batch(&self, query: &[f32]) -> Result<Vec<Matches>, Box<dyn std::error::Error>> {
+    pub fn search_batch(&self, query: &[f32], k : Option<usize>) -> Result<Vec<Matches>, Box<dyn std::error::Error>> {
         let num_queries = query.len() / self.embed_len;
         let mut results: Vec<Matches> = Vec::with_capacity(num_queries);
-
+        let n = k.unwrap_or(self.num_candidates);
         for i in 0..num_queries {
             let q = &query[i*self.embed_len .. (i+1)*self.embed_len];
-            let r = self.indexer.search(&q, self.num_candidates)?;
+            let r = self.indexer.search(&q, n)?;
             results.push(r);
         }
         Ok(results)

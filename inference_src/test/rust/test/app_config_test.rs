@@ -22,7 +22,8 @@ mod app_config_tests {
             "ratings_uris": ["file1.csv", "file2.csv"],
             "ranker_n_local_devices": 2,
             "top_k": 50,
-            "persisted_index_path": "./index_dir"
+            "persisted_index_path": "./index_dir",
+            "user_db_path" : "./user_db.bin"
         }"#;
 
         // Create a temporary file to test the load function

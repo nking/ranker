@@ -41,7 +41,7 @@ mod calc_metrics_tests {
     use inference_engine::calc_metrics::{Evaluator, MetricStats};
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_calc_metrics() {
+    pub async fn test_calc_test_metrics() {
 
         let mut test_file_patterns: Option<PathBuf> = get_project_dir();
         if let Some(ref mut p) = test_file_patterns {
@@ -127,5 +127,22 @@ mod calc_metrics_tests {
         Precision    | 0.6459   | 0.6600   | 0.1400   | 0.2076
         F1-Score     | 0.5273   | 0.5485   | 0.0463   | 0.0687
         */
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_polarized_metrics() {
+        /*
+        given a file of :
+        user_id,total_pos_ratings,count_Action,count_Adventure,count_Animation,count_Children,
+        count_Comedy,count_Crime,count_Documentary,count_Drama,count_Fantasy,count_Film-Noir,
+        count_Horror,count_Musical,count_Mystery,count_Romance,count_Sci-Fi,count_Thriller,
+        count_War,count_Western,ratio_Action,ratio_Adventure,ratio_Animation,ratio_Children,
+        ratio_Comedy,ratio_Crime,ratio_Documentary,ratio_Drama,ratio_Fantasy,ratio_Film-Noir,
+        ratio_Horror,ratio_Musical,ratio_Mystery,ratio_Romance,ratio_Sci-Fi,ratio_Thriller,
+        ratio_War,ratio_Western,max_genre_ratio,max_genre_count
+
+        get user_ids, make requests for recommendations
+        then
+         */
     }
 }

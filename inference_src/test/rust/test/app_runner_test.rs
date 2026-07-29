@@ -40,7 +40,7 @@ mod app_runner_tests {
         });
 
         // Synchronization Wait:
-        let actual_addr = rx_addr.await.expect("Failed to receive bound address from server");
+        let _actual_addr = rx_addr.await.expect("Failed to receive bound address from server");
 
         // Fire a real gRPC request from the test (client) task
         // Note: Because we used port 0, we'd ideally extract the bound port.

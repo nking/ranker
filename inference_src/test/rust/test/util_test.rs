@@ -2,7 +2,7 @@
 mod util_tests {
     use std::collections::HashSet;
     //use std::error::Error;
-    use inference_engine::util::{calc_number_jax_graph_components, sort_by_scores};
+    use inference_engine::util::{calc_number_jax_graph_components, ceiling_search, sort_by_scores};
     //use super::*;
     mod helper {
         // Tell Rust to literally include the code from helper.rs here
@@ -52,5 +52,17 @@ mod util_tests {
         assert_eq!(max_nodes, 128);
         assert_eq!(max_edges, 128);
         assert_eq!(max_graphs, 3);
+    }
+
+
+    #[test]
+    pub fn test_ceiling_search() {
+        let ids: Vec<i64> = vec![1, 2, 3, 3, 4];
+        let srchs : Vec<i64> = vec![3, 4, 9, 0];
+        let expected : Vec<usize> = vec![3, 4, 5, 0];
+        for i in 0..srchs.len() {
+            let idx = ceiling_search(&ids, srchs[i]);
+            assert_eq!(expected[i], idx);
+        }
     }
 }

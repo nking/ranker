@@ -42,7 +42,7 @@ mod embedding_ann_tests {
             0.139777973, 0.0450548381, -0.294477165, 0.108183414
         ];
 
-        let results : Result<Matches, Box<dyn std::error::Error>> = search.search(&query_embedding);
+        let results : Result<Matches, Box<dyn std::error::Error>> = search.search(&query_embedding, None);
 
         let m : Matches = results.unwrap();
         let candidate_ids = &m.keys;
@@ -84,7 +84,8 @@ mod embedding_ann_tests {
             -0.11216034, -0.650176942, -0.309607685, 0.14945665
         ];
 
-        let results : Result<Vec<Matches>, Box<dyn std::error::Error>> = search.search_batch(&query_embedding);
+        let results : Result<Vec<Matches>, Box<dyn std::error::Error>>
+            = search.search_batch(&query_embedding, None);
 
         let m : Vec<Matches> = results.unwrap();
         for i in 0..m.len() {

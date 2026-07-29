@@ -91,6 +91,41 @@ impl UserHistory {
 
         (ret_movie_ids, ret_ratings)
     }
+
+    pub fn get_history_count_before_timestamp(
+        &self,
+        user_ids: &[i32],
+        timestamps: &[i64],
+    ) -> Vec<usize> {
+
+        let n_requests = user_ids.len();
+
+        // Pre-allocate the output arrays filled entirely with 0's
+        let mut ret_counts : Vec<usize> = vec![0; n_requests];
+
+        // Iterate through each requested user and their target timestamp
+        for (i, (&target_uid, &target_ts)) in user_ids.iter().zip(timestamps.iter()).enumerate() {
+
+            // np.searchsorted -> Rust's native binary_search
+            if let Ok(user_idx) = self.user_ids.binary_search(&target_uid) {
+
+                // Calculate where this specific user's data starts in our flattened arrays
+                let start_idx = user_idx * self.max_history;
+                let end_idx = start_idx + self.max_history;
+
+                // Create lightweight slice (view) into the data
+                let user_timestamps = &self.timestamps[start_idx..end_idx];
+
+                // rightmost index where user_timestamps <= target_ts
+
+                let count = util::ceiling_search(user_timestamps, target_ts);
+
+                ret_counts[i] = count + 1;
+            }
+        }
+
+        ret_counts
+    }
     
 }
 

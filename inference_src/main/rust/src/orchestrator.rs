@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use arc_swap::ArcSwap;
@@ -158,17 +159,45 @@ impl RecommenderService for Orchestrator {
         let user_embedding = self.query_model.get_user_embedding(&user_req).await
             .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
 
+        let user_ids : Vec<i32> = vec![user_req.user_id as i32];
+        let timestamps: Vec<i64> = vec![user_req.timestamp];
+        let n_hist = self.user_history.get_history_count_before_timestamp(
+            &user_ids, &timestamps
+        );
+        // choose more than num_candidates unseen movies to rank and take only the top_k from
+        let n_srch = Some(self.num_candidates + n_hist[0]);
+
         // finds num_candidates approx nearest neighbors
         let searcher = self.searcher.load();
-        let nearest : Matches = searcher.search(&user_embedding)
+        let nearest : Matches = searcher.search(&user_embedding, n_srch)
             .map_err(|e| Status::internal(format!("Vector search failed: {}", e)))?;
 
         // candidate_ids are in "reference frame" of 0 to num_catalog_movies  - 1, so translate to
         // reference frame num_catalog_users + 1 to num_catalog_users + 1 + num_catalog_movies
-        let candidate_ids : Vec<i32> = nearest.keys
+        let mut candidate_ids : Vec<i32> = nearest.keys
             .into_iter()
             .map(|x| x as i32 + 1 + self.num_catalog_users as i32)
             .collect();
+
+        // filter to keep only unseen movies
+
+        let (history, _ratings) = self.user_history.get_history_before_timestamp(
+            &user_ids, &timestamps, n_hist[0]
+        );
+        let watched_set: HashSet<i32> = history.iter().copied().collect();
+
+        candidate_ids.retain(|id| !watched_set.contains(id));
+
+        let n_backfill = self.num_candidates.saturating_sub(candidate_ids.len());
+        if n_backfill > 0 {
+            candidate_ids.extend(
+                history.iter()
+                    .take(n_backfill)
+                    .copied() // or .cloned() depending on the type inside history
+            );
+        } else {
+            candidate_ids.truncate(self.num_candidates);
+        }
 
         self.make_ranker_request(user_req.user_id as i32, user_req.timestamp,
             user_embedding, candidate_ids).await

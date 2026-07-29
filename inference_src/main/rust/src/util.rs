@@ -123,7 +123,7 @@ pub fn sort_by_scores(ids : &[i32], scores : &[f32]) -> (Vec<i32>, Vec<f32>) {
 
 /// get timestamp in seconds for "now".  timestamp is the number of seconds since
 /// January 1st, 1970 at UTC.
-/// 
+///
 /// returns: u64
 pub fn timestamp_now()-> u64 {
 
@@ -141,6 +141,38 @@ pub fn timestamp_now()-> u64 {
     //let timestamp_millis = since_the_epoch.as_millis();
 
     timestamp_secs
+}
+
+/// find the largest index in a sorted array arr where arr[index] <= srch
+///
+/// # Arguments
+///
+/// * `arr`: an array whose values are sorted ascending
+/// * `srch`: the value to search for the largest index in arr for which the value <= srch
+///
+/// returns: usize
+///
+/// # Examples
+///
+///       arr       = [1, 2, 3, 3, 4]
+//          indexes =  0  1  2  3  4
+//
+//          ceil of srch=3 is index 3
+//          ceil of srch=4 is index 4
+//          ceil of srch=9 is index 5
+//          ceil of srch=0 is index 0
+///
+pub fn ceiling_search(arr: &[i64], srch: i64) -> usize {
+    // Find the first index where the element is STRICTLY GREATER than `srch`.
+    let p = arr.partition_point(|&x| x <= srch);
+
+    // If the element just before this index equals our target,
+    //    return that index (the last occurrence). Otherwise, return the insertion point.
+    if p > 0 && arr[p - 1] == srch {
+        p - 1
+    } else {
+        p
+    }
 }
 
 
