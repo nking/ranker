@@ -1,5 +1,5 @@
 
-best objective NDCG@20: 0.45
+best HPO objective NDCG@20: 0.45
 
 {'top_k': 20, 'learning_rate': 0.00123, 'weight_decay': 0.0015, 'out_dim': 32,
 'hidden_dim': 64, 'num_layers': 2, 'num_heads': 4, 'edge_embed_dim': 16,
@@ -14,6 +14,27 @@ test_mrr_20': 0.3204557201210058,
 
 see file opt_gpu_notes.txt for the gradual improvements in reducing runtime.
 the file is a work in progress.
+
+Then final test metrics performed by sampling randomly num_candidates for each
+user in the test dataset of all ratings.  n_draws are done for each user.
+The statics for NDCG@20, MRR@20, RECALL@20, PRECISION@20, and F1SCORE@20 
+were calculated and then group stats calculated:
+== Evaluation Results (K=20) ===
+Metric       | Mean     | Median   | MAD      | MAD-Std 
+--------------------------------------------------------
+NDCG         | 0.6857   | 0.6912   | 0.1242   | 0.1842
+MRR          | 0.8465   | 0.9500   | 0.0500   | 0.0741
+Recall       | 0.4768   | 0.4666   | 0.0457   | 0.0678
+Precision    | 0.6459   | 0.6600   | 0.1400   | 0.2076
+F1-Score     | 0.5273   | 0.5485   | 0.0463   | 0.0687
+
+Additionally, highly polarized viewers were chosen who primarily loved
+movies from one genre and had significant number of ratings in both
+(train+val) and test.
+  recommendations for those users were made, excluding already seen,
+  and then the results were examined to see whether they were reasonable:
+  <in progress ...>
+
 
 --------
 Note that in training a batch size of 256, and choosing k=20 out of them and
