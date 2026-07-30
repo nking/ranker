@@ -51,6 +51,10 @@ oneshot = "0.2.1"
 [build-dependencies]
 tonic-prost-build = "0.14.6"
 
+[dev-dependencies]
+# Test-only dependencies go here
+polars = { version = "0.54.4", features = ["lazy", "strings", "parquet", "polars-lazy", "is_in"] }
+
 # Force Cargo to look outside its project root for the test file
 [[test]]
 name = "integration_tests"
@@ -94,9 +98,13 @@ name = "app_runner_tests"
 path="../../test/rust/test/app_runner_test.rs"
 
 [[test]]
+name = "user_db_tests"
+path="../../test/rust/test/user_db_test.rs"
+
+[[test]]
 name = "calc_metrics_tests"
 path="../../test/rust/test/calc_metrics_test.rs"
 
 [[test]]
-name = "user_db_tests"
-path="../../test/rust/test/user_db_test.rs"
+name = "pairwise_pref_tests"
+path="../../test/rust/test/pairwise_pref_test.rs"

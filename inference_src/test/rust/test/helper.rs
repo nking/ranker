@@ -103,7 +103,7 @@ pub fn get_recommended_movies_uris() -> (String, String) {
 #[allow(dead_code)]
 pub fn get_movies_uri() -> String {
     let movies_uri = get_project_dir()
-        .map(|p| p.join("src/test/resources/data/movies-00000-of-00001.parquet"))
+        .map(|p| p.join("src/test/resources/data/movies.parquet"))
         .map(|p| p.to_string_lossy().into_owned())
         .expect("Project directory not found");
 

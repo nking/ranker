@@ -93,6 +93,16 @@ impl Orchestrator {
     async fn make_ranker_request(&self, user_id : i32, timestamp: i64,
         user_embedding : Vec<f32>, candidate_ids : Vec<i32>) ->Result<Response<RankedMovies>, Status> {
 
+        if candidate_ids.len() != self.num_candidates {
+            println!(
+                "[Warning] Expected candidate_ids length to be {}, but got {}",
+                self.num_candidates,
+                candidate_ids.len()
+            );
+        }
+
+        println!("make_ranker_request: CANDIDATE_IDS {:?}", candidate_ids.clone());
+
         let user_ids : Vec<i32> = vec![user_id];
         let timestamps: Vec<i64> = vec![timestamp];
 
@@ -114,12 +124,19 @@ impl Orchestrator {
             searcher.get_movies_embedding_catalog_ref(),
             &user_embedding,  self.ranker_n_local_devices);
 
+        println!("make_ranker_request: padded_super_graph_arrays.node_ids {:?}", padded_super_graph_arrays.node_ids.clone());
+
         // Send to TFS Ranker model
         let final_response = self.ranker_model.get_candidate_ranks(
             padded_super_graph_arrays, searcher.get_embed_len()).await;
 
         match final_response {
             Ok(ranks) => {
+
+                println!("make_ranker_request: candidate_ids iin response {:?}", candidate_ids.clone());
+
+                //TODO: editing  to return all candidates and make 2 client calls one for returning all and one for returning the top_k and for the later use sort and truncate
+
                 let (sorted_ids, sorted_scores) = sort_by_scores(&candidate_ids, &ranks);
                 let r = RankedMovies{
                     movie_ids: sorted_ids[0..self.top_k].to_vec(),

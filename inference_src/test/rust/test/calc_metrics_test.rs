@@ -33,7 +33,7 @@ mod calc_metrics_tests {
     use helper::{get_project_dir, get_model_param_json_uri};
     use std::path::PathBuf;
     use std::fs::File;
-    use std::collections::HashMap;
+    use std::collections::{HashMap};
     use std::io::BufReader;
     use serde_json::Value;
     use inference_engine::app_config::AppConfig;
@@ -43,10 +43,7 @@ mod calc_metrics_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_calc_test_metrics() {
 
-        let mut test_file_patterns: Option<PathBuf> = get_project_dir();
-        if let Some(ref mut p) = test_file_patterns {
-            p.push("src/test/resources/data/ratings_test*.parquet");
-        }
+        // ======= setup server ======================
 
         let params_json_uri = get_model_param_json_uri();
         let file = File::open(params_json_uri).unwrap();
@@ -66,7 +63,6 @@ mod calc_metrics_tests {
         let config = AppConfig::load_from_file(config_path).unwrap();
 
         let top_k = config.top_k;
-        let n_draws = 10;
 
         //let user_db_path = &config.user_db_path;
 
@@ -91,6 +87,25 @@ mod calc_metrics_tests {
 
         let endpoint = format!("http://{}", addr);
 
+        // ===== run tests ==========
+
+        if true {
+            run_evaluator(top_k, num_candidates, endpoint).await;
+        }
+
+
+
+        // server is shutdown by the guard when this method is out of scope
+
+    }
+
+    async fn run_evaluator(top_k: usize, num_candidates: usize,  endpoint: String) {
+        let n_draws = 10;
+        let mut test_file_patterns: Option<PathBuf> = get_project_dir();
+        if let Some(ref mut p) = test_file_patterns {
+            p.push("src/test/resources/data/ratings_test*.parquet");
+        }
+
         let evaluator = Evaluator::new(top_k, num_candidates, n_draws,
             endpoint).await;
 
@@ -114,19 +129,16 @@ mod calc_metrics_tests {
             }
             Err(e) => eprintln!("Evaluator construction Failed: {}", e),
         }
-
-        // server is shutdown by the guard when this method is out of scope
-
         /*
-        == Evaluation Results (K=20) ===
-        Metric       | Mean     | Median   | MAD      | MAD-Std
-        --------------------------------------------------------
-        NDCG         | 0.6857   | 0.6912   | 0.1242   | 0.1842
-        MRR          | 0.8465   | 0.9500   | 0.0500   | 0.0741
-        Recall       | 0.4768   | 0.4666   | 0.0457   | 0.0678
-        Precision    | 0.6459   | 0.6600   | 0.1400   | 0.2076
-        F1-Score     | 0.5273   | 0.5485   | 0.0463   | 0.0687
-        */
+       == Evaluation Results (K=20) ===
+       Metric       | Mean     | Median   | MAD      | MAD-Std
+       --------------------------------------------------------
+       NDCG         | 0.6857   | 0.6912   | 0.1242   | 0.1842
+       MRR          | 0.8465   | 0.9500   | 0.0500   | 0.0741
+       Recall       | 0.4768   | 0.4666   | 0.0457   | 0.0678
+       Precision    | 0.6459   | 0.6600   | 0.1400   | 0.2076
+       F1-Score     | 0.5273   | 0.5485   | 0.0463   | 0.0687
+       */
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
