@@ -49,6 +49,7 @@ mod pairwise_pref_tests {
 
     use polars::prelude::*;
     use std::io::{self, Write};
+    use std::path::Path;
     use tonic::Status;
     // use recommender_grpc::ranker_client::RankerClient;
     // use recommender_grpc::RankRequest;
@@ -58,6 +59,7 @@ mod pairwise_pref_tests {
     use inference_engine::util::timestamp_now;
     use crate::pairwise_pref_tests::helper::{get_movies_uri, get_project_dir};
     use rand::Rng;
+    use inference_engine::user_db::UserDb;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_pairwise_pref() -> Result<(), Box<dyn Error>> {
@@ -81,9 +83,9 @@ mod pairwise_pref_tests {
         let config_path = "./config/default.json";
         let config = AppConfig::load_from_file(config_path).unwrap();
 
-        let _top_k = config.top_k;
+        let top_k = config.top_k;
 
-        //let user_db_path = &config.user_db_path;
+        let user_db_path = &config.user_db_path;
 
         let runner = AppRunner::new(config.to_owned());
 
@@ -143,7 +145,7 @@ mod pairwise_pref_tests {
 
         let mut client = RecommenderServiceClient::connect(endpoint.clone()).await?;
 
-        let win_rate = run_pairwise_preference_test(&mut client, &context).await?;
+        let win_rate = run_pairwise_preference_test(&mut client, &context, top_k, user_db_path).await?;
 
         assert!(win_rate >= 0.55, "Ranker failed the pairwise preference test!");
 
@@ -481,14 +483,31 @@ mod pairwise_pref_tests {
     pub async fn run_pairwise_preference_test(
         client: &mut RecommenderServiceClient<Channel>,
         context: &EvalContext,
+        top_k: usize,
+        user_db_path : impl AsRef<Path>
     ) -> Result<f64, tonic::Status> {
 
+        // variables for the parity metrics:
         let mut wins = 0;
         let mut valid_tests = 0;
         let popularity_tolerance = 0.15;
         let num_pairs = context.num_candidates / 2;
 
         println!("Starting Pairwise Preference Evaluation (Batch Size: {})...", context.num_candidates);
+
+        // also we are calculating ranking purity on the synthetic candidate list.
+        // the candidates are a pure 50/50 split of positives/negatives.
+        // we count how many of the top_k sorted are positives
+
+        // variables for the purity metrics for the randomly chosen pos and neg ids:
+        let mut purity_total: f32 = 0.0;
+        let mut purity_eval_count: usize = 0;
+
+        // variables for the purity metrics for the recommended movies
+        let mut e2e_total_purity: f32 = 0.0;
+        let mut e2e_purity_eval_count: usize = 0;
+
+        let user_db : UserDb = UserDb::new(user_db_path).expect("Failed to initialize UserDb from binary path");
 
         for (i, user) in context.polarized_users.iter().enumerate() {
             let history = context.user_histories.get(&user.user_id).cloned().unwrap_or_default();
@@ -569,6 +588,89 @@ mod pairwise_pref_tests {
                     }
                     valid_tests += 1;
                 }
+
+                // ==========================================
+                // NEW: Top-K Genre Purity Evaluation
+                // ==========================================
+
+                // 1. Zip the IDs and scores together so we can sort them listwise
+                let mut ranked_items: Vec<(i32, f32)> = response.movie_ids.iter().cloned()
+                    .zip(response.scores.iter().cloned())
+                    .collect();
+
+                //Sort descending by score
+                ranked_items.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+                // Take the Top K (handling cases where the batch might be smaller than K)
+                let top_k_items: Vec<(i32, f32)> = ranked_items.into_iter().take(top_k).collect();
+                let actual_k = top_k_items.len();
+
+                //  Calculate Purity: How many of the Top K belong to the user's dominant genre?
+                let mut hits = 0;
+                for (movie_id, _score) in &top_k_items {
+                    if let Some(movie) = context.movies.get(movie_id) {
+                        // Assuming genres is a Vec<String>
+                        if movie.genres.contains(&user.pos_dominant_genre) {
+                            hits += 1;
+                        }
+                    }
+                }
+
+                if actual_k > 0 {
+                    let user_purity = hits as f32 / actual_k as f32;
+                    purity_total += user_purity;
+                    purity_eval_count += 1;
+
+                    // Optional diagnostic: Flag if the model completely buried the target genre
+                    if user_purity == 0.0 {
+                        println!(
+                            "[Purity Warning] User {}: 0 hits in Top {} for genre '{}'",
+                            user.user_id, actual_k, user.pos_dominant_genre
+                        );
+                    }
+                }
+            }
+
+            // ============ test for genre purity of recommended  movies =======================
+            let user_req_opt = user_db.get_request(user.user_id as i64);
+            assert!(user_req_opt.is_some(), "User ID {} should exist in database", user.user_id);
+            let tonic_req = user_req_opt.unwrap();
+
+            let mut active_client = client.clone();
+            let response_response = active_client
+                //.predict(tonic::Request::new(tonic_req.into_inner()))
+                .predict(tonic_req)
+                .await
+                .map_err(|err| Status::internal(format!("ranking request failed: {}", err)))?;
+
+            let response = response_response.into_inner();
+
+            // Already truncated to top_k by the service
+            let retrieved_ids = response.movie_ids;
+            let actual_k = retrieved_ids.len();
+
+            if actual_k > 0 {
+                let mut hits = 0;
+
+                for &movie_id in &retrieved_ids {
+                    if let Some(movie) = context.movies.get(&movie_id) {
+                        if movie.genres.contains(&user.pos_dominant_genre) {
+                            hits += 1;
+                        }
+                    }
+                }
+
+                let user_purity = hits as f32 / actual_k as f32;
+                e2e_total_purity += user_purity;
+                e2e_purity_eval_count += 1;
+
+                // Optional: Log cases where the end-to-end system completely missed the mark
+                if user_purity == 0.0 {
+                    println!(
+                        "[E2E Purity Warning] User {}: 0 hits in Top {} for genre '{}'. ANN might be drifting.",
+                        user.user_id, actual_k, user.pos_dominant_genre
+                    );
+                }
             }
 
             print!("\rProgress: {}/{} users tested", i + 1, context.polarized_users.len());
@@ -584,7 +686,28 @@ mod pairwise_pref_tests {
         }
 
         let win_rate = wins as f64 / valid_tests as f64;
-        println!("Positive Genre Win Rate:  {:.2}% ({}/ {})", win_rate * 100.0, wins, valid_tests);
+        println!("Pairwise Positive Genre Win Rate (random pos & neg pairs, ranker-only):  {:.2}% ({}/ {})", win_rate * 100.0, wins, valid_tests);
+
+        println!("\n=== Listwise Ranking Results (random pos & neg 50%/50%, ranker-only) ===");
+        if purity_eval_count > 0 {
+            let average_purity = (purity_total / purity_eval_count as f32) * 100.0;
+            println!("Top-{} Genre Purity: {:.2}%", top_k, average_purity);
+        }
+
+        println!("\n=== End-to-End Pipeline Results (ANN + Ranker) ===");
+        if e2e_purity_eval_count > 0 {
+            let average_purity = (e2e_total_purity / e2e_purity_eval_count as f32) * 100.0;
+            println!("Top-K Dominant Genre Purity: {:.2}%", average_purity);
+        }
+
+        println!("\n=>Results of end-to-end hit rate ratio > purity ratios shows that the ANN search
+                is usefully providing a pool to choose from.");
+
+        println!("\n=>Results near 50% show either that: \ngenres is not an important feature for \
+              the models,\nor that the random choice of an unwatched movies from the dominant genre \
+              is not a good recommendation for the user\n  (similarly for negatives not being a good anti-recommendation), \
+              \nor the model is not specializing enough for polarized users.\
+              ");
 
         Ok(win_rate)
     }
