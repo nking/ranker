@@ -8,9 +8,10 @@ use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
 use crate::user_history::{build_user_history, UserHistory};
 
 // Now you can use them directly!
-use crate::pb::{UserRequest, RankedMovies, recommender_service_server::RecommenderService, RankOnlyRequest};
+use crate::pb::{UserRequest, RankedMovies, RankOnlyRequest};
 use tonic::{Request, Response, Status};
 use usearch::ffi::Matches;
+use crate::pb::recommender_service_server::RecommenderService;
 use crate::user_db::UserDb;
 use crate::util::sort_by_scores;
 
@@ -91,7 +92,7 @@ impl Orchestrator {
     }
 
     async fn make_ranker_request(&self, user_id : i32, timestamp: i64,
-        user_embedding : Vec<f32>, candidate_ids : Vec<i32>) ->Result<Response<RankedMovies>, Status> {
+        user_embedding : Vec<f32>, candidate_ids : Vec<i32>) ->Result<RankedMovies, Status> {
 
         if candidate_ids.len() != self.num_candidates {
             println!(
@@ -100,8 +101,6 @@ impl Orchestrator {
                 candidate_ids.len()
             );
         }
-
-        println!("make_ranker_request: CANDIDATE_IDS {:?}", candidate_ids.clone());
 
         let user_ids : Vec<i32> = vec![user_id];
         let timestamps: Vec<i64> = vec![timestamp];
@@ -124,25 +123,18 @@ impl Orchestrator {
             searcher.get_movies_embedding_catalog_ref(),
             &user_embedding,  self.ranker_n_local_devices);
 
-        println!("make_ranker_request: padded_super_graph_arrays.node_ids {:?}", padded_super_graph_arrays.node_ids.clone());
-
         // Send to TFS Ranker model
         let final_response = self.ranker_model.get_candidate_ranks(
             padded_super_graph_arrays, searcher.get_embed_len()).await;
 
         match final_response {
             Ok(ranks) => {
-
-                println!("make_ranker_request: candidate_ids iin response {:?}", candidate_ids.clone());
-
-                //TODO: editing  to return all candidates and make 2 client calls one for returning all and one for returning the top_k and for the later use sort and truncate
-
-                let (sorted_ids, sorted_scores) = sort_by_scores(&candidate_ids, &ranks);
-                let r = RankedMovies{
-                    movie_ids: sorted_ids[0..self.top_k].to_vec(),
-                    scores: sorted_scores[0..self.top_k].to_vec(),
-                };
-                Ok(Response::new(r))
+                Ok(
+                    RankedMovies{
+                        movie_ids: candidate_ids,
+                        scores: ranks
+                    }
+                )
             },
             Err(e) => {
                 Err(Status::internal(format!("ranking request failed: {}", e)))
@@ -216,9 +208,42 @@ impl RecommenderService for Orchestrator {
             candidate_ids.truncate(self.num_candidates);
         }
 
-        self.make_ranker_request(user_req.user_id as i32, user_req.timestamp,
-            user_embedding, candidate_ids).await
+        let ranked_movies = self.make_ranker_request(user_req.user_id as i32, user_req.timestamp,
+            user_embedding, candidate_ids).await?;
 
+        let (sorted_ids, sorted_scores) = sort_by_scores(
+            &ranked_movies.movie_ids, &ranked_movies.scores);
+
+        Ok(Response::new( RankedMovies{
+            movie_ids: sorted_ids[0..self.top_k].to_vec(),
+            scores: sorted_scores[0..self.top_k].to_vec(),
+        }))
+    }
+
+    async fn rank_only_return_all(&self, request: Request<RankOnlyRequest>) -> Result<Response<RankedMovies>, Status> {
+
+        /*
+        RankOnlyRequest has:
+            pub user_id: i32,
+            pub timestamp: i64,
+            pub candidate_ids: ::prost::alloc::vec::Vec<i32>,
+         */
+        let rank_req = request.into_inner();
+
+        // populate a UserRequest with age, gender and occupation.  The UserRequest is needed to get a user_embedding
+        let user_req_opt = self.user_db.get_request(rank_req.user_id as i64);
+        assert!(user_req_opt.is_some(), "User ID {} should exist in database", rank_req.user_id);
+        let tonic_req = user_req_opt.unwrap();
+        // Extract the inner UserRequest from tonic::Request using .get_ref()
+        let user_req = tonic_req.get_ref();
+
+        let user_embedding = self.query_model.get_user_embedding(&user_req).await
+            .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
+
+        let ranked_movies = self.make_ranker_request(rank_req.user_id, rank_req.timestamp,
+            user_embedding, rank_req.candidate_ids).await?;
+
+        Ok(Response::new( ranked_movies))
     }
 
     async fn rank_only(&self, request: Request<RankOnlyRequest>) -> Result<Response<RankedMovies>, Status> {
@@ -241,8 +266,15 @@ impl RecommenderService for Orchestrator {
         let user_embedding = self.query_model.get_user_embedding(&user_req).await
             .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
 
-        self.make_ranker_request(rank_req.user_id, rank_req.timestamp,
-            user_embedding, rank_req.candidate_ids).await
+        let ranked_movies = self.make_ranker_request(rank_req.user_id, rank_req.timestamp,
+            user_embedding, rank_req.candidate_ids).await?;
 
+        let (sorted_ids, sorted_scores) = sort_by_scores(
+            &ranked_movies.movie_ids, &ranked_movies.scores);
+
+        Ok(Response::new( RankedMovies{
+            movie_ids: sorted_ids[0..self.top_k].to_vec(),
+            scores: sorted_scores[0..self.top_k].to_vec(),
+        }))
     }
 }

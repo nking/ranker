@@ -3,6 +3,8 @@ syntax = "proto3";
 package recommender;
 
 // input for the query model
+
+// input request identifying a user and time, suppleented with demographic information
 message UserRequest {
   int64 user_id = 1;
   string gender = 2;
@@ -11,23 +13,27 @@ message UserRequest {
   int64 timestamp = 5;
 }
 
-// input for the graph ranker
+// input for the graph ranker model
 
-// The output from your orchestrator
+// The output from your orchestrator containing parallel vectors of movie_ids and their model scores
 message RankedMovies {
   repeated int32 movie_ids = 1; // "repeated" means it's a Vec in Rust
   repeated float scores = 2;
 }
 
+// input request to return scored candidate_ids
 message RankOnlyRequest {
-  // Include fields needed to bypass the searcher, such as:
   int32 user_id = 1;
   int64 timestamp = 2;
   repeated int32 candidate_ids = 3;
 }
 
-// Tonic will generate the RecommenderService trait from this
+// methods available for the service
 service RecommenderService {
+  // request to retun top_k unwatched recommended movies for the user, descending oder by score
   rpc Predict (UserRequest) returns (RankedMovies);
-  rpc RankOnly(RankOnlyRequest) returns (RankedMovies); // New Endpoint
+  // request to return the top_k of the candidate_ids in order of descending score
+  rpc RankOnly(RankOnlyRequest) returns (RankedMovies);
+  // request to return all of the candidate_ids, not reordered nor truncated
+  rpc RankOnlyReturnAll(RankOnlyRequest) returns (RankedMovies);
 }
