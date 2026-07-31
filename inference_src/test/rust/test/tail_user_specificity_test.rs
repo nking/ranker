@@ -1,3 +1,7 @@
+///
+/// a look at user specificity with respect to the target ratings (see test_Y().
+/// and with respect to the input latent space (see test_X)
+///
 #[cfg(test)]
 mod tail_user_specificity_tests {
     use std::collections::HashMap;
@@ -11,10 +15,11 @@ mod tail_user_specificity_tests {
     use inference_engine::pb::recommender_service_client::RecommenderServiceClient;
     use inference_engine::user_db::UserDb;
     use inference_engine::user_history::{build_map_async, UserMapEntry};
-    use crate::tail_user_specificity_tests::helper::{get_model_param_json_uri};
+    use crate::tail_user_specificity_tests::helper::{get_embeddings_uris, get_model_param_json_uri};
 
     use tokio::task::JoinHandle;
     use inference_engine::app_runner::AppRunner;
+    use inference_engine::embeddings_util::read_user_embeddings;
 
     //use super::*;
     mod helper {
@@ -44,7 +49,7 @@ mod tail_user_specificity_tests {
     }
 
     /// calculate the movie global rating distribution and note the top 100 movies and the tail 80%.
-    /// users who  rated the tail 80% highly are the tail of the "behavioral" distribution and are
+    /// users who  rated the tail 20% highly are the tail of the "behavioral" distribution and are
     /// tested for specificity of recommendations here:
     ///
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -117,48 +122,106 @@ mod tail_user_specificity_tests {
         // The exact mainstreamness score at the 20% threshold
         let cutoff_score = scored_users[tail_cutoff].1;
 
-        let num_buckets = 30;
-        let bucket_width = (max_score - min_score) / num_buckets as f32;
+        print_histogram(&scored_users, min_score, max_score, cutoff_score,
+            "USER MAINSTREAMNESS (M_u) DISTRIBUTION".parse().unwrap(), true);
 
-        let mut buckets = vec![0; num_buckets];
 
-        for &(_, score) in &scored_users {
-            let mut bucket_idx = ((score - min_score) / bucket_width).floor() as usize;
-            if bucket_idx >= num_buckets {
-                bucket_idx = num_buckets - 1; // Catch edge case for the absolute max value
+        run_baysian_shrinkage_stats(config, catalog_stats, scored_users, tail_user_ids).await;
+
+    }
+
+    /// calculate the centroid of the latent space embeddings and find the users who are furthest
+    /// from the centroid at as the tail users. and test for specificity here
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_X() {
+
+        let (user_embeddings_uri, _) = get_embeddings_uris();
+        let config_path = "./config/default.json";
+        let config = AppConfig::load_from_file(config_path).unwrap();
+
+        let (user_embeddings, num_embeddings, embed_len) : (Vec<f32>, usize, usize)
+            = read_user_embeddings(user_embeddings_uri.as_str());
+
+        let user_db : UserDb = UserDb::new(&config.user_db_path).expect("Failed to initialize UserDb from binary path");
+
+        let mut centroid: Vec<f32> = Vec::new();
+
+        println!("Fetching user embeddings to calculate latent centroid...");
+
+        //  Gather all embeddings and sum them up
+        for i in 0..num_embeddings {
+            //let user_id = i + 1;
+            let i00 = i * embed_len;
+            let i01 = i00 + embed_len;
+            let embedding = &user_embeddings[i00..i01];
+
+            // Initialize centroid vector on the first pass
+            if centroid.is_empty() {
+                centroid = vec![0.0; embedding.len()];
             }
-            buckets[bucket_idx] += 1;
+
+            // Accumulate for the centroid average
+            for (i, &val) in embedding.iter().enumerate() {
+                centroid[i] += val;
+            }
         }
 
-        let max_count = *buckets.iter().max().unwrap_or(&1);
-        let max_bar_length = 50; // Maximum terminal characters for the longest bar
-
-        println!("\n=======================================================");
-        println!("       USER MAINSTREAMNESS (M_u) DISTRIBUTION          ");
-        println!("=======================================================");
-        println!("Total Users: {} | Tail Cutoff (Bottom 20%): <= {:.4}", scored_users.len(), cutoff_score);
-        println!("-------------------------------------------------------");
-
-        for i in 0..num_buckets {
-            let bucket_min = min_score + (i as f32 * bucket_width);
-            let bucket_max = bucket_min + bucket_width;
-            let count = buckets[i];
-
-            // Scale bar length to fit terminal
-            let bar_length = ((count as f32 / max_count as f32) * max_bar_length as f32).round() as usize;
-
-            // Use a solid block for the Tail (Bottom 20%), and a shaded block for the rest
-            let bar_char = if bucket_min < cutoff_score { "█" } else { "▒" };
-            let bar: String = std::iter::repeat(bar_char).take(bar_length).collect();
-
-            // Print the bucket range, count, and visual bar
-            println!("{:.4} - {:.4} | {:>4} | {}", bucket_min, bucket_max, count, bar);
+        for val in &mut centroid {
+            *val /= num_embeddings as f32;
         }
-        println!("=======================================================\n");
 
-        // ===== E2E Purity loop  on `tail_users` to see if performance drops. =====
+        // 3. Calculate Euclidean distance from the centroid for each user
+        let mut user_distances: Vec<(i32, f32)> = Vec::with_capacity(num_embeddings);
+        for i in 0..num_embeddings {
+            let user_id = i + 1;
+            let i00 = i * embed_len;
+            let i01 = i00 + embed_len;
+            let emb = &user_embeddings[i00..i01];
 
-        // turn on server, with guard to shutdown when method is out of scope
+            let mut dist_sq = 0.0;
+            for (i, &val) in emb.iter().enumerate() {
+                let diff = val - centroid[i];
+                dist_sq += diff * diff;
+            }
+            user_distances.push((user_id as i32, dist_sq));
+        }
+
+        // 4. Sort by distance descending (most distant users at the top)
+        user_distances.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+        // 5. Extract the new distance-based Tail Cohort (e.g., top 20% most distant)
+        let tail_cutoff = (user_distances.len() as f32 * 0.20) as usize;
+
+        let latent_tail_user_ids: Vec<i32> = user_distances.iter()
+            .take(tail_cutoff)
+            .map(|(id, _)| *id)
+            .collect();
+
+        println!("Centroid calculation complete.");
+        println!("Identified {} latent tail users.", latent_tail_user_ids.len());
+
+        let min_score = user_distances.last().unwrap().1;
+        let max_score = user_distances.first().unwrap().1;
+
+        // The exact mainstreamness score at the 20% threshold
+        let cutoff_score = user_distances[tail_cutoff].1;
+
+        print_histogram(&user_distances, min_score, max_score, cutoff_score,
+            "LATENT TAIL COHORT DISTRIBUTION (Squared Distance)".parse().unwrap(), false);
+
+
+        let movies_map : HashMap<i32, Movie> = load_and_count_movies(&config);
+
+        let catalog_stats : CatalogStats = build_bayesian_catalog(&movies_map);
+
+        run_baysian_shrinkage_stats(config, catalog_stats, user_distances, latent_tail_user_ids).await;
+
+    }
+
+    async fn run_baysian_shrinkage_stats(config: AppConfig, catalog_stats: CatalogStats,
+        scored_users: Vec<(i32, f32)>, tail_user_ids: Vec<i32>) {
+
+        // turn on server, with guard to shutdown when method goes out of scope
         let runner = AppRunner::new(config.to_owned());
 
         let (tx_shutdown, rx_shutdown) = tokio::sync::oneshot::channel::<()>();
@@ -179,6 +242,8 @@ mod tail_user_specificity_tests {
         };
         let endpoint = format!("http://{}", addr);
 
+
+        // ===== E2E Purity loop  on `tail_users` to see if performance drops. =====
         let mut e2e_total_rec_score: f32 = 0.0;
         let mut e2e_eval_count: usize = 0;
 
@@ -186,9 +251,9 @@ mod tail_user_specificity_tests {
         let mut tail_ann_count = 0;
 
         let user_db : UserDb = UserDb::new(config.user_db_path).expect("Failed to initialize UserDb from binary path");
-        let mut client = RecommenderServiceClient::connect(endpoint.clone()).await.unwrap();
+        let client = RecommenderServiceClient::connect(endpoint.clone()).await.unwrap();
 
-        for (i, &user_id) in tail_user_ids.iter().enumerate() {
+        for (_i, &user_id) in tail_user_ids.iter().enumerate() {
 
             let user_req_opt = user_db.get_request(user_id as i64);
             assert!(user_req_opt.is_some(), "User ID {} should exist in database", user_id);
@@ -244,7 +309,7 @@ mod tail_user_specificity_tests {
                 = active_client.approx_nearest_neighbors(tonic_req).await {
                 let response = response_response.into_inner();
                 let retrieved_ids = response.candidate_ids;
-                let actual_k = retrieved_ids.len();
+                let _actual_k = retrieved_ids.len();
                 for &movie_id in &retrieved_ids {
                     if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
                         tail_ann_score += s_i;
@@ -287,7 +352,7 @@ mod tail_user_specificity_tests {
 
         println!("\nStarting Global Baseline Evaluation...");
 
-        for (i, &user_id) in global_user_ids.iter().enumerate() {
+        for (_i, &user_id) in global_user_ids.iter().enumerate() {
 
             let user_req_opt = user_db.get_request(user_id as i64);
 
@@ -336,7 +401,7 @@ mod tail_user_specificity_tests {
                 = active_client.approx_nearest_neighbors(tonic_req).await {
                 let response = response_response.into_inner();
                 let retrieved_ids = response.candidate_ids;
-                let actual_k = retrieved_ids.len();
+                let _actual_k = retrieved_ids.len();
                 for &movie_id in &retrieved_ids {
                     if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
                         global_ann_score += s_i;
@@ -406,9 +471,6 @@ mod tail_user_specificity_tests {
         } else {
             println!("❌ FAILURE: The model suffers from strong popularity bias. Tail users are receiving the exact same mainstream recommendations as the rest of the population.");
         }
-
-        //if tail_eval_metric > tail_avg_ann_retrieval_s_i {
-
     }
 
     #[test]
@@ -439,8 +501,54 @@ mod tail_user_specificity_tests {
     }
 
 
-    /// calculate the centroid of the latent space embeddings and find the users who are furthest
-    /// from the centroid at as the tail users. and test for specificity here
-    #[test]
-    pub fn test_X() {}
+    pub fn print_histogram(scored_users : &Vec<(i32, f32)> , min_score: f32, max_score: f32,
+        cutoff_score: f32, title: String, ascending_scores: bool) {
+        let num_buckets = 30;
+        let bucket_width = (max_score - min_score) / num_buckets as f32;
+
+        let mut buckets = vec![0; num_buckets];
+
+        for &(_, score) in scored_users {
+            let mut bucket_idx = ((score - min_score) / bucket_width).floor() as usize;
+            if bucket_idx >= num_buckets {
+                bucket_idx = num_buckets - 1; // Catch edge case for the absolute max value
+            }
+            buckets[bucket_idx] += 1;
+        }
+
+        let max_count = *buckets.iter().max().unwrap_or(&1);
+        let max_bar_length = 50; // Maximum terminal characters for the longest bar
+
+        println!("\n=======================================================");
+        println!("       {}          ", title);
+        println!("=======================================================");
+        let direction :String = if ascending_scores {"(Bottom 20%) <=".to_string() } else {"(Top 20%) >=".to_string()};
+        println!("Total Users: {} | Tail Cutoff {}  {:.4}", scored_users.len(),
+            direction, cutoff_score);
+        println!("-------------------------------------------------------");
+
+        for i in 0..num_buckets {
+            let bucket_min = min_score + (i as f32 * bucket_width);
+            let bucket_max = bucket_min + bucket_width;
+            let count = buckets[i];
+
+            // Scale bar length to fit terminal
+            let bar_length = ((count as f32 / max_count as f32) * max_bar_length as f32).round() as usize;
+
+            // Use a solid block for the Tail (Bottom 20%), and a shaded block for the rest
+            let bar_char = if ascending_scores {
+                if bucket_min < cutoff_score { "█" } else { "▒" }
+            } else {
+                // For test_X, shade the buckets that are greater than or equal to the cutoff
+                if bucket_max >= cutoff_score { "█" } else { "▒" }
+            };
+            let bar: String = std::iter::repeat(bar_char).take(bar_length).collect();
+
+            // Print the bucket range, count, and visual bar
+            println!("{:.4} - {:.4} | {:>4} | {}", bucket_min, bucket_max, count, bar);
+        }
+        println!("=======================================================\n");
+    }
+
+
 }
