@@ -8,7 +8,7 @@ use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
 use crate::user_history::{build_user_history, UserHistory};
 
 // Now you can use them directly!
-use crate::pb::{UserRequest, RankedMovies, RankOnlyRequest};
+use crate::pb::{UserRequest, RankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse};
 use tonic::{Request, Response, Status};
 use usearch::ffi::Matches;
 use crate::pb::recommender_service_server::RecommenderService;
@@ -160,7 +160,10 @@ impl RecommenderService for Orchestrator {
     /// ```
     ///
     /// ```
-    async fn predict(&self, req: Request<UserRequest>) ->Result<Response<RankedMovies>, Status> {
+    async fn approx_nearest_neighbors(
+        &self,
+        req: Request<UserRequest>,
+    ) -> Result<Response<ApproxNearestNeighborsResponse>, Status> {
 
         let user_req = req.into_inner();
 
@@ -168,7 +171,7 @@ impl RecommenderService for Orchestrator {
         let user_embedding = self.query_model.get_user_embedding(&user_req).await
             .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
 
-        let user_ids : Vec<i32> = vec![user_req.user_id as i32];
+        let user_ids: Vec<i32> = vec![user_req.user_id as i32];
         let timestamps: Vec<i64> = vec![user_req.timestamp];
         let n_hist = self.user_history.get_history_count_before_timestamp(
             &user_ids, &timestamps
@@ -178,12 +181,12 @@ impl RecommenderService for Orchestrator {
 
         // finds num_candidates approx nearest neighbors
         let searcher = self.searcher.load();
-        let nearest : Matches = searcher.search(&user_embedding, n_srch)
+        let nearest: Matches = searcher.search(&user_embedding, n_srch)
             .map_err(|e| Status::internal(format!("Vector search failed: {}", e)))?;
 
         // candidate_ids are in "reference frame" of 0 to num_catalog_movies  - 1, so translate to
         // reference frame num_catalog_users + 1 to num_catalog_users + 1 + num_catalog_movies
-        let mut candidate_ids : Vec<i32> = nearest.keys
+        let mut candidate_ids: Vec<i32> = nearest.keys
             .into_iter()
             .map(|x| x as i32 + 1 + self.num_catalog_users as i32)
             .collect();
@@ -208,8 +211,25 @@ impl RecommenderService for Orchestrator {
             candidate_ids.truncate(self.num_candidates);
         }
 
-        let ranked_movies = self.make_ranker_request(user_req.user_id as i32, user_req.timestamp,
-            user_embedding, candidate_ids).await?;
+        Ok(Response::new(ApproxNearestNeighborsResponse {
+            user_embedding,
+            candidate_ids,
+        }))
+    }
+
+    async fn predict(&self, req: Request<UserRequest>) -> Result<Response<RankedMovies>, Status> {
+
+        let user_req = req.into_inner();
+
+        let ann_req = Request::new(user_req.clone());
+        let ann_res: ApproxNearestNeighborsResponse = self.approx_nearest_neighbors(ann_req).await?.into_inner();
+
+        // Extract the generated fields from the new protobuf response message
+        let user_embedding = ann_res.user_embedding;
+        let candidate_ids = ann_res.candidate_ids;
+
+        let ranked_movies = self.make_ranker_request(user_req.user_id as i32,
+            user_req.timestamp, user_embedding, candidate_ids).await?;
 
         let (sorted_ids, sorted_scores) = sort_by_scores(
             &ranked_movies.movie_ids, &ranked_movies.scores);

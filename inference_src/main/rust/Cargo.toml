@@ -68,7 +68,6 @@ path="../../test/rust/test/user_history_test.rs"
 name = "recommended_movies_tests"
 path="../../test/rust/test/recommended_movies_test.rs"
 
-
 [[test]]
 name = "graph_builder_tests"
 path="../../test/rust/test/graph_builder_test.rs"
@@ -107,4 +106,8 @@ path="../../test/rust/test/calc_metrics_test.rs"
 
 [[test]]
 name = "pairwise_pref_tests"
-path="../../test/rust/test/pairwise_pref_test.rs"
+path= "../../test/rust/test/polarized_genre_pref_test.rs"
+
+[[test]]
+name = "tail_user_specificity_tests"
+path= "../../test/rust/test/tail_user_specificity_test.rs"

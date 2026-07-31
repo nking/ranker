@@ -153,7 +153,7 @@ pub async fn _testable_build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32,
 /// ```
 ///
 /// ```
-async fn build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEntry>, usize) {
+pub async fn build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEntry>, usize) {
 
     // use semaphore to prevent memory swap thrashing from too many threads
     let semaphore = Arc::new(Semaphore::new(4));
@@ -346,7 +346,7 @@ pub async fn build_user_history(ratings_uris: &[&str], max_history: usize) -> Us
     // Block the thread until the map is built and sorted
     let (map, longest_history)  = build_map_async(&ratings_uris).await;
 
-    print!("longest history read has length={}\n", longest_history);
+    print!("map length={}, longest history read has length={}\n", map.len(), longest_history);
 
     let pad_value : i32 = -1;
     let ts_pad_value: i64 = 2524608000; //year 2050

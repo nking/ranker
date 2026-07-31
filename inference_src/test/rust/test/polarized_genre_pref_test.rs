@@ -57,7 +57,7 @@ mod pairwise_pref_tests {
     use inference_engine::pb::RankOnlyRequest;
     use inference_engine::pb::recommender_service_client::RecommenderServiceClient;
     use inference_engine::util::timestamp_now;
-    use crate::pairwise_pref_tests::helper::{get_movies_uri, get_project_dir};
+    use crate::pairwise_pref_tests::helper::{get_project_dir};
     use rand::Rng;
     use inference_engine::user_db::UserDb;
 
@@ -128,7 +128,7 @@ mod pairwise_pref_tests {
         let test_liked: &[&str] = &[&test_liked[0]];
 
 
-        let movies_path = get_movies_uri();
+        let movies_path = config.movies_path;
 
         let context = generate_eval_context_on_the_fly(
             &train_val_liked,

@@ -20,7 +20,7 @@ mod embedding_ann_tests {
     async fn test_search() {
 
         // get num_candidates from the default config for this model
-        let config_path = "./config/default.json";
+        let config_path = "./config/default_tiny.json";
         let config = AppConfig::load_from_file(config_path).unwrap();
         let file = File::open(&config.params_json_path).unwrap();
         let reader = BufReader::new(file);
@@ -32,7 +32,7 @@ mod embedding_ann_tests {
 
         let (_user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
 
-        let persisted_index_path: std::path::PathBuf = PathBuf::from("./target/movie_embeddings_indexer");
+        let persisted_index_path: PathBuf = PathBuf::from("./target/movie_embeddings_indexer");
 
         let search = Searcher::new(&movie_embeddings_uri, num_candidates, persisted_index_path).unwrap();
 
@@ -58,7 +58,7 @@ mod embedding_ann_tests {
     async fn test_search_batch() {
 
         // get num_candidates from the default config for this model
-        let config_path = "./config/default.json";
+        let config_path = "./config/default_tiny.json";
         let config = AppConfig::load_from_file(config_path).unwrap();
         let file = File::open(&config.params_json_path).unwrap();
         let reader = BufReader::new(file);

@@ -1,0 +1,433 @@
+#[cfg(test)]
+mod tail_user_specificity_tests {
+    use std::collections::HashMap;
+    use std::fs::File;
+    use std::io::BufReader;
+    use rustc_hash::FxHashMap;
+    use serde_json::Value;
+    use tonic::Status;
+    use inference_engine::app_config::AppConfig;
+    use inference_engine::bayesian::{load_and_count_movies, Movie, CatalogStats, build_bayesian_catalog};
+    use inference_engine::pb::recommender_service_client::RecommenderServiceClient;
+    use inference_engine::user_db::UserDb;
+    use inference_engine::user_history::{build_map_async, UserMapEntry};
+    use crate::tail_user_specificity_tests::helper::{get_model_param_json_uri};
+
+    use tokio::task::JoinHandle;
+    use std::error::Error;
+    use inference_engine::app_runner::AppRunner;
+
+    //use super::*;
+    mod helper {
+        // Tell Rust to literally include the code from helper.rs here
+        include!("helper.rs");
+    }
+
+    struct TestServerGuard {
+        tx_shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+        server_handle: Option<JoinHandle<()>>,
+    }
+
+    impl Drop for TestServerGuard {
+        fn drop(&mut self) {
+            // Trigger the shutdown signal
+            if let Some(tx) = self.tx_shutdown.take() {
+                let _ = tx.send(());
+            }
+
+            // Safely block and join the background server thread using block_in_place
+            if let Some(handle) = self.server_handle.take() {
+                let _ = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(handle)
+                });
+            }
+        }
+    }
+
+    /// calculate the movie global rating distribution and note the top 100 movies and the tail 80%.
+    /// users who  rated the tail 80% highly are the tail of the "behavioral" distribution and are
+    /// tested for specificity of recommendations here:
+    ///
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_Y() {
+
+        // files for use in tests:
+        let config_path = "./config/default.json";
+        let config = AppConfig::load_from_file(config_path).unwrap();
+
+        let movies_map : HashMap<i32, Movie> = load_and_count_movies(&config);
+
+        let catalog_stats : CatalogStats = build_bayesian_catalog(&movies_map);
+
+        let ratings_uris = &config.ratings_uris;
+        let tmp: Vec<&str> = ratings_uris.iter().map(|s| s.as_str()).collect();
+        let slice: &[&str] = tmp.as_slice();
+
+        let (user_ratings_map, longest_history)  : (FxHashMap<i32, UserMapEntry>, usize) = build_map_async(slice).await;
+
+        println!("user_map len={}, longest_history={}", user_ratings_map.len(), longest_history);
+
+        let mut scored_users: Vec<(i32, f32)> = Vec::with_capacity(user_ratings_map.len());
+
+        for (&user_id, entry) in user_ratings_map.iter() {
+            let mut numerator = 0.0;
+            let mut denominator = 0.0;
+
+            let history_iter = entry.movie_ids.iter().zip(entry.ratings.iter());
+
+            for (&movie_id, &rating) in history_iter {
+                let rating_f32 = rating as f32;
+                // Only score items that exist in our Bayesian cache
+                if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
+                    numerator += rating_f32 * s_i;
+                    denominator += rating_f32;
+                } else {
+                    println!("WARNING:  shouldn't be missing any movies: {}", &movie_id);
+                }
+            }
+
+            // Only include users who had at least one valid rated item in the catalog
+            if denominator > 0.0 {
+                let m_u = numerator / denominator;
+                scored_users.push((user_id, m_u));
+            }
+        }
+
+        // Sort users by Mainstreamness (Lowest to Highest)
+        scored_users.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Identify the Tail (Bottom 20%)
+        let tail_cutoff = (scored_users.len() as f32 * 0.20).floor() as usize;
+
+        // Extract just the user IDs for the tail distribution
+        let tail_user_ids: Vec<i32> = scored_users.iter()
+            .take(tail_cutoff)
+            .map(|(u_id, _)| *u_id)
+            .collect();
+
+        println!(
+            "Identified {} Tail Users out of {} total unique users.",
+            tail_user_ids.len(),
+            scored_users.len()
+        );
+
+        // --- VISUALIZE DISTRIBUTION (ASCII HISTOGRAM) ---
+        let min_score = scored_users.first().unwrap().1;
+        let max_score = scored_users.last().unwrap().1;
+
+        // The exact mainstreamness score at the 20% threshold
+        let cutoff_score = scored_users[tail_cutoff].1;
+
+        let num_buckets = 30;
+        let bucket_width = (max_score - min_score) / num_buckets as f32;
+
+        let mut buckets = vec![0; num_buckets];
+
+        for &(_, score) in &scored_users {
+            let mut bucket_idx = ((score - min_score) / bucket_width).floor() as usize;
+            if bucket_idx >= num_buckets {
+                bucket_idx = num_buckets - 1; // Catch edge case for the absolute max value
+            }
+            buckets[bucket_idx] += 1;
+        }
+
+        let max_count = *buckets.iter().max().unwrap_or(&1);
+        let max_bar_length = 50; // Maximum terminal characters for the longest bar
+
+        println!("\n=======================================================");
+        println!("       USER MAINSTREAMNESS (M_u) DISTRIBUTION          ");
+        println!("=======================================================");
+        println!("Total Users: {} | Tail Cutoff (Bottom 20%): <= {:.4}", scored_users.len(), cutoff_score);
+        println!("-------------------------------------------------------");
+
+        for i in 0..num_buckets {
+            let bucket_min = min_score + (i as f32 * bucket_width);
+            let bucket_max = bucket_min + bucket_width;
+            let count = buckets[i];
+
+            // Scale bar length to fit terminal
+            let bar_length = ((count as f32 / max_count as f32) * max_bar_length as f32).round() as usize;
+
+            // Use a solid block for the Tail (Bottom 20%), and a shaded block for the rest
+            let bar_char = if bucket_min < cutoff_score { "█" } else { "▒" };
+            let bar: String = std::iter::repeat(bar_char).take(bar_length).collect();
+
+            // Print the bucket range, count, and visual bar
+            println!("{:.4} - {:.4} | {:>4} | {}", bucket_min, bucket_max, count, bar);
+        }
+        println!("=======================================================\n");
+
+        // ===== E2E Purity loop  on `tail_users` to see if performance drops. =====
+
+        // turn on server, with guard to shutdown when method is out of scope
+        let runner = AppRunner::new(config.to_owned());
+
+        let (tx_shutdown, rx_shutdown) = tokio::sync::oneshot::channel::<()>();
+        let (tx_addr, rx_addr) = tokio::sync::oneshot::channel::<std::net::SocketAddr>();
+        // Spawn the server in a background Tokio task
+        let server_handle = tokio::spawn(async move {
+            let shutdown_future = async {
+                rx_shutdown.await.ok();
+            };
+            runner.run(shutdown_future, Some(tx_addr)).await.expect("Server crashed");
+        });
+        let addr = rx_addr.await.expect("Failed to receive server address");
+        // Initialize the RAII Guard.
+        // It will automatically trigger shutdown and join if the test finishes or panics.
+        let _server_guard = TestServerGuard {
+            tx_shutdown: Some(tx_shutdown),
+            server_handle: Some(server_handle),
+        };
+        let endpoint = format!("http://{}", addr);
+
+        let mut e2e_total_rec_score: f32 = 0.0;
+        let mut e2e_eval_count: usize = 0;
+
+        let mut tail_ann_score = 0.0;
+        let mut tail_ann_count = 0;
+
+        let user_db : UserDb = UserDb::new(config.user_db_path).expect("Failed to initialize UserDb from binary path");
+        let mut client = RecommenderServiceClient::connect(endpoint.clone()).await.unwrap();
+
+        for (i, &user_id) in tail_user_ids.iter().enumerate() {
+
+            let user_req_opt = user_db.get_request(user_id as i64);
+            assert!(user_req_opt.is_some(), "User ID {} should exist in database", user_id);
+            let tonic_req = user_req_opt.unwrap();
+
+            let mut active_client = client.clone();
+            let response_response = active_client
+                .predict(tonic_req)
+                .await
+                .map_err(|err| Status::internal(format!("ranking request failed: {}", err)))
+                .unwrap();
+
+            let response = response_response.into_inner();
+
+            let retrieved_ids = response.movie_ids;
+            let actual_k = retrieved_ids.len();
+
+            if actual_k > 0 {
+                let mut rec_score_sum = 0.0;
+                let mut scored_items = 0;
+
+                for &movie_id in &retrieved_ids {
+                    if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
+                        rec_score_sum += s_i;
+                        scored_items += 1;
+                    }
+                }
+
+                if scored_items > 0 {
+                    let user_avg_s_i = rec_score_sum / scored_items as f32;
+                    e2e_total_rec_score += user_avg_s_i;
+                    e2e_eval_count += 1;
+
+                    // if the model aggressively defaults to highly mainstream items
+                    // adjust this threshold based on the catalog's global mean S_i
+                    if user_avg_s_i > 4.5 {
+                        println!(
+                            "\n[Popularity Bias Warning] User {}: Avg Rec S_i is {:.2}. Model may be falling back to global popularity.",
+                            user_id, user_avg_s_i
+                        );
+                    }
+                }
+            }
+
+            // look for popularity affinity in the ANN of embeddings from bi-encoder trained models ====
+
+            let user_req_opt = user_db.get_request(user_id as i64);
+            assert!(user_req_opt.is_some(), "User ID {} should exist in database", user_id);
+            let tonic_req = user_req_opt.unwrap();
+
+            let mut active_client = client.clone();
+            if let Ok(response_response)
+                = active_client.approx_nearest_neighbors(tonic_req).await {
+                let response = response_response.into_inner();
+                let retrieved_ids = response.candidate_ids;
+                let actual_k = retrieved_ids.len();
+                for &movie_id in &retrieved_ids {
+                    if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
+                        tail_ann_score += s_i;
+                        tail_ann_count += 1;
+                    }
+                }
+            }
+
+            //use std::io::{self, Write};
+            //print!("\rProgress: {}/{} users tested", i + 1, tail_user_ids.len());
+            //io::stdout().flush().unwrap();
+        }
+
+        let tail_avg_ann_retrieval_s_i = if tail_ann_count > 0 {
+            tail_ann_score / tail_ann_count as f32
+        } else {
+            0.0
+        };
+
+        let tail_eval_metric = if e2e_eval_count > 0 {
+            e2e_total_rec_score / e2e_eval_count as f32
+        } else {
+            0.0
+        };
+
+        // ==== new we compare the results to a random sample of all users
+        // if the random S_i is significantly larger than tail_eval_metric, then the model is
+        // specializing for the tail distribution users,
+        // else if the random S_ is near tail_eval_metric, the model is showing popularity bias.
+        // --- GLOBAL BASELINE EVALUATION ---
+
+        // Extract all user IDs from the previously scored map
+        let global_user_ids: Vec<i32> = scored_users.iter().map(|(u_id, _)| *u_id).collect();
+
+        let mut global_total_rec_score: f32 = 0.0;
+        let mut global_eval_count: usize = 0;
+
+        let mut global_ann_score = 0.0;
+        let mut global_ann_count = 0;
+
+        println!("\nStarting Global Baseline Evaluation...");
+
+        for (i, &user_id) in global_user_ids.iter().enumerate() {
+
+            let user_req_opt = user_db.get_request(user_id as i64);
+
+            // Safe unwrap/continue in case some users are missing from the request DB
+            if user_req_opt.is_none() {
+                continue;
+            }
+            let tonic_req = user_req_opt.unwrap();
+
+            let mut active_client = client.clone();
+
+            // We use Ok() to gracefully skip errors if the server drops a request
+            // under high load, rather than panicking the entire test loop.
+            if let Ok(response_response) = active_client.predict(tonic_req).await {
+                let response = response_response.into_inner();
+                let retrieved_ids = response.movie_ids;
+                let actual_k = retrieved_ids.len();
+
+                if actual_k > 0 {
+                    let mut rec_score_sum = 0.0;
+                    let mut scored_items = 0;
+
+                    for &movie_id in &retrieved_ids {
+                        if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
+                            rec_score_sum += s_i;
+                            scored_items += 1;
+                        }
+                    }
+
+                    if scored_items > 0 {
+                        let user_avg_s_i = rec_score_sum / scored_items as f32;
+                        global_total_rec_score += user_avg_s_i;
+                        global_eval_count += 1;
+                    }
+                }
+            }
+
+            // look for popularity affinity in the ANN of embeddings from bi-encoder trained models ====
+
+            let user_req_opt = user_db.get_request(user_id as i64);
+            assert!(user_req_opt.is_some(), "User ID {} should exist in database", user_id);
+            let tonic_req = user_req_opt.unwrap();
+
+            let mut active_client = client.clone();
+            if let Ok(response_response)
+                = active_client.approx_nearest_neighbors(tonic_req).await {
+                let response = response_response.into_inner();
+                let retrieved_ids = response.candidate_ids;
+                let actual_k = retrieved_ids.len();
+                for &movie_id in &retrieved_ids {
+                    if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
+                        global_ann_score += s_i;
+                        global_ann_count += 1;
+                    }
+                }
+            }
+
+            //use std::io::{self, Write};
+            //print!("\rProgress: {}/{} global users tested", i + 1, global_user_ids.len());
+            //io::stdout().flush().unwrap();
+        }
+
+        let global_avg_ann_retrieval_s_i = if global_ann_count > 0 {
+            global_ann_score / global_ann_count as f32
+        } else {
+            0.0
+        };
+
+        let global_eval_metric = if global_eval_count > 0 {
+            global_total_rec_score / global_eval_count as f32
+        } else {
+            0.0
+        };
+
+        // --- FINAL ANALYSIS ---
+
+        println!("\n\n===========================================");
+        println!("        POPULARITY BIAS ANALYSIS           ");
+        println!("===========================================");
+        println!("Global Average Top-K S_i: {:.4}", global_eval_metric);
+        println!("Tail Average Top-K S_i:   {:.4}", tail_eval_metric);
+
+        let diff = global_eval_metric - tail_eval_metric;
+        println!("Delta (Global - Tail):    {:.4}", diff);
+        println!("===========================================");
+
+        if diff > 0.3 {
+            println!("✅ SUCCESS: The model successfully specializes! It recommends significantly more niche items to Tail users than to the Global population.");
+        } else if diff > 0.1 {
+            println!("⚠️ MODERATE: The model shows some specialization, but the gap is narrow. Popularity bias may still be heavily influencing the ranker.");
+        } else {
+            println!("❌ FAILURE: The model suffers from strong popularity bias. Tail users are receiving the exact same mainstream recommendations as the rest of the population.");
+        }
+
+        println!("Global ANN Retrieval Pool Avg S_i: {:.4}", global_avg_ann_retrieval_s_i);
+        println!("Tail Cohort ANN Retrieval Pool Avg S_i: {:.4}", tail_avg_ann_retrieval_s_i);
+        let diff = global_avg_ann_retrieval_s_i - tail_avg_ann_retrieval_s_i;
+        println!("Delta (Global - Tail):    {:.4}", diff);
+        println!("===========================================");
+        if diff > 0.3 {
+            println!("✅ The retrieval doesn't appear to be a cause for popularity bias.");
+        } else if diff > 0.1 {
+            println!("⚠️ The retrieval appears to be at least moderately responsible for popularity bias.");
+        } else {
+            println!("❌ The retrieval appears to be the origin of the popularity bias.");
+        }
+
+    }
+
+    #[test]
+    pub fn test_load_movies() {
+
+        let config_path = "./config/default.json";
+        let config = AppConfig::load_from_file(config_path).unwrap();
+
+        let movies_map : HashMap<i32, Movie> = load_and_count_movies(&config);
+
+        // model params:
+        let params_json_uri = get_model_param_json_uri();
+        let file = File::open(params_json_uri).unwrap();
+        let reader = BufReader::new(file);
+        let dict: HashMap<String, Value> = serde_json::from_reader(reader).unwrap();
+        let num_catalog_movies = dict.get("num_catalog_movies")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        assert_eq!(num_catalog_movies, movies_map.len());
+
+        for (movie_id, movie) in &movies_map {
+            assert_eq!(movie_id, &movie.movie_id);
+            assert!(movie.title.len() > 0);
+            assert!(movie.genres.len() > 0);
+            assert!(movie.rating_counts.len() > 0);
+        }
+    }
+
+
+    /// calculate the centroid of the latent space embeddings and find the users who are furthest
+    /// from the centroid at as the tail users. and test for specificity here
+    #[test]
+    pub fn test_X() {}
+}

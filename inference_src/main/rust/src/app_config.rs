@@ -51,7 +51,13 @@ pub struct AppConfig {
     #[arg(long, env = "PERSISTED_INDEX_PATH", default_value = "./target/movie_embeddings_indexer")]
     pub persisted_index_path : PathBuf,
 
+    // path to the users catalog file
+    #[arg(long, env = "USER_DB_PATH")]
     pub user_db_path : PathBuf,
+
+    // path to the movies catalog file
+    #[arg(long, env = "MOVIES_PATH")]
+    pub movies_path : String,
 }
 
 impl AppConfig {

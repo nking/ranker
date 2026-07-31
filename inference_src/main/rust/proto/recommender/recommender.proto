@@ -28,12 +28,21 @@ message RankOnlyRequest {
   repeated int32 candidate_ids = 3;
 }
 
+// Response message containing the user embedding and retrieved candidate IDs
+message ApproxNearestNeighborsResponse {
+  repeated float user_embedding = 1;
+  repeated int32 candidate_ids = 2;
+}
+
 // methods available for the service
 service RecommenderService {
-  // request to retun top_k unwatched recommended movies for the user, descending oder by score
+  // request to retun top_k unwatched recommended movies for the user, descending order by score
   rpc Predict (UserRequest) returns (RankedMovies);
   // request to return the top_k of the candidate_ids in order of descending score
   rpc RankOnly(RankOnlyRequest) returns (RankedMovies);
+
   // request to return all of the candidate_ids, not reordered nor truncated
   rpc RankOnlyReturnAll(RankOnlyRequest) returns (RankedMovies);
+  // request to return return nearest neigbhors of user embedding
+  rpc ApproxNearestNeighbors(UserRequest) returns (ApproxNearestNeighborsResponse);
 }

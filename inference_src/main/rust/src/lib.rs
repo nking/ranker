@@ -4,6 +4,7 @@ pub mod user_db;
 pub mod recommended_movies;
 pub mod graph_builder;
 
+pub mod bayesian;
 pub mod embeddings_util;
 
 pub mod calc_metrics;
