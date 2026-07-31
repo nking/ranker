@@ -111,3 +111,7 @@ path= "../../test/rust/test/polarized_genre_pref_test.rs"
 [[test]]
 name = "tail_user_specificity_tests"
 path= "../../test/rust/test/tail_user_specificity_test.rs"
+
+[[test]]
+name = "bayesian_tests"
+path= "../../test/rust/test/bayesian_test.rs"

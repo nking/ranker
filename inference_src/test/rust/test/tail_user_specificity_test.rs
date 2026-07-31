@@ -14,7 +14,6 @@ mod tail_user_specificity_tests {
     use crate::tail_user_specificity_tests::helper::{get_model_param_json_uri};
 
     use tokio::task::JoinHandle;
-    use std::error::Error;
     use inference_engine::app_runner::AppRunner;
 
     //use super::*;
@@ -368,33 +367,47 @@ mod tail_user_specificity_tests {
         println!("\n\n===========================================");
         println!("        POPULARITY BIAS ANALYSIS           ");
         println!("===========================================");
-        println!("Global Average Top-K S_i: {:.4}", global_eval_metric);
-        println!("Tail Average Top-K S_i:   {:.4}", tail_eval_metric);
-
-        let diff = global_eval_metric - tail_eval_metric;
-        println!("Delta (Global - Tail):    {:.4}", diff);
-        println!("===========================================");
-
-        if diff > 0.3 {
-            println!("✅ SUCCESS: The model successfully specializes! It recommends significantly more niche items to Tail users than to the Global population.");
-        } else if diff > 0.1 {
-            println!("⚠️ MODERATE: The model shows some specialization, but the gap is narrow. Popularity bias may still be heavily influencing the ranker.");
-        } else {
-            println!("❌ FAILURE: The model suffers from strong popularity bias. Tail users are receiving the exact same mainstream recommendations as the rest of the population.");
-        }
 
         println!("Global ANN Retrieval Pool Avg S_i: {:.4}", global_avg_ann_retrieval_s_i);
         println!("Tail Cohort ANN Retrieval Pool Avg S_i: {:.4}", tail_avg_ann_retrieval_s_i);
         let diff = global_avg_ann_retrieval_s_i - tail_avg_ann_retrieval_s_i;
-        println!("Delta (Global - Tail):    {:.4}", diff);
-        println!("===========================================");
-        if diff > 0.3 {
-            println!("✅ The retrieval doesn't appear to be a cause for popularity bias.");
-        } else if diff > 0.1 {
-            println!("⚠️ The retrieval appears to be at least moderately responsible for popularity bias.");
+        let diff_sigma = diff / catalog_stats.std_dev;
+        println!("Delta (Global - Tail):    {:.4} = {:.3} σ", diff, diff_sigma);
+        if diff_sigma >= 0.6 {
+            println!("✅ SUCCESS: The retrieval successfully specializes for user item preference! \
+            It recommends significantly more niche items to Tail users than to the Global population.");
+        } else if diff_sigma >= 0.5 {
+            println!("MODERATE: The retrieval shows a moderate ability to recommend niche items to users \
+            who prefer them. Popularity bias may still be heavily influencing the rerieval.");
+        } else if diff_sigma >= 0.2 {
+            println!("⚠️ SMALL: The retrieval shows low behavioral differentiation for tail users.\
+            The effect is statistically detectable but it is an operationally marginal difference \
+            between global and tail user consumption patterns");
         } else {
-            println!("❌ The retrieval appears to be the origin of the popularity bias.");
+            println!("❌ FAILURE: The retrieval suffers from strong popularity bias. \
+            Tail users are receiving the exact same mainstream recommendations as the rest of the population.");
         }
+        println!("===========================================");
+        println!("Global Average Retrieval+Ranking Top-K S_i: {:.4}", global_eval_metric);
+        println!("Tail Average Retrieval+Ranking Top-K S_i:   {:.4}", tail_eval_metric);
+        let diff = global_eval_metric - tail_eval_metric;
+        let diff_sigma = diff / catalog_stats.std_dev;
+        println!("Delta (Global - Tail): {:.4}  = {:.3} σ", diff, diff_sigma);
+        if diff_sigma >= 0.6 {
+            println!("✅ SUCCESS: The model successfully specializes for user item preference! \
+            It recommends significantly more niche items to Tail users than to the Global population.");
+        } else if diff_sigma >= 0.5 {
+            println!("MODERATE: The model shows a moderate ability to recommend niche items to users \
+            who prefer them. Popularity bias may still be heavily influencing the ranker.");
+        } else if diff_sigma >= 0.2 {
+            println!("⚠️ SMALL: The model shows low behavioral differentiation for tail users.\
+            The effect is statistically detectable but it is an operationally marginal difference \
+            between global and tail user consumption patterns");
+        } else {
+            println!("❌ FAILURE: The model suffers from strong popularity bias. Tail users are receiving the exact same mainstream recommendations as the rest of the population.");
+        }
+
+        //if tail_eval_metric > tail_avg_ann_retrieval_s_i {
 
     }
 
