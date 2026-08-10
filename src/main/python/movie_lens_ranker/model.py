@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 class GraphRanker(nnx.Module):
     def __init__(self,
-            emb_in_dim:int, #16
+            emb_in_dim:int, #16 or 24
             num_candidates: int,
             hidden_features: int = 128, num_layers: int = 2,
             out_features: int = 64, heads: int = 4, edge_embed_dim:int=8,

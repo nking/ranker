@@ -1,3 +1,4 @@
+import os.path
 import re
 import json
 
@@ -67,4 +68,5 @@ def parse_metrics(input_filepath, output_filepath):
 
 if __name__ == "__main__":
     # Ensure tt_metrics.txt is in the same directory as this script
-    parse_metrics("tmp_metrics.txt", "metrics.json")
+    if os.path.exists("tmp_metrics.txt"):
+        parse_metrics("tmp_metrics.txt", "metrics.json")

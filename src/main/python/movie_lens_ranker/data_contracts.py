@@ -13,8 +13,8 @@ class BaseEmbeddingRecord(BaseModel):
 
     embedding: list[float] = Field(
         min_length=16,
-        max_length=16,
-        description="16-dimensional float embedding"
+        max_length=64,
+        description="float embedding"
     )
 
 class UserEmbeddingRecord(BaseEmbeddingRecord):
@@ -94,7 +94,6 @@ def _validate_array_record(resource_uri:str, adapter: TypeAdapter, column_keys: 
     err = uri_access_error(resource_uri)
     if err is not None:
         raise ValueError(f"{err}")
-
     reader = None
     try:
         reader = array_record_module.ArrayRecordReader(resource_uri)

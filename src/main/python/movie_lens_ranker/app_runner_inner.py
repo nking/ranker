@@ -5,6 +5,8 @@ model with JaxAI stack dataloader under SPMD paradigm with multi-host, multi-pro
 abilities.
 """
 import os
+
+import math
 import sys
 import logging
 
@@ -29,7 +31,7 @@ from movie_lens_ranker.train import run_train_phase, run_test_phase
 from movie_lens_ranker.util import get_recognized_keys, \
     app_runner_is_missing_minimum_required_keys, \
     destringify_mlflow_params, get_cpu_stats, is_running_on_gpu, \
-    create_dirs_if_is_filepath, get_canonical_mlflow_run_name, get_git_commit_hash
+    create_dirs_if_is_filepath, get_canonical_mlflow_run_name, get_git_commit_hash, read_embeddings_length
 
 FLAGS = flags.FLAGS
 
@@ -90,8 +92,20 @@ def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
                 config[k] = float(v)
     return config
 
-def _get_study_config(top_k:int=20, use_batching_alg:bool=False):
-    
+def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:int=16):
+    """
+    get the Vizier study config of hyperparameter ranges.
+    :param top_k:  the top_k rankings for the model
+    :param use_batching_alg: if True, uses study_config.algorithm = 'GP_UCB_PE'
+    else study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
+    :param embed_in_dim: the embedding lengths from the bin-encoder QueryModel or CAndidateModel.  This is expected
+    to be in range[16, 64] inclusive.
+    :return: he Vizier study config of hyperparameter ranges
+    """
+
+    if embed_in_dim % 8 != 0:
+        raise ValueError(f"emb_in_dim expected to be a multiple of 8.  found={embed_in_dim}")
+
     problem = vz.ProblemStatement()
     #https://oss-vizier.readthedocs.io/en/latest/guides/user/search_spaces.html#search-spaces
     root = problem.search_space.select_root()
@@ -100,7 +114,14 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False):
     root.add_discrete_param("num_layers", feasible_values=[2])
     #hidden_dim % num_heads == 0
     root.add_discrete_param("num_heads", feasible_values=[2, 4, 8])
-    root.add_discrete_param("hidden_dim", feasible_values=[64, 128])
+
+    #For emb_in_dim=16, this yields [32, 64, 96]
+    #For emb_in_dim=24, this yields [48, 96, 144]
+    root.add_discrete_param(
+        "hidden_dim",
+        feasible_values=[embed_in_dim * 2, embed_in_dim * 4, embed_in_dim * 6]
+    )
+
     root.add_discrete_param("max_history", feasible_values=[i for i in range(2*top_k, 100, 10)])
     
     root.add_discrete_param("num_candidates", feasible_values=[i for i in range(2*top_k, 100, 10)])
@@ -113,8 +134,25 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False):
     root.add_float_param("weight_decay", min_value=1e-4, max_value=1e-2,
         default_value=1e-3,
         scale_type=vz.ScaleType.LOG)
-    root.add_discrete_param("out_dim", feasible_values=[16, 32])
-    root.add_discrete_param("edge_embed_dim", feasible_values=[8, 16])
+
+    # out_dim avoids bottlenecking the incoming embeddings.
+    # For emb_in_dim=16, this yields [16, 32]
+    # For emb_in_dim=24, this yields [24, 48]
+    root.add_discrete_param(
+        "out_dim",
+        feasible_values=[embed_in_dim, embed_in_dim * 2]
+    )
+
+    # For emb_in_dim=18, this yields [8, 8, 16]
+    # For emb_in_dim=24, this yields [8, 12, 16]
+    if embed_in_dim == 16:
+        root.add_discrete_param("edge_embed_dim", feasible_values=[8, 16])
+    else:
+        root.add_discrete_param(
+            "edge_embed_dim",
+            feasible_values=[8, math.ceil(embed_in_dim / 2), 16]
+        )
+
     root.add_discrete_param("dropout_rate", feasible_values=[i*0.05 for i in range(1, 7)])
 
     problem.metric_information.append(
@@ -138,10 +176,12 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False):
     return study_config
 
 def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
-        top_k:int=20, use_batching_alg:bool=False, waittime_sec:int=60)\
-        -> vz_clients.Study:
+        top_k:int=20, use_batching_alg:bool=False, waittime_sec:int=60,
+        embed_in_dim:int=16) -> vz_clients.Study:
     """
     get or create a vizier study
+    :param top_k:
+    :param embed_in_dim: length of embeddings from the QueryModel or CandidateModel from the bi-encoder.
     :param project_id:
     :param study_name:
     :param endpoint:
@@ -153,7 +193,8 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
     vz_clients.environment_variables.server_endpoint = endpoint
     resource_name = f"owners/{project_id}/studies/{study_name}"
     
-    study_config = _get_study_config(top_k=top_k, use_batching_alg=use_batching_alg)
+    study_config = _get_study_config(top_k=top_k, use_batching_alg=use_batching_alg,
+        embed_in_dim=embed_in_dim)
     
     if jax.process_index() == 0:
         # Now connects to the explicitly created server.
@@ -163,7 +204,7 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
             study_id=study_name)
         return study
     #else other workers may need to wait for worker 0 to create the study
-    #the other wokers might need to wait
+    #the other workers might need to wait
     n_waits = waittime_sec//5
     # use the poll-retry pattern to wait until worker 0 creates study
     for _ in range(n_waits):
@@ -267,11 +308,15 @@ def run_tune(config):
     n_large = len(trial_ids) > 10
     
     jax.experimental.multihost_utils.sync_global_devices( "sync_barrier_for_vizier")
-    
+
+    embed_len = read_embeddings_length(config["movie_embeddings_uri"])
+    config['embed_len'] = embed_len
+
     if worker_rank == 0:
         logging.info(f"worker_{worker_rank}: creating vizier study")
         study = setup_vizier_study(project_id=config['project_id'], study_name=config['study_name'],
-            endpoint=config['vizier_endpoint'], top_k=config['top_k'], use_batching_alg=n_large)
+            endpoint=config['vizier_endpoint'], top_k=config['top_k'], use_batching_alg=n_large,
+                                   embed_in_dim=  embed_len)
         unique_id = uuid.uuid4().hex[:8]
         resource_name = f"owners_{config['project_id']}_studies_{config['study_name']}"
         client_id = f"{resource_name}_{unique_id}"

@@ -74,7 +74,7 @@ def app_runner_is_missing_minimum_required_keys(config: Dict[str, Any]) -> bool:
     """
     a method mostly for use to silently return from requests by docker compose polling
     :param config: dictionary of flags passed to app_runner
-    :return: False if has minumum required keys, else returns False
+    :return: False if has minimum required keys, else returns False
     """
     for key in ("study_name", "phase",  "mlflow_tracking_uri"):
         if config.get(key, None) is None:
@@ -354,13 +354,28 @@ def read_user_movie_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str
     :param user_embeddings_uri:
     :param movie_embeddings_uri:
     :param batch_size:
-    :return: tconcatenated row of zeros, user embeddings, movie embeddings,
+    :return: concatenated row of zeros, user embeddings, movie embeddings,
     """
     user_emb = _read_embeddings(user_embeddings_uri, batch_size=batch_size)
     movie_emb = _read_embeddings(movie_embeddings_uri, batch_size=batch_size)
     zero_row = jnp.zeros((1, user_emb.shape[1]))
     emb = jnp.concatenate([zero_row, user_emb, movie_emb])
     return emb
+
+def read_embeddings_length(embeddings_uri:str) -> int:
+    err = uri_access_error(embeddings_uri)
+    if err is not None:
+        raise ValueError(f"{err}")
+    reader = None
+    try:
+        reader = array_record_module.ArrayRecordReader(embeddings_uri)
+        batch_bytes = reader.read([0])
+        batch = [msgpack.unpackb(b, use_list=True) for b in batch_bytes]
+        for record in batch:
+            return len(record[1])
+    finally:
+        if reader is not None:
+            reader.close()
 
 def _read_embeddings(embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
     """
@@ -522,7 +537,7 @@ def build_history_lookup(ratings_uri_list: Union[str, List[str]], batch_size: in
     
     return lookup2, max_history
 
-def uri_access_error(uri: str) -> str:
+def uri_access_error(uri: str) -> Union[str, None]:
     """
     Safely checks if a file exists locally or on GCS.
     Fails fast on malformed URIs.
