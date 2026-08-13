@@ -1,0 +1,248 @@
+{
+    "space": [
+        {
+            "class_name": "Float",
+            "config": {
+                "name": "learning_rate",
+                "default": 0.0001,
+                "conditions": [],
+                "min_value": 0.0001,
+                "max_value": 0.001,
+                "step": null,
+                "sampling": "log"
+            }
+        },
+        {
+            "class_name": "Float",
+            "config": {
+                "name": "weight_decay",
+                "default": 0.0001,
+                "conditions": [],
+                "min_value": 0.0001,
+                "max_value": 0.05,
+                "step": null,
+                "sampling": "log"
+            }
+        },
+        {
+            "class_name": "Float",
+            "config": {
+                "name": "drop_rate",
+                "default": 0.4,
+                "conditions": [],
+                "min_value": 0.35,
+                "max_value": 0.65,
+                "step": null,
+                "sampling": "linear"
+            }
+        },
+        {
+            "class_name": "Float",
+            "config": {
+                "name": "log_q_correction_factor",
+                "default": 0.5,
+                "conditions": [],
+                "min_value": 0.1,
+                "max_value": 1.0,
+                "step": null,
+                "sampling": "linear"
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "regl2",
+                "conditions": [],
+                "value": 0.0
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "layer_sizes",
+                "conditions": [],
+                "value": "[32]"
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "feature_acronym",
+                "conditions": [],
+                "value": "ahosy"
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "incl_genres",
+                "conditions": [],
+                "value": true
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "BATCH_SIZE",
+                "conditions": [],
+                "value": 2048
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "NUM_EPOCHS",
+                "conditions": [],
+                "value": 20
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "use_bias_corr",
+                "conditions": [],
+                "value": true
+            }
+        },
+        {
+            "class_name": "Choice",
+            "config": {
+                "name": "bias_corr_alpha",
+                "default": 0.05,
+                "conditions": [],
+                "values": [
+                    0.01,
+                    0.05,
+                    0.1
+                ],
+                "ordered": true
+            }
+        },
+        {
+            "class_name": "Float",
+            "config": {
+                "name": "temperature",
+                "default": 0.05,
+                "conditions": [],
+                "min_value": 0.05,
+                "max_value": 0.15,
+                "step": 0.01,
+                "sampling": "linear"
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "n_users",
+                "conditions": [],
+                "value": 6040
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "n_movies",
+                "conditions": [],
+                "value": 3883
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "n_genres",
+                "conditions": [],
+                "value": 18
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "run_eagerly",
+                "conditions": [],
+                "value": false
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "num_train",
+                "conditions": [],
+                "value": 370838
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "num_eval",
+                "conditions": [],
+                "value": 46354
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "version",
+                "conditions": [],
+                "value": "1.0.0"
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "model_name",
+                "conditions": [],
+                "value": "user_movie"
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "git_hash",
+                "conditions": [],
+                "value": "6adfe72bfc357affcc17dca02bcfe6559ee49bfb"
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "input_dataset_element_spec_raw_ser",
+                "conditions": [],
+                "value": "gASVAgIAAAAAAAB9lCiMA2FnZZSMInRlbnNvcmZsb3cucHl0aG9uLmZyYW1ld29yay50ZW5zb3KUjApUZW5zb3JTcGVjlJOUjCh0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsudGVuc29yX3NoYXBllIwLVGVuc29yU2hhcGWUk5RdlChoBYwJRGltZW5zaW9ulJOUToWUUpRoCksBhZRSlGWFlFKUjCJ0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsuZHR5cGVzlIwIYXNfZHR5cGWUk5SMBWludDY0lIWUUpRoAYeUUpSMBmdlbmRlcpRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoE4wGc3RyaW5nlIWUUpRoGYeUUpSMBmdlbnJlc5RoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoI2gmh5RSlIwIbW92aWVfaWSUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoMIeUUpSMCm9jY3VwYXRpb26UaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoOoeUUpSMCXRpbWVzdGFtcJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmhEh5RSlIwHdXNlcl9pZJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmhOh5RSlHUu"
+            }
+        },
+        {
+            "class_name": "Fixed",
+            "config": {
+                "name": "input_dataset_element_spec_trans_ser",
+                "conditions": [],
+                "value": "gASV/gIAAAAAAAB9lCiMA2FnZZSMInRlbnNvcmZsb3cucHl0aG9uLmZyYW1ld29yay50ZW5zb3KUjApUZW5zb3JTcGVjlJOUjCh0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsudGVuc29yX3NoYXBllIwLVGVuc29yU2hhcGWUk5RdlChoBYwJRGltZW5zaW9ulJOUToWUUpRoCksBhZRSlGWFlFKUjCJ0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsuZHR5cGVzlIwIYXNfZHR5cGWUk5SMB2Zsb2F0MzKUhZRSlGgBh5RSlIwGZ2VuZGVylGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaBmHlFKUjAZnZW5yZXOUaARoB12UKGgKToWUUpRoCksBhZRSlGgKSxKFlFKUZYWUUpRoFmgjh5RSlIwCaHKUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoL4eUUpSMBWhyX3drlGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaDmHlFKUjAVtb250aJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmhDh5RSlIwIbW92aWVfaWSUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoTYeUUpSMCm9jY3VwYXRpb26UaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoV4eUUpSMC3NlY19pbnRvX3lylGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaGGHlFKUjAd1c2VyX2lklGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaGuHlFKUjAd3ZWVrZGF5lGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaHWHlFKUjAJ5cpRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmh/h5RSlIwEeXJfepRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmiJh5RSlHUu"
+            }
+        }
+    ],
+    "values": {
+        "learning_rate": 0.0001,
+        "weight_decay": 0.0001,
+        "drop_rate": 0.35,
+        "log_q_correction_factor": 1.0,
+        "regl2": 0.0,
+        "layer_sizes": "[32]",
+        "feature_acronym": "ahosy",
+        "incl_genres": true,
+        "BATCH_SIZE": 2048,
+        "NUM_EPOCHS": 20,
+        "use_bias_corr": true,
+        "bias_corr_alpha": 0.05,
+        "temperature": 0.14,
+        "n_users": 6040,
+        "n_movies": 3883,
+        "n_genres": 18,
+        "run_eagerly": false,
+        "num_train": 370838,
+        "num_eval": 46354,
+        "version": "1.0.0",
+        "model_name": "user_movie",
+        "git_hash": "6adfe72bfc357affcc17dca02bcfe6559ee49bfb",
+        "input_dataset_element_spec_raw_ser": "gASVAgIAAAAAAAB9lCiMA2FnZZSMInRlbnNvcmZsb3cucHl0aG9uLmZyYW1ld29yay50ZW5zb3KUjApUZW5zb3JTcGVjlJOUjCh0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsudGVuc29yX3NoYXBllIwLVGVuc29yU2hhcGWUk5RdlChoBYwJRGltZW5zaW9ulJOUToWUUpRoCksBhZRSlGWFlFKUjCJ0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsuZHR5cGVzlIwIYXNfZHR5cGWUk5SMBWludDY0lIWUUpRoAYeUUpSMBmdlbmRlcpRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoE4wGc3RyaW5nlIWUUpRoGYeUUpSMBmdlbnJlc5RoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoI2gmh5RSlIwIbW92aWVfaWSUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoMIeUUpSMCm9jY3VwYXRpb26UaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoOoeUUpSMCXRpbWVzdGFtcJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmhEh5RSlIwHdXNlcl9pZJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmhOh5RSlHUu",
+        "input_dataset_element_spec_trans_ser": "gASV/gIAAAAAAAB9lCiMA2FnZZSMInRlbnNvcmZsb3cucHl0aG9uLmZyYW1ld29yay50ZW5zb3KUjApUZW5zb3JTcGVjlJOUjCh0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsudGVuc29yX3NoYXBllIwLVGVuc29yU2hhcGWUk5RdlChoBYwJRGltZW5zaW9ulJOUToWUUpRoCksBhZRSlGWFlFKUjCJ0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsuZHR5cGVzlIwIYXNfZHR5cGWUk5SMB2Zsb2F0MzKUhZRSlGgBh5RSlIwGZ2VuZGVylGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaBmHlFKUjAZnZW5yZXOUaARoB12UKGgKToWUUpRoCksBhZRSlGgKSxKFlFKUZYWUUpRoFmgjh5RSlIwCaHKUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoL4eUUpSMBWhyX3drlGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaDmHlFKUjAVtb250aJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmhDh5RSlIwIbW92aWVfaWSUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoTYeUUpSMCm9jY3VwYXRpb26UaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoV4eUUpSMC3NlY19pbnRvX3lylGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaGGHlFKUjAd1c2VyX2lklGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaGuHlFKUjAd3ZWVrZGF5lGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaHWHlFKUjAJ5cpRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmh/h5RSlIwEeXJfepRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmiJh5RSlHUu"
+    }
+}
