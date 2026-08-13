@@ -1,6 +1,11 @@
 #[cfg(test)]
 mod client_tests {
+    use std::collections::HashMap;
     use std::error::Error;
+    use std::fs::File;
+    use std::io::BufReader;
+    use std::path::Path;
+    use serde_json::Value;
     use inference_engine::model_client::{QueryModelClient, RankerModelClient};
     use inference_engine::graph_builder::{create_fake_padded_super_batch, JraphGraph};
     //use super::*;
@@ -10,7 +15,7 @@ mod client_tests {
         // Tell Rust to literally include the code from helper.rs here
         include!("helper.rs");
     }
-    use crate::client_tests::helper::{get_embeddings_uris};
+    use crate::client_tests::helper::{get_embeddings_metadata_uris, get_embeddings_uris};
 
     #[tokio::test]
     async fn test_query_model_connection() {
@@ -40,7 +45,7 @@ mod client_tests {
     }
 
     #[tokio::test]
-    async fn test_ranker_model_connection() {
+    async fn test_ranker_model_connection() -> Result<(), Box<dyn std::error::Error>>{
         let uri = String::from("http://172.17.0.1:8510");
 
         let client = RankerModelClient::new(uri).await;
@@ -63,10 +68,17 @@ mod client_tests {
             &user_embeddings_uri, &movie_embeddings_uri
         );
 
+        let (user_emb_metadata_uri, movie_emb_metadata_uri) : (String, String)
+            = get_embeddings_metadata_uris();
+
+        let json_content = tokio::fs::read_to_string(&user_emb_metadata_uri).await?;
+        let dict: HashMap<String, Value> = serde_json::from_str(&json_content)?;
+        let embed_len = dict.get("embed_dim").and_then(|v| v.as_u64()).unwrap();
+
         // If the docker container isn't running, or the model isn't loaded,
         // this will fail and print the gRPC status error.
         let result : Result<Vec<f32>, Box<dyn Error>> = client.get_candidate_ranks(
-            padded_super_graph, 16).await;
+            padded_super_graph, embed_len as usize).await;
 
         assert!(result.is_ok(), "Failed to get ranks: {:?}", result.err());
 
@@ -75,5 +87,8 @@ mod client_tests {
 
         // Assert the expected dimension length (e.g., 128)
         assert!(!ranks.is_empty(), "ranks vector is empty!");
+
+        Ok(())
+
     }
 }

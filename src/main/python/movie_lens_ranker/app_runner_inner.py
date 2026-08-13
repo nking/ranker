@@ -92,13 +92,13 @@ def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
                 config[k] = float(v)
     return config
 
-def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:int=16):
+def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:int=32):
     """
     get the Vizier study config of hyperparameter ranges.
     :param top_k:  the top_k rankings for the model
     :param use_batching_alg: if True, uses study_config.algorithm = 'GP_UCB_PE'
     else study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
-    :param embed_in_dim: the embedding lengths from the bin-encoder QueryModel or CAndidateModel.  This is expected
+    :param embed_in_dim: the embedding lengths from the bi-encoder QueryModel or CandidateModel.  This is expected
     to be in range[16, 64] inclusive.
     :return: he Vizier study config of hyperparameter ranges
     """
@@ -111,19 +111,16 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:in
     root = problem.search_space.select_root()
     
     root.add_discrete_param("top_k", feasible_values=[top_k])
-    root.add_discrete_param("num_layers", feasible_values=[2])
+    root.add_discrete_param("num_layers", feasible_values=[2,3])
     #hidden_dim % num_heads == 0
     root.add_discrete_param("num_heads", feasible_values=[2, 4, 8])
 
-    #For emb_in_dim=16, this yields [32, 64, 96]
-    #For emb_in_dim=24, this yields [48, 96, 144]
+    # For embed_in_dim=32, yields [64, 128, 192, 256]
     root.add_discrete_param(
-        "hidden_dim",
-        feasible_values=[embed_in_dim * 2, embed_in_dim * 4, embed_in_dim * 6]
+        "hidden_dim", feasible_values=[embed_in_dim * k for k in (2, 4, 6, 8)]
     )
 
     root.add_discrete_param("max_history", feasible_values=[i for i in range(2*top_k, 100, 10)])
-    
     root.add_discrete_param("num_candidates", feasible_values=[i for i in range(2*top_k, 100, 10)])
     
     #if want a linear relationship between lr and wd, setup a dependency:
@@ -131,29 +128,23 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:in
     # config['weight_decay'] = config['learning_rate'] * wd_ratio
     root.add_float_param("learning_rate", min_value=1e-4, max_value=1e-2, default_value=1e-3,
         scale_type=vz.ScaleType.LOG)
-    root.add_float_param("weight_decay", min_value=1e-4, max_value=1e-2,
-        default_value=1e-3,
+    root.add_float_param("weight_decay", min_value=1e-4, max_value=1e-2, default_value=1e-3,
         scale_type=vz.ScaleType.LOG)
 
     # out_dim avoids bottlenecking the incoming embeddings.
-    # For emb_in_dim=16, this yields [16, 32]
-    # For emb_in_dim=24, this yields [24, 48]
+    # For embed_in_dim=32, yields [32, 48, 64] (multiples of 16 for JAX vector alignment)
     root.add_discrete_param(
         "out_dim",
-        feasible_values=[embed_in_dim, embed_in_dim * 2]
+        feasible_values=[embed_in_dim, int(embed_in_dim * 1.5), embed_in_dim * 2]
     )
 
-    # For emb_in_dim=18, this yields [8, 8, 16]
-    # For emb_in_dim=24, this yields [8, 12, 16]
-    if embed_in_dim == 16:
-        root.add_discrete_param("edge_embed_dim", feasible_values=[8, 16])
-    else:
-        root.add_discrete_param(
-            "edge_embed_dim",
-            feasible_values=[8, math.ceil(embed_in_dim / 2), 16]
-        )
+    # Deduplicated edge embedding dimension logic
+    # For embed_in_dim=32, yields [8, 16, 24]
+    edge_dims = sorted(list({8, embed_in_dim // 2, int(embed_in_dim * 0.75)}))
+    root.add_discrete_param("edge_embed_dim", feasible_values=edge_dims)
 
-    root.add_discrete_param("dropout_rate", feasible_values=[i*0.05 for i in range(1, 7)])
+    # Dropout range [0.10, 0.40] to stabilize GNN message passing
+    root.add_discrete_param("dropout_rate", feasible_values=[round(i * 0.05, 2) for i in range(2, 9)])
 
     problem.metric_information.append(
         vz.MetricInformation(name=f'ndcg_{top_k}',
@@ -177,7 +168,7 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:in
 
 def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
         top_k:int=20, use_batching_alg:bool=False, waittime_sec:int=60,
-        embed_in_dim:int=16) -> vz_clients.Study:
+        embed_in_dim:int=32) -> vz_clients.Study:
     """
     get or create a vizier study
     :param top_k:

@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 class GraphRanker(nnx.Module):
     def __init__(self,
-            emb_in_dim:int, #16 or 24
+            emb_in_dim:int,
             num_candidates: int,
             hidden_features: int = 128, num_layers: int = 2,
             out_features: int = 64, heads: int = 4, edge_embed_dim:int=8,
@@ -69,9 +69,9 @@ class GraphRanker(nnx.Module):
         
         num_total_nodes = x.shape[0]
         batch_indices = jnp.repeat(
-            jnp.arange(len(graph.n_node)), #batch_size + 1 dummy = 3
-            graph.n_node, # ndarray of [21, 21, 86]
-            total_repeat_length=num_total_nodes #128
+            jnp.arange(len(graph.n_node)),
+            graph.n_node,
+            total_repeat_length=num_total_nodes
         )
         #batch_indices length is num_total_nodes
         

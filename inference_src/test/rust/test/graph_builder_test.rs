@@ -246,7 +246,7 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
         let _rows = rows.len();
         let _cols = embed_len;
         let _rng = rand::thread_rng();
-
+        
         // Generate 32 (2 * 16) random numbers
         let user_embeddings : Vec<f32> = get_user_embeddings(&user_ids, &user_embeddings_catalog, embed_len);
         //let user_embeddings: Vec<f32> = (0..(rows * cols))

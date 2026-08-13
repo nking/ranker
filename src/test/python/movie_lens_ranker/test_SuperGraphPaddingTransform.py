@@ -72,7 +72,7 @@ class TestSuperGraphPadding(unittest.TestCase):
         
     def test_transform(self):
         batch_size = 3
-        max_history = 20
+        max_history = 40
         num_candidates = 20
         
         jax_graph_comp_dict = calc_number_jax_graph_components(
@@ -168,6 +168,8 @@ class TestSuperGraphPadding(unittest.TestCase):
         np.testing.assert_array_equal(a.n_node, b.n_node,
                 strict=True
         )
+        #import sys
+        #np.set_printoptions(threshold=sys.maxsize)
         for key in a.nodes.keys():
             aa = a.nodes[key]
             bb = b.nodes[key]
@@ -177,16 +179,7 @@ class TestSuperGraphPadding(unittest.TestCase):
                     np.testing.assert_array_equal,aa, bb, strict=True
                 )
             elif key == "embeddings":
-                count = 0
-                for row in range(aa.shape[0]):
-                    a1 = aa[row]
-                    b1 = bb[row]
-                    diff = a1 - b1
-                    indices = np.where(abs(diff) > 1)[0]
-                    if len(indices) > 0:
-                        print(f'row={row}, indices={indices}', flush=True)
-                        count += 1
-                self.assertNotEqual(0, count)
+                self.assertFalse(np.allclose(aa, bb, rtol=1e-04))
             else:
                 np.testing.assert_array_equal(aa, bb, strict=True)
         

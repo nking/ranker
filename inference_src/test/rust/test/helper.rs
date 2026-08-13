@@ -86,6 +86,21 @@ pub fn get_embeddings_uris() -> (String, String) {
     (user_embedding_uri.unwrap().to_string_lossy().into_owned(),
     movie_embedding_uri.unwrap().to_string_lossy().into_owned())
 }
+
+pub fn get_embeddings_metadata_uris() -> (String, String) {
+    let mut user_uri : Option<PathBuf> = get_project_dir();
+    if let Some(ref mut p) = user_uri {
+        p.push("src/test/resources/data/user_emb_metadata.json");
+    }
+    let mut movie_uri : Option<PathBuf> = get_project_dir();
+    if let Some(ref mut p) = movie_uri {
+        p.push("src/test/resources/data/movie_emb_metadata.json");
+    }
+
+    (user_uri.unwrap().to_string_lossy().into_owned(),
+        movie_uri.unwrap().to_string_lossy().into_owned())
+}
+
 #[allow(dead_code)]
 pub fn get_recommended_movies_uris() -> (String, String) {
     let movies_rec_uri = get_project_dir()
