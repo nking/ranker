@@ -41,7 +41,13 @@ class SuperGraphPaddingTransform(pgrain.MapTransform):
             jraph.GraphsTuple(
                 n_node=n_node_padded,
                 n_edge=n_edge_padded,
-                nodes=nodes_padded,
+                nodes={#padded
+                    "ids": node_ids,
+                    "label": node_labels,
+                    "type": node_types,
+                    "candidate_mask": candidate_mask,
+                    "embeddings" : embeddings for node_ids
+                },
                 edges=edges_padded,
                 globals=globals_padded,
                 senders=senders_padded,

@@ -270,7 +270,7 @@ def define_flags():
     )
     # ====== TRAINABLE MODEL PARAMS, for tune phase, they're supplied by internal code ======
     flags.DEFINE_integer("top_k", default=20,
-        help="used when calculating metrics NDCG@k, recal@k, MRR@k"
+        help="used when calculating metrics NDCG@k, recall@k, MRR@k"
     )
     flags.DEFINE_float("learning_rate", default=5e-4,
         help="learning_rate for the AdamW optimizer"

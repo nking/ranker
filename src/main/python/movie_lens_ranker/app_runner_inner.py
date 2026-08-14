@@ -635,7 +635,14 @@ def run_export_results(config: Dict[str, Any]):
         #get the metrics:
         mlflow_client = MlflowClient(tracking_uri=config['mlflow_tracking_uri'])
         logging.info(f'getting metrics history for mlflow_run_id={mlflow_run_id}')
-        for key in ("loss", "ndcg_20", "recall_20", "mrr_20"):
+        m_run = mlflow_client.get_run(mlflow_run_id)
+        all_metric_keys = list(m_run.data.metrics.keys())
+        metrics_keys = set()
+        for k in all_metric_keys:
+            v = k.removeprefix("train_")
+            v = v.removeprefix("val_")
+            metrics_keys.add(v)
+        for key in metrics_keys:
             for key_t in (f"train_{key}", f"val_{key}"):
                 metrics_dict[key_t] = {'x': [], 'y': []}
                 m_dict = mlflow_client.get_metric_history(mlflow_run_id, key=key_t)

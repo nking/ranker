@@ -6,6 +6,7 @@ import json
 # (1) cat train_output.log | grep NDCG@20 >& tmp_metrics.txt
 # (2) python3 train_logs_parser
 
+#TODO: update with "logit_mean", "logit_std", "logit_min", "logit_max"
 def parse_metrics(input_filepath, output_filepath):
     # Initialize the dictionary to match the target JSON structure
     metrics = {

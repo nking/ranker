@@ -153,7 +153,7 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
     
 @nnx.jit
 def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
-        optimizer: nnx.Optimizer) -> Tuple[float, Dict[str, float]]:
+        optimizer: nnx.Optimizer) -> Array:
     """
     train step over a batch, where padded_graph contains super graph of the batch
     :param model:
@@ -161,9 +161,9 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     :param optimizer:
     :return:
     """
-    
+
     #debug_weight_before = jnp.linalg.norm(model.score_head.kernel.get_value())
-    
+
     def loss_fn(model, padded_graph) -> Array:
         scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
         safe_scores = jnp.where(main_mask, scores_2d, -1e9)
@@ -175,7 +175,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
             reduce_fn=jnp.mean  # Let it crash if NaNs happen to enable follow up
         )
         return loss
-    
+
     # the model and optimizer were created with a mesh context, so here in this jax.jit method
     # value_and_grad does the following:
     # in the forward pass, the model is replicated across devices and each device calculates loss for its shard of data.
@@ -186,25 +186,32 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     loss, grads = nnx.value_and_grad(loss_fn)(model, padded_graph)
     # each process updates its model with the same values, so the model stays implicitly synchronized.
     optimizer.update(model, grads)
-    
+
     #debug_weight_after = jnp.linalg.norm(model.score_head.kernel.get_value())
     #diff = jnp.abs(debug_weight_before - debug_weight_after)
     ## if > 1E-4, is a significant change
     ## if > 1, exploding gradient or learning rate issue
     #jax.debug.print("Weight Norm: Before={b:.6f}, After={a:.6f}, Delta={d:.8f}",
     #    b=debug_weight_before, a=debug_weight_after, d=diff)
-  
+
     return loss
 
-@nnx.jit
+@nnx.jit(static_argnames=('top_k',))
 def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) -> dict[str, Array]:
     """
     train step over a batch, where padded_graph contains super graph of the batch
     :param model:
     :param padded_graph:
     :param top_k:
-    :return: dictionary of "loss", "mrr", "ndcg", "recall"
+    :return: dictionary with keys:
+        "loss",
+        "mrr_{top_k}", "ndcg_{top_k}", "recall_{top_k}", "precision_{top_k}", "precision_1", "precision_5",
+        "logit_mean"
+        "logit_std"
+        "logit_min"
+        "logit_max"
     """
+
     def loss_fn(model, padded_graph) -> Tuple[Array, Dict[str, Array]]:
         scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
         safe_scores = jnp.where(main_mask, scores_2d, -1e9)
@@ -222,11 +229,44 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) ->
             safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
         recall = rax.recall_metric(
             safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
-        return loss, {f"mrr": mrr, f"ndcg": ndcg, f"recall": recall}
-    
+        prec_1 = rax.precision_metric(
+            safe_scores, labels_2d, where=main_mask, topn=1, reduce_fn=jnp.mean)
+        prec_5 = rax.precision_metric(
+            safe_scores, labels_2d, where=main_mask, topn=5, reduce_fn=jnp.mean)
+        prec_k = rax.precision_metric(
+            safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
+        #statistics to track the score head and logisti
+        safe_num_valid = jnp.maximum(jnp.sum(main_mask), 1.0)
+        masked_scores = jnp.where(main_mask, scores_2d, 0.0)
+        # Mean and Standard Deviation over valid unpadded candidates
+        logit_mean = jnp.sum(masked_scores) / safe_num_valid
+        logit_var = jnp.sum(jnp.where(main_mask, jnp.square(scores_2d - logit_mean), 0.0)) / safe_num_valid
+        logit_std = jnp.sqrt(logit_var)
+        # Extreme values bounded strictly within the masked region
+        logit_min = jnp.min(jnp.where(main_mask, scores_2d, jnp.inf))
+        logit_max = jnp.max(jnp.where(main_mask, scores_2d, -jnp.inf))
+        stats = {
+            f"mrr_{top_k}": mrr,
+            f"ndcg_{top_k}": ndcg,
+            f"recall_{top_k}": recall,
+            f"precision_{top_k}": prec_k,
+            f"precision_1": prec_1,
+            f"precision_5": prec_5,
+            "logit_mean": logit_mean,
+            "logit_std": logit_std,
+            "logit_min": logit_min,
+            "logit_max": logit_max,
+        }
+        return loss, stats
+
     # has_aux is necessary when loss_fn returns more than scalar loss
-    loss, metrics_dict = loss_fn(model, padded_graph)
-    metrics_dict['loss'] = loss
+    (loss, stats_dict), grads = nnx.value_and_grad(loss_fn, has_aux=True)(model, padded_graph)
+
+    metrics_dict = {
+        **stats_dict,
+        "loss" : loss,
+    }
+
     return metrics_dict
 
 def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterator,
@@ -240,12 +280,14 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
     :param val_dataloader_iter: iterator over the validation dataset
     :param top_k: the @K to be used in metrics NDCG@K, recall@K, MRR@K
     :param jax_graph_comp_dict: dictionary formed from method calc_number_jax_graph_components
-    :return: a dictionary of the globally averaged metrics "loss", "mrr", "ndcg", "recall", the number of samples used
+    :return: a dictionary of the globally averaged metrics
+    "loss", "mrr", "ndcg", "recall", "logit_mean", "logit_std", "logit_min", "logit_max",
+    the number of samples used
     """
     data_mesh = jax.sharding.Mesh(jax.devices(), axis_names=('data',))
     #model_pspec = P(('processes', 'local_devices'))
     #model_mesh = get_model_mesh()
-    global_avg_metrics_batches = {"loss":[], "mrr":[], "ndcg":[], "recall":[]}
+    global_avg_metrics_batches = {}
     n_samples_tot = 0
     
     # in_specs=P() tells JAX the input is a scalar
@@ -265,11 +307,13 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
 
         val_metrics = eval_step(model, padded_super_graph, top_k)
         
-        # val_metrics['ndcg'] is now an array of shape (Num_Batches,)
+        # val_metrics['ndcg_20'] is now an array of shape (Num_Batches,)
         local_avg_val_metrics = jax.tree.map(jnp.mean, val_metrics)
         #average over all devices. the jax.lax internal to aggregate_metric acts as a barrier
         global_avg_metrics = jax.tree.map(aggregate_metric, local_avg_val_metrics)
         for key in global_avg_metrics:
+            if key not in global_avg_metrics_batches:
+                global_avg_metrics_batches[key] = []
             global_avg_metrics_batches[key].append(global_avg_metrics[key].item())
             
     #NOTE: at expense of RAM, could instead: stack all the padded graphs (put in a list
@@ -429,17 +473,13 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         from importlib import metadata
         config_dict['model_version'] = metadata.version("movie_lens_ranker")
         config_dict['trained_at_timestamp'] = int(time.time())
-
-    ndcg_text = f'ndcg_{top_k}'
-    mrr_text = f'mrr_{top_k}'
-    recall_text = f'recall_{top_k}'
     
     #configure for early stopping when ndcg stops changing
     patience = 5
     best_ndcg = -1.0
     epochs_without_improvement = 0
     delay = 10 # min number of epochs to learn.  for large graphs, consider using 20
-    
+
     epoch_avg_train_loss = []
     early_stop_triggered = [False]
     
@@ -485,7 +525,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         global_step = local_step * NUM_TRAIN_SHARDS
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
         last_epoch = epoch
-        
+
         loss = train_step(model, padded_super_graph, optimizer)
         
         epoch_avg_train_loss.append(loss)
@@ -509,30 +549,17 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             # Also, this is synced across all shards, so all shards have same conditional logic for global_avg_val_metrics below here
             global_avg_val_metrics, n_val_samples = _epoch_validation(model, iter(val_dataloader), top_k)
             model.train()
-            
-            global_avg_val_loss = global_avg_val_metrics["loss"]
-            global_avg_val_mrr = global_avg_val_metrics['mrr']
-            global_avg_val_ndcg = global_avg_val_metrics['ndcg']
-            global_avg_val_recall = global_avg_val_metrics['recall']
-            
-            logging.info(f"Epoch {epoch}: Train avg Loss {avg_train_loss:.4f} "
-                  f"| train NDCG@{top_k} {train_metrics['ndcg']:.4f} "
-                  f"| train MRR@{top_k} {train_metrics['mrr']:.4f} "
-                  f"| train recall_{top_k} {train_metrics['recall']:.4f}"
-                  f"avg val loss {global_avg_val_loss:.4f} | val NDCG@{top_k} {global_avg_val_ndcg:.4f} "
-                  f"| val MRR@{top_k} {global_avg_val_mrr:.4f} | val recall_{top_k} {global_avg_val_recall:.4f}")
-            
-            metrics_dict = {
-                "train_loss":avg_train_loss.item(),
-                f"train_{mrr_text}":train_metrics['mrr'].item(),
-                f"train_{ndcg_text}" : train_metrics['ndcg'].item(),
-                f"train_{recall_text}" : train_metrics['recall'].item(),
-                "val_loss":global_avg_val_loss,
-                f"val_{mrr_text}":global_avg_val_mrr,
-                f"val_{ndcg_text}":global_avg_val_ndcg,
-                f"val_{recall_text}":global_avg_val_recall
-            }
-            
+
+            global_avg_val_ndcg : float = global_avg_val_metrics[f'ndcg_{top_k}']
+
+            metrics_dict = {"train_loss":avg_train_loss.item()}
+            for kt in train_metrics:
+                metrics_dict[f"train_{kt}"] = train_metrics[kt].item()
+            for kt in global_avg_val_metrics:
+                metrics_dict[f"val_{kt}"] = global_avg_val_metrics[kt]
+            metrics_dict["time"] = time.time() #leave as float, else mlflow fluent tries to use tf  to make it a float and tf is not installed
+            logging.info(f"Epoch {epoch}: {metrics_dict}")
+
             if save_checkpoints:
                 #orbax for checkpointing.  saves latest 2
                 convert_fn = partial(convert_to_global, mesh=model_mesh)
@@ -901,42 +928,6 @@ def stack_val_batches(dataloader, num_steps):
     stacked_batches = jax.tree.map(lambda *args: jnp.stack(args), *batches)
     return stacked_batches
 
-@nnx.jit
-def validation_epoch_compiled(model: GraphRanker, stacked_batches, top_k):
-    """
-    Compiled validation epoch.
-    Processes multiple batches on-device without returning to Python.
-    """
-    def scan_body(carry, batch):
-        # Call your existing eval_step logic
-        # Since eval_step is also @nnx.jit, XLA will inline it here
-        metrics = eval_step(model, batch, top_k)
-        return None, metrics
-    
-    # jax.lax.scan iterates over the leading dimension of stacked_batches
-    _, metrics_history = jax.lax.scan(scan_body, None, stacked_batches)
-    
-    # metrics_history now contains arrays of shape [steps_per_worker, ...]
-    # We average them directly on the GPU
-    return jax.tree.map(lambda x: jnp.mean(x), metrics_history)
-
-def run_full_validation(model, val_dataloader, top_k, steps=903, micro_batch_size=100):
-    all_step_metrics = []
-    
-    # Iterate through the loader in chunks
-    for _ in range(0, steps, micro_batch_size):
-        # 1. Stack a smaller chunk (e.g., 100 batches)
-        chunk = stack_val_batches(val_dataloader, micro_batch_size)
-        
-        # 2. Run compiled validation on this chunk
-        # This keeps GPU utilization high without OOMing the Host RAM
-        chunk_metrics = validation_epoch_compiled(model, chunk, top_k)
-        all_step_metrics.append(chunk_metrics)
-    
-    # Final average across chunks
-    return jax.tree.map(lambda *args: jnp.mean(jnp.array(args)),
-        *all_step_metrics)
-
 def restore_items_from_checkpoint(checkpoint_uri:str, get_earliest:bool=False) -> Dict[str, Any]:
     """
     restore the model, dataloader and state from checkpoint_uri.  if get_Earliest is set to True,
@@ -1158,11 +1149,9 @@ def run_test_phase(config: dict):
 
         global_test_metrics, n_val_samples = _epoch_validation(model, iter(test_dataloader), config['top_k'])
     
-        out_dict = {f"test_{key}_{config['top_k']}" : value for key, value in global_test_metrics.items()}
-        #to be consitent w/ train, change the loss label:
-        out_dict['test_loss'] = out_dict[f"test_loss_{config['top_k']}"]
-        del out_dict[f"test_loss_{config['top_k']}"]
-    
+        out_dict = {f"test_{key}" : value for key, value in global_test_metrics.items()}
+        #to be consistent w/ train, change the loss label:
+
         if worker_rank == 0:
             if mlflow_run is not None:
                 for key, value in out_dict.items():
@@ -1278,9 +1267,13 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
     multihost_utils.sync_global_devices( "sync_barrier_for_restored_model_validation")
     
     logging.info(f'n_val_samples_current={n_val_samples_current}, n_val_samples_restored = {n_val_samples_restored}')
-    
+
+    keys = set(global_avg_val_metrics_current.keys())
+    keys = keys.union(global_avg_val_metrics_restored.keys())
+    assert(len(keys) > 0)
+
     all_similar = True
-    for key in ("loss", "mrr", "ndcg", "recall"):
+    for key in keys:
         logging.info(f'worker_rank={jax.process_index()}: key={key}, model={global_avg_val_metrics_current[key]}, restored={global_avg_val_metrics_restored[key]}')
         if not jnp.allclose(global_avg_val_metrics_current[key], global_avg_val_metrics_restored[key]):
             all_similar = False

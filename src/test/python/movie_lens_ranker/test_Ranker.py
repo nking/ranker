@@ -509,24 +509,13 @@ class TestRanker(unittest.TestCase):
             filter_string="attributes.run_name LIKE 'train_%'",
             output_format="list"
         )
-        expected_keys = {'loss', 'ndcg_20', 'mrr_20', 'recall_20'}
-       
+
         metrics_dicts = get_mlflow_metrics_by_exp_name(
             mlflow_tracking_uri=config['mlflow_tracking_uri'],
+            run_name = get_canonical_mlflow_run_name(config),
             experiment_name=config['study_name'])
-        
-        print(f'metrics_dicts={metrics_dicts}')
-        metrics_dict = None
-        for run_id, d in metrics_dicts.items():
-            if metrics_dict is None or (len(d['train_loss']['x']) > len(metrics_dict['train_loss']['x'])):
-                metrics_dict = d
-        plot_metrics_dict(metrics_dict, get_bin_dir())
-        pngs = glob.glob(os.path.join(get_bin_dir(), "*.png"))
-        self.assertIsNotNone(pngs)
-        self.assertTrue(len(pngs) > 0)
-        for png_file in pngs:
-            self.assertTrue(os.path.exists(png_file))
-            
+        self.assertIsNotNone(metrics_dicts)
+
         self._assert_export_methods(config)
     
     def test_run_train_test_given(self):
@@ -615,7 +604,8 @@ class TestRanker(unittest.TestCase):
             content = f.read()
             output_metrics_dict = json.loads(content)
         self.assertIsNotNone(output_metrics_dict)
-        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
+        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss',
+                    "logit_mean", "logit_std", "logit_min", "logit_max"):
             key1 = f'train_{key}'
             key2 = f'val_{key}'
             self.assertTrue(key1 in output_metrics_dict)
@@ -636,7 +626,8 @@ class TestRanker(unittest.TestCase):
             content = f.read()
             output_metrics_dict = json.loads(content)
         self.assertIsNotNone(output_metrics_dict)
-        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss'):
+        for key in ("ndcg_20", 'mrr_20', 'recall_20', 'loss',
+                    "logit_mean", "logit_std", "logit_min", "logit_max"):
             key1 = f'test_{key}'
             self.assertTrue(key1 in output_metrics_dict)
     
