@@ -203,6 +203,9 @@ def main(_):
             
             "movie_embeddings_uri": "gs://data/movie_emb-00000-of-00001.array_record",
             "user_embeddings_uri": "gs://data/user_emb-00000-of-00001.array_record",
+
+            "movie_tiers_uri": "gs://data/movie_tiers-00000-of-00001.array_record",
+
             "num_epochs": 2,
             "batch_size": 64,
             "seed": 12345,

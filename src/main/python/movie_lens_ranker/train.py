@@ -39,7 +39,7 @@ from movie_lens_ranker.util import \
     stringify_mlflow_params, get_canonical_mlflow_run_name, \
     calc_number_jax_graph_components, get_model_mesh, get_gpu_stats, \
     get_cpu_stats, is_running_on_gpu, model_params_trainable_keys, \
-    create_dirs_if_is_filepath, get_num_users_movies, read_user_movie_embeddings
+    create_dirs_if_is_filepath, get_num_users_movies, read_user_movie_embeddings, read_movie_tiers_uri
 
 from jax.experimental import multihost_utils
 
@@ -197,80 +197,111 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     return loss
 
 @nnx.jit(static_argnames=('top_k',))
-def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple, top_k:int) -> dict[str, Array]:
+def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
+    movie_tiers:np.ndarray, movie_offset:int, top_k:int) -> dict[str, Array]:
     """
     train step over a batch, where padded_graph contains super graph of the batch
     :param model:
     :param padded_graph:
+    :param movie_tiers: array of movie tiers where indicies are movie_id-movie_offset and values are 0, 1, 2 for
+        head, torso, tail, respectively of the movie frequency distribution (where distribution
+        was determined from train dataset).
+    :param movie_offset: offset from 0 of movie_ids
     :param top_k:
     :return: dictionary with keys:
         "loss",
-        "mrr_{top_k}", "ndcg_{top_k}", "recall_{top_k}", "precision_{top_k}", "precision_1", "precision_5",
+        "mrr_{top_k}",
+        "ndcg_{top_k}", "ndcg_head_{top_k}", "ndec_torso_{top_k}", "ndcg_tail_{top_k}"
+        "recall_{top_k}", "recall_head_{top_k}",, "recall_torso_{top_k}", ,"recall_tail_{top_k}",
+        "precision_{top_k}", "precision_1", "precision_5",
         "logit_mean"
         "logit_std"
         "logit_min"
         "logit_max"
     """
 
-    def loss_fn(model, padded_graph) -> Tuple[Array, Dict[str, Array]]:
-        scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
-        safe_scores = jnp.where(main_mask, scores_2d, -1e9)
-        # Rax Ranking Loss & Metrics
-        # Rax is designed to ignore entries where master_mask is False
-        loss = rax.softmax_loss(
-            scores=safe_scores,
-            labels=labels_2d,
-            where=main_mask,
-            reduce_fn=jnp.mean
-        )
-        mrr = rax.mrr_metric(
-            safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
-        ndcg = rax.ndcg_metric(
-            safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
-        recall = rax.recall_metric(
-            safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
-        prec_1 = rax.precision_metric(
-            safe_scores, labels_2d, where=main_mask, topn=1, reduce_fn=jnp.mean)
-        prec_5 = rax.precision_metric(
-            safe_scores, labels_2d, where=main_mask, topn=5, reduce_fn=jnp.mean)
-        prec_k = rax.precision_metric(
-            safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
-        #statistics to track the score head and logisti
-        safe_num_valid = jnp.maximum(jnp.sum(main_mask), 1.0)
-        masked_scores = jnp.where(main_mask, scores_2d, 0.0)
-        # Mean and Standard Deviation over valid unpadded candidates
-        logit_mean = jnp.sum(masked_scores) / safe_num_valid
-        logit_var = jnp.sum(jnp.where(main_mask, jnp.square(scores_2d - logit_mean), 0.0)) / safe_num_valid
-        logit_std = jnp.sqrt(logit_var)
-        # Extreme values bounded strictly within the masked region
-        logit_min = jnp.min(jnp.where(main_mask, scores_2d, jnp.inf))
-        logit_max = jnp.max(jnp.where(main_mask, scores_2d, -jnp.inf))
-        stats = {
-            f"mrr_{top_k}": mrr,
-            f"ndcg_{top_k}": ndcg,
-            f"recall_{top_k}": recall,
-            f"precision_{top_k}": prec_k,
-            f"precision_1": prec_1,
-            f"precision_5": prec_5,
-            "logit_mean": logit_mean,
-            "logit_std": logit_std,
-            "logit_min": logit_min,
-            "logit_max": logit_max,
-        }
-        return loss, stats
+    scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
+    safe_scores = jnp.where(main_mask, scores_2d, -1e9)
 
-    # has_aux is necessary when loss_fn returns more than scalar loss
-    (loss, stats_dict), grads = nnx.value_and_grad(loss_fn, has_aux=True)(model, padded_graph)
+    # Extract Positive Target Movie IDs per Graph
+    # Node types: 0 = Target Positive, 1 = History, 2 = Candidate
+    node_types = padded_graph.nodes["type"]
+    node_ids = padded_graph.nodes["ids"]
+    # Identify target positive movie node for each graph in the batch
+    target_indices = jnp.where(node_types == 0, size=len(padded_graph.n_node))[0]
+    raw_target_ids = node_ids[target_indices] - movie_offset
+    safe_target_ids = jnp.clip(raw_target_ids, 0, movie_tiers.shape[0] - 1)
+    # Lookup Tier (0=Head, 1=Torso, 2=Tail)
+    batch_target_tiers = movie_tiers[safe_target_ids]
+
+    # Rax Ranking Loss & Metrics
+    # Rax is designed to ignore entries where master_mask is False
+    loss = rax.softmax_loss(
+        scores=safe_scores,
+        labels=labels_2d,
+        where=main_mask,
+        reduce_fn=jnp.mean
+    )
+    per_query_ndcg = rax.ndcg_metric(
+        safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=None)
+    per_query_recall = rax.recall_metric(
+        safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=None)
+    mrr = rax.mrr_metric(
+        safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
+    prec_1 = rax.precision_metric(
+        safe_scores, labels_2d, where=main_mask, topn=1, reduce_fn=jnp.mean)
+    prec_5 = rax.precision_metric(
+        safe_scores, labels_2d, where=main_mask, topn=5, reduce_fn=jnp.mean)
+    prec_k = rax.precision_metric(
+        safe_scores, labels_2d, where=main_mask, topn=top_k, reduce_fn=jnp.mean)
+
+    #statistics to track the score head and logistics
+    safe_num_valid = jnp.maximum(jnp.sum(main_mask), 1.0)
+    masked_scores = jnp.where(main_mask, scores_2d, 0.0)
+
+    # Mean and Standard Deviation over valid unpadded candidates
+    logit_mean = jnp.sum(masked_scores) / safe_num_valid
+    logit_var = jnp.sum(jnp.where(main_mask, jnp.square(scores_2d - logit_mean), 0.0)) / safe_num_valid
+    logit_std = jnp.sqrt(logit_var)
+    # Extreme values bounded strictly within the masked region
+    logit_min = jnp.min(jnp.where(main_mask, scores_2d, jnp.inf))
+    logit_max = jnp.max(jnp.where(main_mask, scores_2d, -jnp.inf))
+
+    # Create Slice Masks (Excluding Padded Dummy Graphs)
+    valid_query_mask = (jnp.sum(labels_2d * main_mask, axis=-1) > 0)
+    head_mask = valid_query_mask & (batch_target_tiers == 0)
+    torso_mask = valid_query_mask & (batch_target_tiers == 1)
+    tail_mask = valid_query_mask & (batch_target_tiers == 2)
+
+    # Helper function for safe masked mean
+    def masked_mean(values: Array, mask: Array) -> Array:
+        count = jnp.sum(mask)
+        return jnp.where(count > 0, jnp.sum(values * mask) / count, 0.0)
 
     metrics_dict = {
-        **stats_dict,
-        "loss" : loss,
+        f"loss" : loss,
+        f"ndcg_{top_k}": masked_mean(per_query_ndcg, valid_query_mask),
+        f"ndcg_head_{top_k}": masked_mean(per_query_ndcg, head_mask),
+        f"ndcg_torso_{top_k}": masked_mean(per_query_ndcg, torso_mask),
+        f"ndcg_tail_{top_k}": masked_mean(per_query_ndcg, tail_mask),
+        f"recall_{top_k}": masked_mean(per_query_recall, valid_query_mask),
+        f"recall_head_{top_k}": masked_mean(per_query_recall, head_mask),
+        f"recall_torso_{top_k}": masked_mean(per_query_recall, torso_mask),
+        f"recall_tail_{top_k}": masked_mean(per_query_recall, tail_mask),
+        f"precision_{top_k}": prec_k,
+        f"precision_1": prec_1,
+        f"precision_5": prec_5,
+        f"mrr_{top_k}": mrr,
+        "logit_mean": logit_mean,
+        "logit_std": logit_std,
+        "logit_min": logit_min,
+        "logit_max": logit_max,
     }
 
     return metrics_dict
 
 def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterator,
-        top_k: int) -> Tuple[Dict, Any]:
+    movie_tiers:np.ndarray, movie_offset:int, top_k: int) -> Tuple[Dict, Any]:
     """
     calc metrics for val dataset. Note, if this method consumes too much memory, use the
     _epoch_validation_chunked instead.   Note that the method uses SPMD paradigm.
@@ -305,7 +336,7 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
         #each n_node in array is (1 + n_real_history + n_candidates)
         n_samples_tot += sum(padded_super_graph.n_node)
 
-        val_metrics = eval_step(model, padded_super_graph, top_k)
+        val_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, top_k)
         
         # val_metrics['ndcg_20'] is now an array of shape (Num_Batches,)
         local_avg_val_metrics = jax.tree.map(jnp.mean, val_metrics)
@@ -394,6 +425,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer,
         top_k:int, latest_checkpoint_uri: str, best_checkpoint_uri:str,
         rngs:nnx.Rngs, config_dict:Dict[str, Union[str, int, float]],
+        movie_tiers:np.ndarray, movie_offset:int,
         trial: Trial = None, save_checkpoints: bool=False,
         restored_train_dataloader_iter=None, restored_global_step:int=None,
         validate_checkpoint_restores:bool=False) -> float:
@@ -544,11 +576,12 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             epoch_avg_train_loss.clear()
             
             model.eval()
-            train_metrics = eval_step(model, padded_super_graph, top_k)
+            train_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, top_k)
             
             # val_dataloader is also sharded, so don't isolate this to only shard 0.
             # Also, this is synced across all shards, so all shards have same conditional logic for global_avg_val_metrics below here
-            global_avg_val_metrics, n_val_samples = _epoch_validation(model, iter(val_dataloader), top_k)
+            global_avg_val_metrics, n_val_samples = _epoch_validation(model, iter(val_dataloader),
+                movie_tiers, movie_offset, top_k)
             model.train()
 
             global_avg_val_ndcg : float = global_avg_val_metrics[f'ndcg_{top_k}']
@@ -787,7 +820,8 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         'num_users': config['num_users'], 'num_movies': config['num_movies'],
         'embed_len' : config['embed_len']}
 
-def run_train_phase(config: dict, trial:Trial=None, save_checkpoints:bool=False) -> Tuple[float, str]:
+def run_train_phase(config: dict, movie_tiers:np.ndarray, movie_offset:int, trial:Trial=None,
+    save_checkpoints:bool=False) -> Tuple[float, str]:
     """
     train the model given data and params specified in config dict and return best validation set ndcg@20 metric and
     return the mlflow_run_id
@@ -796,6 +830,7 @@ def run_train_phase(config: dict, trial:Trial=None, save_checkpoints:bool=False)
     :param save_checkpoints:
     :return: val_ndcg_20, mlflow_run_id
     """
+
     if "phase" not in config:
         raise LookupError(f"config is missing key 'phase'")
     
@@ -894,7 +929,7 @@ def run_train_phase(config: dict, trial:Trial=None, save_checkpoints:bool=False)
         logging.info( f"expect the model training to start w/ loss = {-log(1. / config['num_candidates'])}")
         
         validate_checkpoint_restores = config.get('validate_checkpoint_restores', False)
-        
+
         best_val_ndcg_k = _train_fn(model=model, train_dataloader=train_dataloader,
             val_dataloader=val_dataloader,
             optimizer=optimizer, top_k=config['top_k'],
@@ -902,10 +937,11 @@ def run_train_phase(config: dict, trial:Trial=None, save_checkpoints:bool=False)
             best_checkpoint_uri=config['best_checkpoint_uri'],
             rngs=rngs,
             config_dict=config,
+            movie_tiers=movie_tiers, movie_offset=movie_offset,
             trial=trial,
             save_checkpoints=save_checkpoints,
             validate_checkpoint_restores=validate_checkpoint_restores)
-            
+
         if "debug" in config and config['debug'] and save_checkpoints:
             logging.info(f"checkpoints save to directories:\n  {config.get('best_checkpoint_uri','')}"
                   f"\n  {config.get('latest_checkpoint_uri','')}")
@@ -1067,7 +1103,9 @@ def run_test_phase(config: dict):
     config['num_users'] = num_users
     config['num_movies'] = num_movies
     config['embed_len'] = restore_dict['embed_len']
-    
+
+    movie_tiers, movie_offset, num_catalog_movies = read_movie_tiers_uri(config['movie_tiers_uri'])
+
     model = restore_dict['model']
     model.eval()
     
@@ -1148,7 +1186,8 @@ def run_test_phase(config: dict):
             raise ValueError(
                 "test_dataloader sampler must be an instance of BatchSampler")
 
-        global_test_metrics, n_val_samples = _epoch_validation(model, iter(test_dataloader), config['top_k'])
+        global_test_metrics, n_val_samples = _epoch_validation(model, iter(test_dataloader),
+            movie_tiers, movie_offset, config['top_k'])
     
         out_dict = {f"test_{key}" : value for key, value in global_test_metrics.items()}
         #to be consistent w/ train, change the loss label:
@@ -1186,13 +1225,16 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
         'ratings_train_3_uri', 'ratings_train_disliked_uri',
         'ratings_val_liked_uri', 'ratings_val_3_uri',
         'ratings_val_disliked_uri',
+        'movie_tiers_uri',
         'max_history', 'num_epochs', 'batch_size', 'seed'}
     for key in req_keys:
         if key not in config:
             raise LookupError(f"config is missing {key}")
     
     logging.info(f'resume_train_fn config: {config}')
-    
+
+    movie_tiers, movie_offset, num_catalog_movies =  read_movie_tiers_uri(config['movie_tiers_uri'])
+
     best_val_ndcg_k = -1.0
     mlflow_run = None
     run_name = get_canonical_mlflow_run_name(config)
@@ -1232,6 +1274,7 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
             rngs=restore_dict['rngs'],
             trial=trial,
             config_dict=config,
+            movie_tiers=movie_tiers, movie_offset=movie_offset,
             restored_train_dataloader_iter=restore_dict['train_dataloader_iter'],
             restored_global_step=restore_dict['global_step'],
             save_checkpoints=save_checkpoints,
@@ -1257,13 +1300,16 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
     import copy
     loader_current = copy.deepcopy(val_data_loader)
     loader_restored = copy.deepcopy(val_data_loader)
-    
+
+    movie_tiers, movie_offset, num_catalog_movies = read_movie_tiers_uri(restore_dict['config']['movie_tiers_uri'])
     # iter(x) makes a new iterator state
-    global_avg_val_metrics_current, n_val_samples_current = _epoch_validation(model, iter(loader_current), top_k)
+    global_avg_val_metrics_current, n_val_samples_current = _epoch_validation(model, iter(loader_current),
+        movie_tiers, movie_offset, top_k)
     
     multihost_utils.sync_global_devices( "sync_barrier_for_model_validation")
     
-    global_avg_val_metrics_restored, n_val_samples_restored = _epoch_validation(restored_model, iter(loader_restored), top_k)
+    global_avg_val_metrics_restored, n_val_samples_restored = _epoch_validation(restored_model, iter(loader_restored),
+        movie_tiers, movie_offset, top_k)
     
     multihost_utils.sync_global_devices( "sync_barrier_for_restored_model_validation")
     

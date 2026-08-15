@@ -27,7 +27,7 @@ data_params_nontrainable_keys = {
     'ratings_train_3_uri', 'ratings_val_3_uri', 'ratings_test_3_uri',
     'ratings_train_liked_uri', 'ratings_val_liked_uri', 'ratings_test_liked_uri',
     'ratings_train_disliked_uri', 'ratings_val_disliked_uri', 'ratings_test_disliked_uri',
-    'movie_tiers_uri'
+    'movie_tiers_uri',
     'seed',
 }
 model_params_nontrainable_keys = {

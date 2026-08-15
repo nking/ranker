@@ -257,7 +257,10 @@ class TestRanker(unittest.TestCase):
         # (movie_id, float array of embed_dim as a tuple)
         self.movie_embeddings_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movie_emb-00000-of-00001.array_record")
-        
+
+        self.movie_tiers_uri = os.path.join(get_project_dir(),
+            "src/test/resources/data/movie_tiers-00000-of-00001.array_record")
+
         # (user_id, float array of embed_dim as a tuple)
         self.user_embeddings_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/user_emb-00000-of-00001.array_record")
@@ -323,6 +326,9 @@ class TestRanker(unittest.TestCase):
                 self.movie_embeddings_uri),
             'user_embeddings_uri': self.transform_to_gs_uri(
                 self.user_embeddings_uri),
+
+            'movie_tiers_uri' : self.transform_to_gs_uri(
+                self.movie_tiers_uri),
             
             'latest_checkpoint_uri': latest_checkpoint_uri,
             'best_checkpoint_uri': best_checkpoint_uri,
@@ -358,7 +364,7 @@ class TestRanker(unittest.TestCase):
             print(f"An error occurred: {e}")
             return
         
-        config = self.config
+        config = self.config.copy()
         
         set_flags_from_dict(config)
         
