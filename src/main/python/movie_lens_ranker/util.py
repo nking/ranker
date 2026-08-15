@@ -27,6 +27,7 @@ data_params_nontrainable_keys = {
     'ratings_train_3_uri', 'ratings_val_3_uri', 'ratings_test_3_uri',
     'ratings_train_liked_uri', 'ratings_val_liked_uri', 'ratings_test_liked_uri',
     'ratings_train_disliked_uri', 'ratings_val_disliked_uri', 'ratings_test_disliked_uri',
+    'movie_tiers_uri'
     'seed',
 }
 model_params_nontrainable_keys = {
@@ -153,6 +154,8 @@ def define_flags():
     flags.DEFINE_string("recommendations_ts_uri", default=None,
         help="uri for array_record containing the timestamps for recommendations_uri, each row being [user_id, [timestamps]]"
     )
+    flags.DEFINE_string('movie_tiers_uri', default=None,
+        help="uri for array_record containing rows of movie_id, tier")
     
     flags.DEFINE_string("ratings_train_liked_uri", default=None,
         help="uri for array_record containing the ratings train dataset having ratings > 3, each row being [user_id, movie_id, rating, timestamp]. for this project the dataset should contain only positives"
@@ -348,6 +351,53 @@ def get_num_users_movies(user_embeddings_uri:str, movie_embeddings_uri:str) -> T
         reader.close()
     return num_users, num_movies, embed_len
 
+def read_movie_tiers_uri(movie_tiers_uri:str, batch_size:int=1024) -> Tuple[np.ndarray,int, int]:
+    """
+    read and return a numpy array sorted by movie_id, holding the movie tier values.
+    It is assumed that the entire movie_catalog is given in the array_record file
+    and that all movie_ids are present.  The tiers sorted by movie_id are returned along
+    with the movie_id offset and the number of movies.
+
+    :param movie_tiers_uri: uri to the movie_tiers array record hodling movie_id, tier
+    :param batch_size: batch size to use while reading the file
+    :return: a numpy array sorted by movie_id, holding the movie tier values.
+    The movie_id offset and number of movies are also returned.
+    """
+    #    movie_id_offset:int=6041, num_catalog_movies:int=3883,
+    sentinel = (1<<31)
+    min_id = sentinel - 1
+    max_id = -sentinel
+    d = {}
+    n_records = 0
+    try:
+        reader = array_record_module.ArrayRecordReader(movie_tiers_uri)
+        n_records = reader.num_records()
+        for i in range(0, n_records, batch_size):
+            stop = min(i + batch_size, n_records)
+            batch_bytes = reader.read([x for x in range(i, stop)])
+            batch = [msgpack.unpackb(b) for b in batch_bytes]
+            for record in batch:
+                movie_id = record[0]
+                min_id = min(min_id, movie_id)
+                max_id = max(max_id, movie_id)
+                d[movie_id] = record[1]
+    finally:
+        reader.close()
+    if max_id == -sentinel or n_records==0:
+        raise ValueError(f"file was empty")
+    if min_id == (sentinel-1):
+        raise ValueError(f"smallest movie_id == {sentinel-1}")
+    n_expected = max_id - min_id + 1
+    if n_records != n_expected:
+        logging.warning("there are gaps in movie_ids, so missing value will default to tier==2")
+
+    offset = min_id
+
+    movie_tiers = np.full((n_expected,), 2, dtype=np.int32)
+    for m_id, t in d.items():
+        movie_tiers[m_id - offset] = t
+    return (movie_tiers, offset, n_expected)
+
 def read_user_movie_embeddings(user_embeddings_uri:str, movie_embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
     """
     read and return the movie embedding
@@ -441,17 +491,21 @@ def _read_user_recommendations_array_record(user_uri:str, batch_size:int=1048) -
     output = np.array([val for _, val in sorted(zip(ids, output))], dtype=np.int64)
     return output
 
-def read_movies_array_record(movies_uri:str, batch_size:int=1048) -> List[int]:
+def read_movies_array_record(movies_uri:str, batch_size:int=1048, ret_ids_only:bool=True) -> Union[List[int], Dict[int, Tuple[str, str]]]:
     """
     read the array_record at movies_uri into a list of movie ids
     :param movies_uri: the uri for the array_record of movie ids
-    :param batch_size: batch size to use in reading the array_record.
+    :param batch_size: batch size to use in reading the array_record
+    :param ret_ids_only: returns list of movie_ids if True, else returns dictionary of movie_id, (title, genres)
     :return: a list of movie_ids
     """
     err = uri_access_error(movies_uri)
     if err is not None:
         raise ValueError(f"{err}")
-    movie_ids = []
+    if ret_ids_only:
+        movie_ids = []
+    else:
+        movie_dict = {}
     reader = None
     try:
         reader = array_record_module.ArrayRecordReader(movies_uri)
@@ -461,16 +515,24 @@ def read_movies_array_record(movies_uri:str, batch_size:int=1048) -> List[int]:
             batch_bytes = reader.read([x for x in range(i, stop)])
             records = [msgpack.unpackb(b, use_list=False) for b in batch_bytes]  #(movie_id, title, genres)
             for record in records:
-                movie_ids.append(record[0])
-        #not necessary, but might as well sort in case written out of order
-        movie_ids.sort()
+                if ret_ids_only:
+                    movie_ids.append(record[0])
+                else:
+                    movie_dict[record[0]] = (record[1], record[2])
+        if ret_ids_only:
+            #not necessary, but might as well sort in case written out of order
+            movie_ids.sort()
     except Exception as e:
         logging.exception(f'Error in read_movies_array_record: {e}')
         raise e
     finally:
         if reader is not None:
             reader.close()
-    return movie_ids
+    if ret_ids_only:
+        return movie_ids
+    else:
+        return movie_dict
+
 
 def read_recommendations(user_recommendations_uri:str, batch_size:int=1048) -> np.ndarray:
     """

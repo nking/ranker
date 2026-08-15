@@ -18,6 +18,17 @@ The file that was written in repository
 github.com/nking/recommender_systems.git
 in file src/test/python/movie_lens_tfx/WriteRankerInputArrayRecords.py
 
+movie_tiers files are 
+   movie_id and tier
+where tier are zones of the movie frequency distribution
+from the train ratings partition.
+tier=0 is head of distribution (the 20% most frequently rated),
+tier=1 is torso of distribution 
+tier=2 is tail of distribution (the 20 % least frequently rated),
+the files were created in respository
+github.com/nking/recommender_systems.git
+in file src/test/python/movie_lens_tfx/WriteRankerInputArrayRecords.py
+
 the model_repositories contents:
 -  the bi-encoder query model was built from the TFX pipeline in
    the github repository 

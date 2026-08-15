@@ -395,7 +395,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         top_k:int, latest_checkpoint_uri: str, best_checkpoint_uri:str,
         rngs:nnx.Rngs, config_dict:Dict[str, Union[str, int, float]],
         trial: Trial = None, save_checkpoints: bool=False,
-        restored_train_dataloader_iter=None, restored_global_step:int=None, validate_checkpoint_restores:bool=False) -> float:
+        restored_train_dataloader_iter=None, restored_global_step:int=None,
+        validate_checkpoint_restores:bool=False) -> float:
     """
     a shard's portion of the training
     :param model:
