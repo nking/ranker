@@ -148,7 +148,7 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:in
     root.add_discrete_param("dropout_rate", feasible_values=[round(i * 0.05, 2) for i in range(2, 9)])
 
     problem.metric_information.append(
-        vz.MetricInformation(name=f'ndcg_{top_k}',
+        vz.MetricInformation(name=f'composite_ndcg_{top_k}',
         goal=vz.ObjectiveMetricGoal.MAXIMIZE)
     )
     
@@ -297,7 +297,7 @@ def run_tune(config):
         logging.info(f"worker_{worker_rank}: done creating MLFlow parent run.  "
                      f"mlflow_parent_run_id={mlflow_parent_run_id}, experiment_id={experiment.experiment_id}")
 
-    movie_tiers, movie_offset, num_catalog_movies =  read_movie_tiers_uri(config['movie_tiers_uri'])
+    movie_tiers, movie_offset, num_catalog_movies = read_movie_tiers_uri(config['movie_tiers_uri'])
 
     trial_ids = json.loads(config['trial_ids'])
     n_large = len(trial_ids) > 10
@@ -349,13 +349,13 @@ def run_tune(config):
         # repeated, mark the trial using trial.infeasible() and continue w/o running train_fn
       
         # if worker_Rank !=0, then mlflow_run_id is ""
-        best_val_ndcg_k, mlflow_run_id = run_train_phase(config2,
+        best_val_composite_ndcg_k, mlflow_run_id = run_train_phase(config2,
             movie_tiers=movie_tiers, movie_offset=movie_offset, trial=trial_suggestion,
             save_checkpoints=False)
         
         if worker_rank == 0:
             trial_suggestion.update_metadata(vz.Metadata({'mlflow_run_id': mlflow_run_id}))
-            trial_suggestion.complete(vz.Measurement(metrics={f'ndcg_{config2["top_k"]}': float(best_val_ndcg_k)}))
+            trial_suggestion.complete(vz.Measurement(metrics={f'composite_ndcg_{config2["top_k"]}': float(best_val_composite_ndcg_k)}))
             logging.info(f'wrote to vizier trial: mlflow_run_id={mlflow_run_id}, and metrics')
         
 def run_train(config):
@@ -425,7 +425,7 @@ def run_train(config):
 
     movie_tiers, movie_offset, num_catalog_movies =  read_movie_tiers_uri(config['movie_tiers_uri'])
 
-    best_val_ndcg_k, mlflow_run_id = run_train_phase(config, movie_tiers=movie_tiers, movie_offset=movie_offset,
+    best_val_composite_ndcg_k, mlflow_run_id = run_train_phase(config, movie_tiers=movie_tiers, movie_offset=movie_offset,
         trial=None, save_checkpoints=True)
 
 def get_best_parameters_for_training(config:Dict[str, Any]) -> Dict[str, Union[float, int]]:
@@ -593,7 +593,8 @@ def run_export_results(config: Dict[str, Any]):
         best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
         #logging.info("Available metrics:", list(best_trial_data.final_measurement.metrics.keys()))
         bfm = best_trial_data.final_measurement
-        bfm = bfm.metrics.get(f'ndcg_20')
+        _top_k = config.get('top_k', 20)
+        bfm = bfm.metrics.get(f'composite_ndcg_{_top_k}')
         best_value = bfm.value
     
         logging.info(f"Loaded Best Objective: {best_value}")

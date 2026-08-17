@@ -13,12 +13,26 @@ message UserRequest {
   int64 timestamp = 5;
 }
 
+message BatchUserRequest {
+  repeated int64 user_ids = 1;
+  repeated string genders = 2;
+  repeated int64 occupations = 3;
+  repeated int64 ages = 4;
+  int32 n_users = 5;
+  int64 timestamp = 6;
+}
+
 // input for the graph ranker model
 
 // The output from your orchestrator containing parallel vectors of movie_ids and their model scores
 message RankedMovies {
   repeated int32 movie_ids = 1; // "repeated" means it's a Vec in Rust
   repeated float scores = 2;
+  int64 user_id = 3;
+}
+
+message BatchRankedMovies {
+  repeated RankedMovies user_rankings = 1;
 }
 
 // input request to return scored candidate_ids
@@ -45,4 +59,7 @@ service RecommenderService {
   rpc RankOnlyReturnAll(RankOnlyRequest) returns (RankedMovies);
   // request to return return nearest neigbhors of user embedding
   rpc ApproxNearestNeighbors(UserRequest) returns (ApproxNearestNeighborsResponse);
+
+  // request to retun top_k unwatched recommended movies for the user, descending order by score
+  rpc BatchPredict (BatchUserRequest) returns (BatchRankedMovies);
 }

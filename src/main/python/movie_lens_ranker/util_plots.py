@@ -114,6 +114,8 @@ def plot_metrics_dict(metrics_dict: dict[str, Any], out_dir: str):
 
     for key in keys:
         epochs = metrics_dict[f'train_{key}']['x']
+        if epochs is None or len(epochs)==0 or f'val_{key}' not in metrics_dict:
+            continue
         train_raw = metrics_dict[f'train_{key}']['y']
         val_raw = metrics_dict[f'val_{key}']['y']
 

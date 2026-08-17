@@ -135,7 +135,8 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
     
     # Create Batch Mask (Ignore the last JAX padding graph)
     # real_graph_indices: [0, 1, 2] -> [True, True, False]
-    is_real_graph = jnp.arange(num_total_graphs) < (num_total_graphs - 1)
+    #is_real_graph = jnp.arange(num_total_graphs) < (num_total_graphs - 1)
+    is_real_graph = jraph.get_graph_padding_mask(padded_graph)
     
     # Broadcast to [3, K]
     batch_mask = jnp.broadcast_to(is_real_graph[:, None],(num_total_graphs, K))
@@ -220,19 +221,13 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         "logit_max"
     """
 
+    #FIXED values decided in the TwoTowerDNN bi-encoder:
+    w_head:float=0.25
+    w_torso:float=0.55
+    w_tail:float=0.2
+
     scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
     safe_scores = jnp.where(main_mask, scores_2d, -1e9)
-
-    # Extract Positive Target Movie IDs per Graph
-    # Node types: 0 = Target Positive, 1 = History, 2 = Candidate
-    node_types = padded_graph.nodes["type"]
-    node_ids = padded_graph.nodes["ids"]
-    # Identify target positive movie node for each graph in the batch
-    target_indices = jnp.where(node_types == 0, size=len(padded_graph.n_node))[0]
-    raw_target_ids = node_ids[target_indices] - movie_offset
-    safe_target_ids = jnp.clip(raw_target_ids, 0, movie_tiers.shape[0] - 1)
-    # Lookup Tier (0=Head, 1=Torso, 2=Tail)
-    batch_target_tiers = movie_tiers[safe_target_ids]
 
     # Rax Ranking Loss & Metrics
     # Rax is designed to ignore entries where master_mask is False
@@ -267,6 +262,28 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     logit_min = jnp.min(jnp.where(main_mask, scores_2d, jnp.inf))
     logit_max = jnp.max(jnp.where(main_mask, scores_2d, -jnp.inf))
 
+    # Extract Positive Target Movie IDs per Graph
+    # Node types: 0 = Target Positive, 1 = History, 2 = Candidate
+    node_types = padded_graph.nodes["type"]
+    node_ids = padded_graph.nodes["ids"]
+    num_graphs = padded_graph.n_node.shape[0]
+
+    # Mask out dummy nodes introduced by jraph padding
+    real_node_mask = jraph.get_node_padding_mask(padded_graph)
+    # Map every node to its parent graph index (0 to batch_size - 1)
+    segment_ids = jnp.repeat(
+        jnp.arange(num_graphs),
+        padded_graph.n_node,
+        total_repeat_length=node_types.shape[0]
+    )
+    # Identify valid target positive nodes (type == 0 and real)
+    is_target_node = (node_types == 0) & real_node_mask
+    target_movie_ids = jnp.where(is_target_node, node_ids - movie_offset, 0)
+    # Aggregate to exactly 1 target ID per graph in the batch: shape (num_graphs,)
+    batch_target_ids = jax.ops.segment_sum(target_movie_ids, segment_ids, num_segments=num_graphs)
+    safe_target_ids = jnp.clip(batch_target_ids, 0, movie_tiers.shape[0] - 1)
+    batch_target_tiers = movie_tiers[safe_target_ids]
+
     # Create Slice Masks (Excluding Padded Dummy Graphs)
     valid_query_mask = (jnp.sum(labels_2d * main_mask, axis=-1) > 0)
     head_mask = valid_query_mask & (batch_target_tiers == 0)
@@ -297,6 +314,12 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         "logit_min": logit_min,
         "logit_max": logit_max,
     }
+
+    metrics_dict[f"composite_ndcg_{top_k}"] = (
+        w_head * metrics_dict[f"ndcg_head_{top_k}"] +
+        w_torso * metrics_dict[f"ndcg_torso_{top_k}"] +
+        w_tail * metrics_dict[f"ndcg_tail_{top_k}"]
+    )
 
     return metrics_dict
 
@@ -438,7 +461,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     :param top_k:
     :param latest_checkpoint_uri:
     :param rngs:
-    :return:
+    :return: composite_ndcg_{top_k}.  has to match the Vizier objective metric.
     """
    
     if not isinstance(train_dataloader._sampler, BatchSampler):
@@ -509,7 +532,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     
     #configure for early stopping when ndcg stops changing
     patience = 5
-    best_ndcg = -1.0
+    best_composite_ndcg = -1.0
     epochs_without_improvement = 0
     delay = 10 # min number of epochs to learn.  for large graphs, consider using 20
 
@@ -584,7 +607,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 movie_tiers, movie_offset, top_k)
             model.train()
 
-            global_avg_val_ndcg : float = global_avg_val_metrics[f'ndcg_{top_k}']
+            global_avg_val_composite_ndcg : float = global_avg_val_metrics[f'composite_ndcg_{top_k}']
 
             metrics_dict = {"train_loss":avg_train_loss.item()}
             for kt in train_metrics:
@@ -621,11 +644,11 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                     _assert_checkpoints_restore(latest_checkpoint_uri, model, val_dataloader, global_step, top_k)
                     validate_checkpoint_restores = False #only need to check it once
             
-            if global_avg_val_ndcg > best_ndcg + 1e-6:
-                best_ndcg = global_avg_val_ndcg
+            if global_avg_val_composite_ndcg > best_composite_ndcg + 1e-6:
+                best_composite_ndcg = global_avg_val_composite_ndcg
                 epochs_without_improvement = 0
                 if rank == 0:
-                    logging.info(f"  New best val NDCG! ({global_avg_val_ndcg})")
+                    logging.info(f"  New best val NDCG! ({global_avg_val_composite_ndcg})")
                 if save_checkpoints:
                     logging.info(f'worker_rank={rank}: saving best checkpoint')
                     mngr_best.save(
@@ -660,7 +683,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
                 if trial is not None:
                     trial.add_measurement(
                         vz.Measurement(
-                            metrics={f'ndcg_{top_k}': global_avg_val_ndcg},
+                            metrics={f'composite_ndcg_{top_k}': global_avg_val_composite_ndcg},
                             steps=epoch,
                             elapsed_secs=(time.perf_counter() - start_time)
                         ))
@@ -677,7 +700,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             
     logging.info(f'elapsed time for _train_fn in sec = {time.perf_counter() - start_time}.  last_epoch={last_epoch}')
 
-    return best_ndcg
+    return best_composite_ndcg
 
 def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[str, Any]:
     """
@@ -828,7 +851,7 @@ def run_train_phase(config: dict, movie_tiers:np.ndarray, movie_offset:int, tria
     :param config:
     :param trial:
     :param save_checkpoints:
-    :return: val_ndcg_20, mlflow_run_id
+    :return: val_composite_ndcg_20, mlflow_run_id.  the metric returned has to match that used by vizier objective
     """
 
     if "phase" not in config:
@@ -889,7 +912,7 @@ def run_train_phase(config: dict, movie_tiers:np.ndarray, movie_offset:int, tria
     config['embed_len'] = embed_len
     
     mlflow_run = None
-    best_val_ndcg_k = -1.0
+    best_val_composite_ndcg_k = -1.0
     
     run_name = get_canonical_mlflow_run_name(config)
     
@@ -930,7 +953,7 @@ def run_train_phase(config: dict, movie_tiers:np.ndarray, movie_offset:int, tria
         
         validate_checkpoint_restores = config.get('validate_checkpoint_restores', False)
 
-        best_val_ndcg_k = _train_fn(model=model, train_dataloader=train_dataloader,
+        best_val_composite_ndcg_k = _train_fn(model=model, train_dataloader=train_dataloader,
             val_dataloader=val_dataloader,
             optimizer=optimizer, top_k=config['top_k'],
             latest_checkpoint_uri=config['latest_checkpoint_uri'],
@@ -946,11 +969,11 @@ def run_train_phase(config: dict, movie_tiers:np.ndarray, movie_offset:int, tria
             logging.info(f"checkpoints save to directories:\n  {config.get('best_checkpoint_uri','')}"
                   f"\n  {config.get('latest_checkpoint_uri','')}")
             
-        return best_val_ndcg_k, config.get('mlflow_run_id', "")
+        return best_val_composite_ndcg_k, config.get('mlflow_run_id', "")
     finally:
         logging.info(f'worker_{worker_rank}: finally clause in train_fn')
         if worker_rank==0 and mlflow_run is not None:
-            mlflow.log_metric(f"final_ndcg_{config['top_k']}", float(best_val_ndcg_k))
+            mlflow.log_metric(f"final_composite_ndcg_{config['top_k']}", float(best_val_composite_ndcg_k))
             mlflow.end_run()
             logging.info(f"end mlflow_run_id={mlflow_run.info.run_id}")
     
@@ -1235,7 +1258,7 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
 
     movie_tiers, movie_offset, num_catalog_movies =  read_movie_tiers_uri(config['movie_tiers_uri'])
 
-    best_val_ndcg_k = -1.0
+    best_val_composite_ndcg_k = -1.0
     mlflow_run = None
     run_name = get_canonical_mlflow_run_name(config)
     try:
@@ -1263,8 +1286,8 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
         
         model = restore_dict['model']
         model.train()
-        
-        best_val_ndcg_k = _train_fn(model=model,
+
+        best_val_composite_ndcg_k = _train_fn(model=model,
             train_dataloader=restore_dict['train_dataloader'],
             val_dataloader=restore_dict['val_dataloader'],
             optimizer=restore_dict['optimizer'],
@@ -1279,12 +1302,12 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
             restored_global_step=restore_dict['global_step'],
             save_checkpoints=save_checkpoints,
         )
-        return best_val_ndcg_k
+        return best_val_composite_ndcg_k
         
     finally:
         if mlflow_run is not None:
-            mlflow.log_metric(f"final_ndcg_{config['top_k']}",
-                float(best_val_ndcg_k))
+            mlflow.log_metric(f"final_composite_ndcg_{config['top_k']}",
+                float(best_val_composite_ndcg_k))
             mlflow.end_run()
     
 def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, global_step, top_k:int=20):

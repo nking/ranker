@@ -8,7 +8,7 @@ use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
 use crate::user_history::{build_user_history, UserHistory};
 
 // Now you can use them directly!
-use crate::pb::{UserRequest, RankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse};
+use crate::pb::{UserRequest, RankedMovies, BatchRankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse, BatchUserRequest};
 use tonic::{Request, Response, Status};
 use usearch::ffi::Matches;
 use crate::pb::recommender_service_server::RecommenderService;
@@ -131,6 +131,7 @@ impl Orchestrator {
             Ok(ranks) => {
                 Ok(
                     RankedMovies{
+                        user_id: user_id as i64,
                         movie_ids: candidate_ids,
                         scores: ranks
                     }
@@ -217,6 +218,35 @@ impl RecommenderService for Orchestrator {
         }))
     }
 
+    /// predicts top_k movies for a user and returs them as a pairs of movie_id and
+    /// cosine similarity distance sorted ascending by increasing distances.
+    ///
+    /// # Arguments
+    ///
+    /// * `req`: user identity and timestamp with enrichment such as gender, age, and occupation.
+    ///
+    /// returns: Result<Response<RankedMovies>, Status>
+    ///   top_k  pairs of movie_id and cosine similarity distance sorted ascending by increasing distances
+    ///
+    /// # Examples
+    ///
+    /// Example call using client:
+    /// `let user_req_opt = user_db.get_request(user_id as i64);
+    //   let tonic_req = user_req_opt.unwrap();
+    //   let mut active_client = client.clone();  //RecommenderServiceClient
+    //   let response_response = active_client
+    //       .predict(tonic_req)
+    //       .await
+    //       .map_err(|err| Status::internal(format!("ranking request failed: {}", err)))
+    //       .unwrap();
+    //   let response = response_response.into_inner();
+    //   let retrieved_ids = response.movie_ids;
+    ///
+    /// Example call inside Orchestrator:
+    /// let tonic_req = tonic::Request::new(mock_request);
+    //  let results : Result<Response<RankedMovies>, tonic::Status>
+    //      = orchestrator.predict(tonic_req).await;
+    //  let response = results.unwrap().into_inner();
     async fn predict(&self, req: Request<UserRequest>) -> Result<Response<RankedMovies>, Status> {
 
         let user_req = req.into_inner();
@@ -235,6 +265,7 @@ impl RecommenderService for Orchestrator {
             &ranked_movies.movie_ids, &ranked_movies.scores);
 
         Ok(Response::new( RankedMovies{
+            user_id: user_req.user_id,
             movie_ids: sorted_ids[0..self.top_k].to_vec(),
             scores: sorted_scores[0..self.top_k].to_vec(),
         }))
@@ -293,8 +324,13 @@ impl RecommenderService for Orchestrator {
             &ranked_movies.movie_ids, &ranked_movies.scores);
 
         Ok(Response::new( RankedMovies{
+            user_id: user_req.user_id,
             movie_ids: sorted_ids[0..self.top_k].to_vec(),
             scores: sorted_scores[0..self.top_k].to_vec(),
         }))
+    }
+
+    async fn batch_predict(&self, _req: Request<BatchUserRequest>) -> Result<Response<BatchRankedMovies>, Status> {
+        Err(tonic::Status::unimplemented("BatchPredict is not yet implemented"))
     }
 }

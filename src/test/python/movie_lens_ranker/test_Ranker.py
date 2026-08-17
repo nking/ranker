@@ -486,12 +486,12 @@ class TestRanker(unittest.TestCase):
         
         ## ====== assert that training continues ======
         print(f'BEGIN RESUME TRAIN 2nd to last')
-        best_val_ndcg_k_2 = resume_train_fn(config=earlier_restore_dict['config'],
+        best_val_composite_ndcg_k_2 = resume_train_fn(config=earlier_restore_dict['config'],
             trial=None, save_checkpoints=True)
         
         #already done, so no new value:
-        print(f'best_val_ndcg_k from resume 2nd to last chkpt training={best_val_ndcg_k_2}')
-        self.assertAlmostEqual(best_val_ndcg_k_2, -1.0, places=6)
+        print(f'best_val_composite_ndcg_k from resume 2nd to last chkpt training={best_val_composite_ndcg_k_2}')
+        self.assertAlmostEqual(best_val_composite_ndcg_k_2, -1.0, places=6)
         
         # ===== read mlflow db metrics ======
         #experiments: name, experiment_id
@@ -659,11 +659,12 @@ class TestRanker(unittest.TestCase):
         best_trial_data = best_trial.materialize()
         # best_params contains only the params being tuned, not all params needed for train_fn
         best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
-        print("Available metrics:",
-            list(best_trial_data.final_measurement.metrics.keys()), flush=True)
         bfm = best_trial_data.final_measurement
-        bfm = bfm.metrics.get(f'ndcg_{config["top_k"]}')
-        best_value = bfm.value
+        print("best_params:", best_params, flush=True)
+        print("Available metrics:", list(bfm.metrics.keys()), flush=True)
+        key = f'composite_ndcg_{config["top_k"]}'
+        best = bfm.metrics.get(key)
+        best_value = best.value
         
         print(f"Loaded Best Objective: {best_value}")
         print(f"Loaded Best Parameters: {best_params}")

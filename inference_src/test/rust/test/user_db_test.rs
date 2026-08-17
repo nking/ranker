@@ -45,6 +45,26 @@ mod user_db_tests {
         assert_eq!(user_req.age, 25);
         assert_eq!(user_req.occupation, 6);
 
+        let user_ids: Vec<i64> = vec![1, 6040];
+        let batch_user_req_opt = user_db.get_batch_request(user_ids.clone());
+        assert!(batch_user_req_opt.is_some(), "User IDs {:?} should exist in database", user_ids.clone());
+        let tonic_req = batch_user_req_opt.unwrap();
+        let user_req = tonic_req.get_ref();
+        assert_eq!(user_req.n_users as usize, user_ids.len());
+        assert!(user_req.timestamp > 0);
+        for i in 0..user_ids.len() {
+            if i == 0 {
+                assert_eq!(user_req.user_ids[i], 1);
+                assert_eq!(user_req.genders[i].clone(), "F");
+                assert_eq!(user_req.ages[i], 1);
+                assert_eq!(user_req.occupations[i], 10);
+            } else {
+                assert_eq!(user_req.user_ids[i], 6040);
+                assert_eq!(user_req.genders[i].clone(), "M");
+                assert_eq!(user_req.ages[i], 25);
+                assert_eq!(user_req.occupations[i], 6);
+            }
+        }
 
     }
 

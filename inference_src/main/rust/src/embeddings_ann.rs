@@ -36,6 +36,17 @@ impl Searcher {
         })
     }
 
+    /// build the ANN index for embedding vectors of length embed_len using inner_product
+    /// (which results in cosine similarity distances if the embedding vectors ar already normalized)
+    /// and save the index to path for fast re-loading abilities.
+    ///
+    /// # Arguments
+    ///
+    /// * `catalog`: the movie_embeddings catalog as a 1D array
+    /// * `embed_len`: the length of each embedding vector.
+    /// * `path`: where the index wll be persisted to
+    ///
+    /// returns: Result<Index, Box<dyn Error+Send+Sync, Global>>
     fn build_and_save(catalog: &[f32], embed_len: usize, path: &Path)
         -> Result<Index, Box<dyn std::error::Error + Send + Sync>> {
 
@@ -80,6 +91,15 @@ impl Searcher {
         &self.movie_embeddings_catalog
     }
 
+    ///construct a Userach index for inner_product.  If the embeddings catalog are normalized, the results
+    /// are cosin_similarity distances, else the results are simply dot product distances.
+    /// The Index is configured to use HNSW degree for connectivity and expect F32 type embedding vectors.
+    /// # Arguments
+    ///
+    /// * `embed_len`: length of an embedding vector
+    /// * `capacity`: the expected number of embeddings to be stored in the index.
+    ///
+    /// returns: Result<Index, Box<dyn Error+Send+Sync, Global>>
     fn construct_index(embed_len : usize, capacity: usize) -> Result<Index, Box<dyn std::error::Error + Send + Sync>> {
         let mut options = IndexOptions::default();
         options.dimensions = embed_len;

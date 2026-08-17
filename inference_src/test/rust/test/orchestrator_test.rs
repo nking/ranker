@@ -87,6 +87,7 @@ mod orchestrator_tests {
         for i in 0..response.movie_ids.len() {
             println!("{} {}", response.movie_ids[i], response.scores[i]);
         }
+        assert_eq!(42, response.user_id)
 
     }
 

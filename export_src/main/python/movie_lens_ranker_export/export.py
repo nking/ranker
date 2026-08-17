@@ -183,7 +183,6 @@ def export_models(trained_model: GraphRanker, batch_size:int,
         max_graphs=jax_graph_comp_dict_batch['max_graphs'],
         signature_name="serving_batch")
 
-    #TODO: consider saving the json files to assets.extra directory (create it in assets.extra)
     print(f"saved model and metadata to {output_savedmodel_dir_uri}")
 
 
