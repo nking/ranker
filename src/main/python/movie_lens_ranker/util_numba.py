@@ -350,18 +350,18 @@ np.ndarray, np.ndarray, np.ndarray, int, int]:
     node_ids[1:1 + n_real_history] = history_movie_ids[:n_real_history]
     node_ids[1 + n_real_history:] = candidate_ids
 
-    #NOTE: the original target movie_id has a label "1" in labels, while the negatives have a label "0"
+    # while the negatives have a label "0"
     # Labels
     node_labels = np.empty(total_nodes, dtype=np.int32)
     node_labels[0] = 0
     node_labels[1:1 + n_real_history] = 0
-    node_labels[1 + n_real_history:] = labels
+    node_labels[1 + n_real_history:] = labels #target movie_id has label=1, all else are 0s
     
-    # Types & Masks.  0=target positive, 1=real_history, 2=candidate or negative
+    # Types & Masks.  1=target positive, 2=real_history, 3=candidate or negative
     node_types = np.empty(total_nodes, dtype=np.int32)
-    node_types[0] = 0
-    node_types[1:1 + n_real_history] = 1
-    node_types[1 + n_real_history:] = 2
+    node_types[0] = 1
+    node_types[1:1 + n_real_history] = 2
+    node_types[1 + n_real_history:] = 3
     
     candidate_mask = np.zeros(total_nodes, dtype=np.bool_)
     candidate_mask[1 + n_real_history:] = True

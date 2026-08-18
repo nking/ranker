@@ -108,50 +108,43 @@ def convert_to_global(arr, mesh, sync:bool=True):
     return jax.make_array_from_callback(global_shape, global_sharding, data_callback)
 
 def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple):
-    # Forward Pass: returns ONLY candidate scores [num_total_graphs * K]
+    # Forward Pass: returns ONLY candidate scores [num_total_graphs * model.num_candidates]
     all_scores = model(padded_graph) #LinearizeTracer<float32[60]>
     #jax.debug.print("all_scores={all_scores}", all_scores=all_scores, ordered=True)
-    num_total_graphs = padded_graph.n_node.shape[0]  # batch_size + 1
-    K = model.K  # num_candidates from data loading
-    total_candidate_slots = num_total_graphs * K
-    # Extract Candidate Data. length is K * num_total_graphs
+    num_total_graphs = padded_graph.n_node.shape[0]  # batch_size + padding
+    total_candidate_slots = num_total_graphs * model.num_candidates
+    # Extract Candidate Data. length is model.num_candidates * num_total_graphs
+    #node.type: 1=user_id, 2=real_history, 3=candidate or negative
+    #node.label = 1 for target movie_id
     cand_indices = jnp.where(
-        padded_graph.nodes["type"] == 2,
-        size=total_candidate_slots
+        padded_graph.nodes["type"] == 3,
+        size=total_candidate_slots,
+        fill_value=0
     )[0]
     #jax.debug.print("cand_indices={cand_indices}", cand_indices=cand_indices, ordered=True)
     # lengths are K * num_total_graphs
     labels_flat = padded_graph.nodes["label"][cand_indices]
-    record_mask_flat = padded_graph.nodes["candidate_mask"][cand_indices]
-    
-    #jax.debug.print("record_mask_flat={record_mask_flat}", record_mask_flat=record_mask_flat, ordered=True)
+    cand_ids_flat = padded_graph.nodes["ids"][cand_indices]
 
-    # Reshape everything to [Batch, K]
-    scores_2d = all_scores.reshape(num_total_graphs, K)
-    labels_2d = labels_flat.reshape((num_total_graphs, K))
-    record_mask_2d = record_mask_flat.reshape((num_total_graphs, K))
-    
-    #jax.debug.print("Label sums per row: {x}", x=jnp.sum(labels_2d, axis=1), ordered=True)
-    
-    # Create Batch Mask (Ignore the last JAX padding graph)
-    # real_graph_indices: [0, 1, 2] -> [True, True, False]
-    #is_real_graph = jnp.arange(num_total_graphs) < (num_total_graphs - 1)
-    is_real_graph = jraph.get_graph_padding_mask(padded_graph)
-    
-    # Broadcast to [3, K]
-    batch_mask = jnp.broadcast_to(is_real_graph[:, None],(num_total_graphs, K))
-    
-    #  Combine Masks
-    # Master mask is True only for real candidates in real graphs
-    final_mask = record_mask_2d & batch_mask
-    
-    #jax.debug.print("scores_2d={scores_2d}", scores_2d=scores_2d, ordered=True)
-    #jax.debug.print("labels_2d={labels_2d}", labels_2d=labels_2d, ordered=True)
-    #jax.debug.print("final_mask={final_mask}", final_mask=final_mask, ordered=True)
-    #jax.debug.print("final_mask sums per row: {x}", x=jnp.sum(final_mask, axis=1),  ordered=True)
+    # Reshape everything to [Batch, model.num_candidates]
+    scores_2d = all_scores.reshape(num_total_graphs, model.num_candidates)
+    labels_2d = labels_flat.reshape((num_total_graphs, model.num_candidates))
+    cand_ids_2d = cand_ids_flat.reshape((num_total_graphs, model.num_candidates))
 
-    return scores_2d, labels_2d, final_mask
-    
+    # true for real graphs Boolean array of shape [total_num_graphs] containing True for real graphs,
+    # and False for padding graphs.
+    n_dummy = jnp.argmin(padded_graph.n_node[::-1] == 0)
+    # Handle edge case where there are no zeros (all graphs are real)
+    n_dummy = jnp.where(jnp.all(padded_graph.n_node != 0), 0, n_dummy)
+    n_real = num_total_graphs - n_dummy
+    # Create boolean mask: True for real graphs, False for the trailing dummy graphs
+    is_real_graph = jnp.arange(num_total_graphs) < n_real
+
+    final_mask = jnp.broadcast_to(is_real_graph[:, None], (num_total_graphs, model.num_candidates))
+
+    # We return cand_ids_2d so eval_step can easily find the target movie!
+    return scores_2d, labels_2d, final_mask, cand_ids_2d
+
 @nnx.jit
 def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         optimizer: nnx.Optimizer) -> Array:
@@ -166,14 +159,17 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     #debug_weight_before = jnp.linalg.norm(model.score_head.kernel.get_value())
 
     def loss_fn(model, padded_graph) -> Array:
-        scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
+
+        scores_2d, labels_2d, main_mask, cand_ids_2d = score_and_shape_results(model, padded_graph)
         safe_scores = jnp.where(main_mask, scores_2d, -1e9)
-        #debug_stats(safe_scores, label="[Scores Statistics]")
+
+        # Rax Ranking Loss & Metrics
+        # Rax is designed to ignore entries where master_mask is False
         loss = rax.softmax_loss(
             scores=safe_scores,
             labels=labels_2d,
             where=main_mask,
-            reduce_fn=jnp.mean  # Let it crash if NaNs happen to enable follow up
+            reduce_fn=jnp.mean
         )
         return loss
 
@@ -226,7 +222,9 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     w_torso:float=0.55
     w_tail:float=0.2
 
-    scores_2d, labels_2d, main_mask = score_and_shape_results(model, padded_graph)
+    #shapes: (total number of graphs including dummy grpahs, model.num_candidates).
+    # main_mask is True for real data and False for dummy graph data
+    scores_2d, labels_2d, main_mask, cand_ids_2d = score_and_shape_results(model, padded_graph)
     safe_scores = jnp.where(main_mask, scores_2d, -1e9)
 
     # Rax Ranking Loss & Metrics
@@ -262,36 +260,24 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     logit_min = jnp.min(jnp.where(main_mask, scores_2d, jnp.inf))
     logit_max = jnp.max(jnp.where(main_mask, scores_2d, -jnp.inf))
 
-    # Extract Positive Target Movie IDs per Graph
-    # Node types: 0 = Target Positive, 1 = History, 2 = Candidate
-    node_types = padded_graph.nodes["type"]
-    node_ids = padded_graph.nodes["ids"]
-    num_graphs = padded_graph.n_node.shape[0]
+    # ==========================================
+    # TARGET ID EXTRACTION
+    # ==========================================
+    # labels_2d is exactly 1 at the target movie_id index and 0 elsewhere.
+    # Multiplying and summing across the row isolates the target ID.
+    batch_target_ids = jnp.sum(cand_ids_2d * labels_2d, axis=1) - movie_offset
 
-    # Mask out dummy nodes introduced by jraph padding
-    real_node_mask = jraph.get_node_padding_mask(padded_graph)
-    # Map every node to its parent graph index (0 to batch_size - 1)
-    segment_ids = jnp.repeat(
-        jnp.arange(num_graphs),
-        padded_graph.n_node,
-        total_repeat_length=node_types.shape[0]
-    )
-    # Identify valid target positive nodes (type == 0 and real)
-    is_target_node = (node_types == 0) & real_node_mask
-    target_movie_ids = jnp.where(is_target_node, node_ids - movie_offset, 0)
-    # Aggregate to exactly 1 target ID per graph in the batch: shape (num_graphs,)
-    batch_target_ids = jax.ops.segment_sum(target_movie_ids, segment_ids, num_segments=num_graphs)
     safe_target_ids = jnp.clip(batch_target_ids, 0, movie_tiers.shape[0] - 1)
+    #in safe_target_ids, all non-target candidates map to index=0
     batch_target_tiers = movie_tiers[safe_target_ids]
 
-    # Create Slice Masks (Excluding Padded Dummy Graphs)
+    # Create Slice Masks for the target movie_id
     valid_query_mask = (jnp.sum(labels_2d * main_mask, axis=-1) > 0)
     head_mask = valid_query_mask & (batch_target_tiers == 0)
     torso_mask = valid_query_mask & (batch_target_tiers == 1)
     tail_mask = valid_query_mask & (batch_target_tiers == 2)
 
-    # Helper function for safe masked mean
-    def masked_mean(values: Array, mask: Array) -> Array:
+    def masked_mean(values: jax.Array, mask: jax.Array) -> jax.Array:
         count = jnp.sum(mask)
         return jnp.where(count > 0, jnp.sum(values * mask) / count, 0.0)
 

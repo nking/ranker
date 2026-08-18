@@ -38,7 +38,11 @@ def optimized_batch_and_pad(batch: Sequence[jraph.GraphsTuple], max_nodes: int, 
                 senders=senders_padded,
                 receivers=receivers_padded
             )
-            where dimensions are max_nodes, max_edges, and max_graphs
+            where dimensions are max_nodes, max_edges, and max_graphs.
+            n_node is an array holding the total_nodes for each user graph,
+                where total_nodes = 1 + n_real_history + n_candidates.
+            n_edge
+
     """
     
     graphs = batch

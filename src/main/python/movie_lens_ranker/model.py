@@ -25,7 +25,7 @@ class GraphRanker(nnx.Module):
         #self.embed_in_dim = user_movie_embeds.shape[1]
         self.embed_in_dim = emb_in_dim
 
-        self.K = num_candidates
+        self.num_candidates = num_candidates
         
         # 6 embeddings: 0 (No Rating/Candidate), 1, 2, 3, 4, 5 (Ratings)
         self.rating_embed = nnx.Embed(num_embeddings=6, features=edge_embed_dim, rngs=rngs)
@@ -54,8 +54,8 @@ class GraphRanker(nnx.Module):
     def __call__(self, graph: jraph.GraphsTuple) -> jnp.ndarray:
         """
         always returns a static shape of (max_graphs * K)
-        :param graph:
-        :return:
+        :param graph:padded super graph of graphs from a batch.
+        :return: scores of shape (max_graphs * self.num_candidates)
         """
         #[ len(graph.nodes["ids"]) X embed_in_dim ]
 
@@ -86,22 +86,36 @@ class GraphRanker(nnx.Module):
             batch=batch_indices,
             batch_size=graph.n_node.shape[0]
         )
-       
-        num_total_graphs = len(graph.n_node) #batch_size + 1
-        num_total_candidates = num_total_graphs * self.K # K is num_candidates from data loading stage
-        
-        user_indices = jnp.where(graph.nodes["type"] == 0, size=num_total_graphs)[0]
-        cand_indices =  jnp.where(graph.nodes["type"] == 2, size=num_total_candidates)[0]
-        
+
+        num_total_graphs = len(graph.n_node) # number of batches + number of dummy padding graphs
+        num_total_candidates = num_total_graphs * self.num_candidates
+
+        # We use fill_value=0. For dummy graphs that don't have type==1 or type==3,
+        # JAX will pad the remaining required indices with 0.
+        # This safely points phantom entities to the 0th node embedding.
+        user_indices = jnp.where(
+            graph.nodes["type"] == 1,
+            size=num_total_graphs,
+            fill_value=0
+        )[0]
+
+        cand_indices = jnp.where(
+            graph.nodes["type"] == 3,
+            size=num_total_candidates,
+            fill_value=0
+        )[0]
+
         user_reprs = node_repr[user_indices]
         cand_reprs = node_repr[cand_indices]
-        
+
         # Cross-Encoder Concatenation
-        # Repeat each user K times to pair with their respective candidates
-        # Result: [U1, U1... (K times), U2, U2... (K times), U_pad, U_pad... (K times)]
-        user_expanded = jnp.repeat(user_reprs, self.K, axis=0)
-        
+        # Repeat each user self.num_candidates times to pair with their respective candidates
+        # Result: [U1, U1... (num_candidate times), U2, U2... (K times), U_pad, U_pad... (K times)]
+        user_expanded = jnp.repeat(user_reprs, self.num_candidates, axis=0)
+
         combined = jnp.concatenate([user_expanded, cand_reprs], axis=-1)
-        
+
         scores = self.score_head(combined)
+
         return jnp.squeeze(scores, axis=-1)
+

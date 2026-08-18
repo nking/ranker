@@ -43,8 +43,8 @@ class SuperGraphPaddingTransform(pgrain.MapTransform):
                 n_edge=n_edge_padded,
                 nodes={#padded
                     "ids": node_ids,
-                    "label": node_labels,
-                    "type": node_types,
+                    "label": node_labels,  #target_movie_ids=1, all else are 0s
+                    "type": node_types,    #1=user_id, 2=real_history, 3=candidate or negative
                     "candidate_mask": candidate_mask,
                     "embeddings" : embeddings for node_ids
                 },
@@ -53,7 +53,13 @@ class SuperGraphPaddingTransform(pgrain.MapTransform):
                 senders=senders_padded,
                 receivers=receivers_padded
             )
-            where dimensions are max_nodes, max_edges, and max_graphs
+            where dimensions are max_nodes, max_edges, and max_graphs.
+            n_node is an array where each element is a graps total_nodes = 1 + n_real_history + n_candidates.
+            n_edges is similar but total_edges = n_real_history + n_candidates for each graph.
+            The dummy graphs have 0 in n_node and n_edges.
+            user_id is where node_types == 1
+            target movie_id is where node_labels == 1
+            candidate movies is where types==3
         """
         padded_super_graph, _ = optimized_batch_and_pad(
             batch=batch,
