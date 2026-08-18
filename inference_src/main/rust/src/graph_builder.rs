@@ -19,7 +19,8 @@ fn build_graph_arrays(
     Vec<i32>,  // edge_features
     Vec<i32>,  // node_ids
     Vec<i32>,  // node_labels
-    Vec<i32>,  // node_types
+    Vec<i32>,  // node_types train: 1=target positive, 2=real_history, 3=candidate or negative
+               //   inference:  use 3 because all are candidates
     Vec<f32>,  //node_embeddings
     Vec<bool>, // candidate_mask
     usize,     // total_nodes
@@ -78,15 +79,22 @@ fn build_graph_arrays(
         emb_off += embed_len;
     }
 
+    /*
+    user_id is where           node_types == 1
+    target movie_id is where   node_labels == 1
+    candidate movies is where  node_types == 3
+     */
+
     // Labels
     let mut node_labels: Vec<i32> = vec![0; total_nodes];
     // node_labels[0..1+n_real_history] is already 0.0
     node_labels[1 + n_real_history..].copy_from_slice(labels);
 
+    // 1=target positive, 2=real_history, 3=candidate or negative
     // Types & Masks
-    let mut node_types = vec![0; total_nodes]; // 0 is User type
-    node_types[1..1 + n_real_history].fill(1); // 1 is History type
-    node_types[1 + n_real_history..].fill(2);  // 2 is Candidate type
+    let mut node_types = vec![1; total_nodes]; // 1 is User type
+    node_types[1..1 + n_real_history].fill(2); // 2 is History type
+    node_types[1 + n_real_history..].fill(3);  // 3 is Candidate type
 
     let mut candidate_mask = vec![false; total_nodes];
     candidate_mask[1 + n_real_history..].fill(true);

@@ -74,8 +74,8 @@ mod graph_builder_tests {
         let expected_node_labels : Vec<i32> = vec![0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let expected_node_types : Vec<i32> = vec![0, 1, 2, 2, 2, 2, 2, 0, 1, 1, 2, 2, 2, 2, 2, 0, 1, 1, 1, 2, 2, 2,
-            2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        let expected_node_types : Vec<i32> = vec![1, 2, 3, 3, 3, 3, 3, 1, 2, 2, 3, 3, 3, 3, 3, 1, 2, 2, 2, 3, 3, 3,
+            3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let expected_candidate_mask : Vec<bool> = vec![
             false, false,  true,  true,  true,  true, true, false, false,
@@ -253,7 +253,6 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
         //    .map(|_| rng.gen_range(-1.0..1.0))
         //    .collect();
 
-        //labels aren't used in inference.  a value of -1 can help distinguish that is isn't used.
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
         let padded_super_graph : JraphGraph = build_enriched_padded_supergraph(&user_ids, &timestamps,
@@ -297,7 +296,7 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
         ];
         let expected_node_types : Vec<i32> = vec![
-            0, 1, 1, 1, 2, 2, 2, 2, 2, 0, 1, 1, 1, 2, 2, 2, 2, 2, 0, 0, 0, 0,
+            1, 2, 2, 2, 3, 3, 3, 3, 3, 1, 2, 2, 2, 3, 3, 3, 3, 3, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
         ];

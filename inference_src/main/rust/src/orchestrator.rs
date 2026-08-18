@@ -108,6 +108,7 @@ impl Orchestrator {
         // finds num_candidates approx nearest neighbors
         let searcher = self.searcher.load();
 
+        //target_movie_id should == 1
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
         let padded_super_graph_arrays : JraphGraph = build_enriched_padded_supergraph(
