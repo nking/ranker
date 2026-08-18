@@ -14,6 +14,7 @@ mod embedding_ann_tests {
     use usearch::ffi::Matches;
     use inference_engine::app_config::AppConfig;
     use inference_engine::embeddings_ann::Searcher;
+    use inference_engine::embeddings_util::read_user_embeddings;
     use crate::embedding_ann_tests::helper::{get_embeddings_uris};
 
     #[tokio::test]
@@ -36,13 +37,18 @@ mod embedding_ann_tests {
 
         let search = Searcher::new(&movie_embeddings_uri, num_candidates, persisted_index_path).unwrap();
 
+        /*
+        //copied from loadiing user embeddingss into polars ahd printing head(1) to get embedding for user_id=1
         let query_embedding: Vec<f32> = vec![
-            0.117549196, 0.238659769, -0.215364203, -0.0403997824, 0.315108567, -0.468034804,
-            -0.188685074, -0.0422358438, -0.0276149735, 0.021486342, -0.518427193, -0.194741741,
-            0.139777973, 0.0450548381, -0.294477165, 0.108183414
-        ];
+            0.335328, -0.010079, 0.216715, -0.306481, 0.30437, 0.070854, 0.124016, -0.126012, -0.15604,
+            -0.132381, 0.04622, -0.030724, -0.031848, 0.022452, 0.148558, -0.372832, 0.096318, -0.187772,
+            0.032677, 0.043376, 0.169722, 0.338766, -0.113468, -0.016541, 0.110968, 0.132685, 0.025607,
+            -0.222184, -0.078174, 0.158795, 0.096952, -0.291931
+        ];*/
 
-        let results : Result<Matches, Box<dyn std::error::Error>> = search.search(&query_embedding, None);
+        let (query_embeddings_vec, num_catalog_users, embed_len) = read_user_embeddings(&*_user_embeddings_uri);
+
+        let results : Result<Matches, Box<dyn std::error::Error>> = search.search(&query_embeddings_vec[0..embed_len], None);
 
         let m : Matches = results.unwrap();
         let candidate_ids = &m.keys;

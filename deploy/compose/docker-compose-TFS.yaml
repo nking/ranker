@@ -14,7 +14,7 @@ services:
     volumes:
       - ./src/test/resources/model_repositories/saved_model_formats/bi-encoder/query:/models/query
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8501/v1/models/query" ]
+      test: [ "CMD", "bash", "-c", "echo > /dev/tcp/localhost/8501" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -31,6 +31,7 @@ services:
     #    ]
     #}'
 
+  #NOTE: in production, would probably want a separate deployment and host for the batch requests
   tfs-cross-encoder:
     image: tensorflow/serving:2.20.0
     container_name: tfs-cross-encoder
@@ -50,10 +51,10 @@ services:
       - --enable_model_warmup=true
     healthcheck:
       #health check is executed inside the container
-      test: [ "CMD", "curl", "-f", "http://localhost:8501/v1/models/graph-ranker" ]
+      test: [ "CMD", "bash", "-c", "echo > /dev/tcp/localhost/8501" ]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 5s
-    #test with:
+    #test outside of container with:
     #curl -X POST http://172.17.0.1:8511/v1/models/graph-ranker:predict -H "Content-Type: application/json" -d @export_src/test/resources/test_graph_ranker_request.json

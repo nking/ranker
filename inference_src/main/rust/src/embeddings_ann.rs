@@ -19,6 +19,9 @@ impl Searcher {
         -> Result<Self, Box<dyn std::error::Error+ Send + Sync>> {
 
         let (movie_embeddings_catalog, num_movies, embed_len) = read_movie_embeddings(&movie_embeddings_uri);
+
+        println!("Movies embeddings embed_len: {}", embed_len);
+
         let path_buf = persisted_index_path.as_ref().to_path_buf();
         let indexer = if path_buf.exists() {
             println!("Restoring index from {:?}", path_buf);
@@ -30,8 +33,11 @@ impl Searcher {
             Self::build_and_save(&movie_embeddings_catalog, embed_len, &path_buf)?
         };
         Ok(Self{
-            indexer: indexer, movie_embeddings_catalog : movie_embeddings_catalog,
-            num_catalog_movies: num_movies, embed_len : embed_len, num_candidates,
+            indexer: indexer,
+            movie_embeddings_catalog : movie_embeddings_catalog,
+            num_catalog_movies: num_movies,
+            embed_len : embed_len,
+            num_candidates : num_candidates,
             persisted_index_path: path_buf,
         })
     }

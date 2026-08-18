@@ -18,10 +18,11 @@ mod app_config_tests {
             "query_uri": "http://localhost:8500",
             "ranker_uri": "http://localhost:8510",
             "params_json_path": "./params.json",
-            "movie_embeddings_path": "./movies.bin",
+            "movie_embeddings_path": "./movie_embeddings.bin",
             "ratings_uris": ["file1.csv", "file2.csv"],
             "ranker_n_local_devices": 2,
             "top_k": 50,
+            "movies_path": "./movies.bin",
             "persisted_index_path": "./index_dir",
             "user_db_path" : "./user_db.bin"
         }"#;

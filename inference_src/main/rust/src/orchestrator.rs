@@ -177,7 +177,7 @@ impl RecommenderService for Orchestrator {
         let n_hist = self.user_history.get_history_count_before_timestamp(
             &user_ids, &timestamps
         );
-        // choose more than num_candidates unseen movies to rank and take only the top_k from
+        // choose more than num_candidates to choose only unseen from them, then rank for top num_candidates
         let n_srch = Some(self.num_candidates + n_hist[0]);
 
         // finds num_candidates approx nearest neighbors
@@ -193,23 +193,22 @@ impl RecommenderService for Orchestrator {
             .collect();
 
         // filter to keep only unseen movies
-
         let (history, _ratings) = self.user_history.get_history_before_timestamp(
             &user_ids, &timestamps, n_hist[0]
         );
         let watched_set: HashSet<i32> = history.iter().copied().collect();
 
-        candidate_ids.retain(|id| !watched_set.contains(id));
+        (&mut candidate_ids).retain(|id: &i32| !watched_set.contains(id));
 
         let n_backfill = self.num_candidates.saturating_sub(candidate_ids.len());
         if n_backfill > 0 {
-            candidate_ids.extend(
+            (&mut candidate_ids).extend(
                 history.iter()
                     .take(n_backfill)
                     .copied() // or .cloned() depending on the type inside history
             );
         } else {
-            candidate_ids.truncate(self.num_candidates);
+            (&mut candidate_ids).truncate(self.num_candidates);
         }
 
         Ok(Response::new(ApproxNearestNeighborsResponse {
@@ -257,6 +256,8 @@ impl RecommenderService for Orchestrator {
         // Extract the generated fields from the new protobuf response message
         let user_embedding = ann_res.user_embedding;
         let candidate_ids = ann_res.candidate_ids;
+        
+        println!("user embed_len{}", user_embedding.len());
 
         let ranked_movies = self.make_ranker_request(user_req.user_id as i32,
             user_req.timestamp, user_embedding, candidate_ids).await?;

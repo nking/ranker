@@ -61,11 +61,12 @@ mod app_runner_tests {
         });
 
         // Assert success
-        let response = client.predict(request).await;
-        assert!(response.is_ok(), "gRPC request failed");
+        let response = client.predict(request).await.expect("gRPC request failed");
+        let ranked_movies = response.into_inner();
+        println!("{:?}", ranked_movies);
+        assert!(ranked_movies.movie_ids.len() > 0);
 
         // Trigger Shutdown
-        println!("Sending shutdown signal...");
         let _ = tx_shutdown.send(());
 
         // Await the server handle to ensure it exited cleanly without panicking

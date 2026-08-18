@@ -3,7 +3,7 @@ use std::error::Error;
 use tonic::transport::{Channel, Endpoint};
 // use crate:: means look inside this project
 use crate::graph_builder::{JraphGraph};
-use crate::pb::UserRequest;
+use crate::pb::{BatchUserRequest, UserRequest};
 
 pub mod tf_serving {
     tonic::include_proto!("tensorflow.serving");
@@ -22,6 +22,15 @@ pub struct RankerModelClient {
     pub client: PredictionServiceClient<Channel>,
 }
 
+//NOTE: in production, would probably separate the single inferece clients above from the batch service clients and have different hosts for theem
+pub struct BatchQueryModelClient {
+    pub client: PredictionServiceClient<Channel>,
+}
+
+pub struct BatchRankerModelClient {
+    pub client: PredictionServiceClient<Channel>,
+}
+
 impl QueryModelClient {
     pub async fn new(uri: String) -> Self {
         let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
@@ -36,6 +45,7 @@ impl QueryModelClient {
     }
 
     pub async fn get_user_embedding(&self, request: &UserRequest) -> Result<Vec<f32>, Box<dyn Error>> {
+
         let predict_req: PredictRequest = build_query_model_inputs(request);
 
         /*println!(
@@ -149,6 +159,32 @@ pub fn build_query_model_inputs(req: &UserRequest) -> PredictRequest {
 
 }
 
+pub fn build_batch_query_model_inputs(req: BatchUserRequest) -> PredictRequest {
+
+    let mut inputs : HashMap<String, TensorProto> = HashMap::new();
+
+    let batch_size = req.user_ids.len();
+
+    // Broadcast the single timestamp to match the batch size
+    let timestamps = vec![req.timestamp; batch_size];
+
+    inputs.insert("user_id".into(), req.user_ids.into_tensor2d());
+    inputs.insert("age".into(), req.ages.into_tensor2d());
+    inputs.insert("gender".into(), req.genders.into_tensor2d());
+    inputs.insert("occupation".into(), req.occupations.into_tensor2d());
+    inputs.insert("timestamp".into(), timestamps.into_tensor2d());
+
+    PredictRequest {
+        model_spec: Some(ModelSpec {
+            name: "query".to_string(),
+            signature_name: "serving_batch".to_string(),
+            ..Default::default()
+        }),
+        inputs: inputs,
+        ..Default::default()
+    }
+}
+
 pub fn build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len : usize) -> PredictRequest {
     /*
     //MAX_GRAPHS:
@@ -165,41 +201,7 @@ pub fn build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len
     padded_super_graph.candidate_mask
     */
 
-    //let max_edges = padded_super_graph.senders.len() as i64;
-    let max_nodes = padded_super_graph.node_ids.len() as i64;
-    //let max_graphs = padded_super_graph.n_edge.len() as i64;
-
-    //println!("max_nodes: {}, max_edges: {}, max_graphs: {}", max_nodes,
-    //    padded_super_graph.senders.len() as i64, padded_super_graph.n_edge.len() as i64);
-
-    let mut inputs = HashMap::new();
-
-    // Graph Structure (Usually single-element Vecs or small arrays)
-    inputs.insert("n_node".into(), padded_super_graph.n_node.into_tensor());
-    inputs.insert("n_edge".into(), padded_super_graph.n_edge.into_tensor());
-
-    // Connectivity & Edge Features
-    inputs.insert("senders".into(), padded_super_graph.senders.into_tensor());
-    inputs.insert("receivers".into(), padded_super_graph.receivers.into_tensor());
-    inputs.insert("edge_features".into(), padded_super_graph.edge_features.into_tensor());
-
-    // Node Features
-    inputs.insert("node_ids".into(), padded_super_graph.node_ids.into_tensor());
-    inputs.insert("node_label".into(), padded_super_graph.node_labels.into_tensor());
-    inputs.insert("node_type".into(), padded_super_graph.node_types.into_tensor());
-    // Masks
-    inputs.insert("node_candidate_mask".into(), padded_super_graph.candidate_mask.into_tensor());
-
-    // Node Embeddings (Requires 2D Shape Override)
-    let mut emb_tensor = padded_super_graph.node_embeddings.into_tensor();
-    emb_tensor.tensor_shape = Some(TensorShapeProto {
-        dim: vec![
-            Dim { size: max_nodes, name: String::new() },
-            Dim { size: embed_len as i64, name: String::new() },
-        ],
-        unknown_rank: false,
-    });
-    inputs.insert("node_embeddings".into(), emb_tensor);
+    let inputs : HashMap<String, TensorProto> = _build_graph_ranker_proto_inputs(padded_super_graph, embed_len);
 
     // using the batch_size=1 default signature:
     let model_spec = ModelSpec {
@@ -216,7 +218,59 @@ pub fn build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len
         client_id: None,
         request_options: None,
     }
+}
 
+fn _build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len: usize
+) -> HashMap<String, TensorProto> {
+
+    // Calculate total nodes from the super-graph
+    let max_nodes = padded_super_graph.node_ids.len() as i64;
+
+    let mut inputs : HashMap<String, TensorProto> = HashMap::new();
+
+    // 1D Tensors: Graph Structure
+    inputs.insert("n_node".into(), padded_super_graph.n_node.into_tensor());
+    inputs.insert("n_edge".into(), padded_super_graph.n_edge.into_tensor());
+
+    // 1D Tensors: Connectivity & Edge Features
+    inputs.insert("senders".into(), padded_super_graph.senders.into_tensor());
+    inputs.insert("receivers".into(), padded_super_graph.receivers.into_tensor());
+    inputs.insert("edge_features".into(), padded_super_graph.edge_features.into_tensor());
+
+    // 1D Tensors: Node Features & Masks
+    inputs.insert("node_ids".into(), padded_super_graph.node_ids.into_tensor());
+    inputs.insert("node_label".into(), padded_super_graph.node_labels.into_tensor());
+    inputs.insert("node_type".into(), padded_super_graph.node_types.into_tensor());
+    inputs.insert("node_candidate_mask".into(), padded_super_graph.candidate_mask.into_tensor());
+
+    // 2D Tensor: Node Embeddings [total_nodes, embed_len]
+    let mut emb_tensor = padded_super_graph.node_embeddings.into_tensor();
+    emb_tensor.tensor_shape = Some(TensorShapeProto {
+        dim: vec![
+            Dim { size: max_nodes, name: String::new() },
+            Dim { size: embed_len as i64, name: String::new() },
+        ],
+        unknown_rank: false,
+    });
+    inputs.insert("node_embeddings".into(), emb_tensor);
+
+    inputs
+}
+
+pub fn build_batch_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len: usize
+) -> PredictRequest {
+
+    let inputs : HashMap<String, TensorProto> = _build_graph_ranker_proto_inputs(padded_super_graph, embed_len);
+
+    PredictRequest {
+        model_spec: Some(ModelSpec {
+            name: "graph-ranker".into(),
+            signature_name: "serving_batch".into(), // Targets the batch signature
+            ..Default::default()
+        }),
+        inputs,
+        ..Default::default()
+    }
 }
 
 pub trait IntoTensorProto {
@@ -237,12 +291,7 @@ impl IntoTensorProto for Vec<i32> {
             version_number: 0,
             int_val: self, // Pack the data here
             // ... all other fields must be empty vectors
-            tensor_content: vec![], half_val: vec![], float_val: vec![],
-            double_val: vec![], string_val: vec![], scomplex_val: vec![],
-            int64_val: vec![], bool_val: vec![], dcomplex_val: vec![],
-            resource_handle_val: vec![], variant_val: vec![],
-            uint32_val: vec![], uint64_val: vec![],
-            float8_val: vec![],
+            ..Default::default()
         }
     }
     fn into_tensor2d(self) -> TensorProto {

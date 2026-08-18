@@ -1,3 +1,8 @@
+2026-08-17 16:42:25.873420: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2026-08-17 16:42:25.925667: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2026-08-17 16:42:28.111055: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+
 MetaGraphDef with tag-set: 'serve' contains the following SignatureDefs:
 
 signature_def['__saved_model_init_op']:
@@ -13,7 +18,7 @@ signature_def['serving_batch']:
   The given SavedModel SignatureDef contains the following input(s):
     inputs['edge_features'] tensor_info:
         dtype: DT_INT32
-        shape: (23104)
+        shape: (38464)
         name: serving_batch_edge_features:0
     inputs['n_edge'] tensor_info:
         dtype: DT_INT32
@@ -25,36 +30,36 @@ signature_def['serving_batch']:
         name: serving_batch_n_node:0
     inputs['node_candidate_mask'] tensor_info:
         dtype: DT_BOOL
-        shape: (23360)
+        shape: (38720)
         name: serving_batch_node_candidate_mask:0
     inputs['node_embeddings'] tensor_info:
         dtype: DT_FLOAT
-        shape: (23360, 16)
+        shape: (38720, 32)
         name: serving_batch_node_embeddings:0
     inputs['node_ids'] tensor_info:
         dtype: DT_INT32
-        shape: (23360)
+        shape: (38720)
         name: serving_batch_node_ids:0
     inputs['node_label'] tensor_info:
         dtype: DT_INT32
-        shape: (23360)
+        shape: (38720)
         name: serving_batch_node_label:0
     inputs['node_type'] tensor_info:
         dtype: DT_INT32
-        shape: (23360)
+        shape: (38720)
         name: serving_batch_node_type:0
     inputs['receivers'] tensor_info:
         dtype: DT_INT32
-        shape: (23104)
+        shape: (38464)
         name: serving_batch_receivers:0
     inputs['senders'] tensor_info:
         dtype: DT_INT32
-        shape: (23104)
+        shape: (38464)
         name: serving_batch_senders:0
   The given SavedModel SignatureDef contains the following output(s):
     outputs['outputs'] tensor_info:
         dtype: DT_FLOAT
-        shape: (50)
+        shape: (70)
         name: StatefulPartitionedCall:0
   Method name is: tensorflow/serving/predict
 
@@ -62,7 +67,7 @@ signature_def['serving_default']:
   The given SavedModel SignatureDef contains the following input(s):
     inputs['edge_features'] tensor_info:
         dtype: DT_INT32
-        shape: (128)
+        shape: (192)
         name: serving_default_edge_features:0
     inputs['n_edge'] tensor_info:
         dtype: DT_INT32
@@ -74,38 +79,38 @@ signature_def['serving_default']:
         name: serving_default_n_node:0
     inputs['node_candidate_mask'] tensor_info:
         dtype: DT_BOOL
-        shape: (128)
+        shape: (192)
         name: serving_default_node_candidate_mask:0
     inputs['node_embeddings'] tensor_info:
         dtype: DT_FLOAT
-        shape: (128, 16)
+        shape: (192, 32)
         name: serving_default_node_embeddings:0
     inputs['node_ids'] tensor_info:
         dtype: DT_INT32
-        shape: (128)
+        shape: (192)
         name: serving_default_node_ids:0
     inputs['node_label'] tensor_info:
         dtype: DT_INT32
-        shape: (128)
+        shape: (192)
         name: serving_default_node_label:0
     inputs['node_type'] tensor_info:
         dtype: DT_INT32
-        shape: (128)
+        shape: (192)
         name: serving_default_node_type:0
     inputs['receivers'] tensor_info:
         dtype: DT_INT32
-        shape: (128)
+        shape: (192)
         name: serving_default_receivers:0
     inputs['senders'] tensor_info:
         dtype: DT_INT32
-        shape: (128)
+        shape: (192)
         name: serving_default_senders:0
   The given SavedModel SignatureDef contains the following output(s):
     outputs['outputs'] tensor_info:
         dtype: DT_FLOAT
-        shape: (50)
+        shape: (70)
         name: StatefulPartitionedCall_1:0
   Method name is: tensorflow/serving/predict
-The MetaGraph with tag set ['serve'] contains the following ops: {'Pack', 'VarHandleOp', 'AssignVariableOp', 'StringJoin', 'Placeholder', 'PreventGradient', 'StaticRegexFullMatch', 'Identity', 'StatefulPartitionedCall', 'DisableCopyOnRead', 'ReadVariableOp', 'MergeV2Checkpoints', 'Const', 'NoOp', 'RestoreV2', 'ShardedFilename', 'SaveV2', 'XlaCallModule', 'Select'}
+The MetaGraph with tag set ['serve'] contains the following ops: {'MergeV2Checkpoints', 'Select', 'VarHandleOp', 'Const', 'RestoreV2', 'ShardedFilename', 'PreventGradient', 'XlaCallModule', 'Identity', 'DisableCopyOnRead', 'AssignVariableOp', 'SaveV2', 'ReadVariableOp', 'StringJoin', 'Placeholder', 'NoOp', 'StatefulPartitionedCall', 'Pack', 'StaticRegexFullMatch'}
 
 Concrete Functions:
