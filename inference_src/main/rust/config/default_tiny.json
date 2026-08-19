@@ -16,5 +16,7 @@
   "movies_path": "../../../src/test/resources/data/movies.parquet",
   "ranker_n_local_devices": 1,
   "top_k": 20,
-  "persisted_index_path": "./target/movie_embeddings_indexer"
+  "persisted_index_path": "./target/movie_embeddings_indexer",
+  "query_metadata_uri": "../../../src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/1/assets.extra/hyperparameters.json",
+  "ranker_metadata_uri": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_single.json"
 }

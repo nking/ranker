@@ -93,6 +93,14 @@ name = "app_config_tests"
 path="../../test/rust/test/app_config_test.rs"
 
 [[test]]
+name = "ranker_model_metadata_tests"
+path="../../test/rust/test/ranker_model_metadata_test.rs"
+
+[[test]]
+name = "query_model_metadata_tests"
+path="../../test/rust/test/query_model_metadata_test.rs"
+
+[[test]]
 name = "app_runner_tests"
 path="../../test/rust/test/app_runner_test.rs"
 

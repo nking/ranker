@@ -11,12 +11,14 @@ use std::path::Path;
 use futures::future::join_all;
 use crate::util;
 
+#[derive(Debug)]
 pub struct UserMapEntry {
     pub movie_ids: Vec<i32>,
     pub ratings: Vec<i32>,
     pub timestamps: Vec<i64>,
 }
 
+#[derive(Debug)]
 pub struct UserHistory {
     pub user_ids : Vec<i32>,
     pub movie_ids : Vec<i32>,

@@ -311,7 +311,8 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
             false
         ];
 
-        let expected_node_embeddings : Vec<f32> = vec![
+        //TODO: update using python test having same hyperparams if intend to use here
+        let _expected_node_embeddings : Vec<f32> = vec![
             -1.46038502e-01,7.56151378e-01,3.79245803e-02,-1.47179127e-01,
             4.40878153e-01,-3.01756620e-01,-2.63107866e-02,-5.77992916e-01,
             3.30849081e-01,-1.73936829e-01,7.93257058e-01,-7.03651309e-01,

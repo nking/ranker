@@ -54,15 +54,14 @@ impl AppRunner {
         let orchestrator = Orchestrator::new(
             self.config.query_uri,
             self.config.ranker_uri,
+            self.config.query_metadata_uri,
+            self.config.ranker_metadata_uri,
             &self.config.movie_embeddings_path,
             ratings_uris_refs,
-            max_history,
-            num_candidates,
-            num_catalog_users,
             self.config.ranker_n_local_devices,
             self.config.top_k,
             self.config.persisted_index_path,
-            self.config.user_db_path,
+            self.config.user_db_path
         ).await?;
 
         let listener = tokio::net::TcpListener::bind(self.config.server_addr).await?;

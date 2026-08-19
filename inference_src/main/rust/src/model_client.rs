@@ -13,20 +13,27 @@ pub mod tf_core {
 }
 use tf_core::{Example, SignatureDef, TensorProto, DataType, TensorShapeProto, tensor_shape_proto::Dim};
 use tf_serving::{prediction_service_client::PredictionServiceClient, PredictRequest, ModelSpec};
+use crate::ranker_model_metadata::RankerModelMetadata;
 
+#[derive(Debug)]
 pub struct QueryModelClient {
     pub client: PredictionServiceClient<Channel>,
 }
 
+#[derive(Debug)]
 pub struct RankerModelClient {
     pub client: PredictionServiceClient<Channel>,
+    pub metadata: RankerModelMetadata,
 }
 
+
 //NOTE: in production, would probably separate the single inferece clients above from the batch service clients and have different hosts for theem
+#[derive(Debug)]
 pub struct BatchQueryModelClient {
     pub client: PredictionServiceClient<Channel>,
 }
 
+#[derive(Debug)]
 pub struct BatchRankerModelClient {
     pub client: PredictionServiceClient<Channel>,
 }
@@ -86,14 +93,14 @@ impl QueryModelClient {
 
 impl RankerModelClient {
 
-    pub async fn new(uri: String) -> Self {
+    pub async fn new(uri: String, metadata: RankerModelMetadata) -> Self {
         let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
 
         let channel = endpoint
             //.max_decoding_message_size(10 * 1024 * 1024) // 10MB example
             .connect()
             .await.expect("Failed to connect to TFS for ranker model");
-        Self { client: PredictionServiceClient::new(channel) }
+        Self { client: PredictionServiceClient::new(channel) , metadata: metadata }
     }
 
     pub async fn get_candidate_ranks(&self, padded_super_graph: JraphGraph, embed_len : usize) -> Result<Vec<f32>, Box<dyn Error>> {
@@ -163,6 +170,7 @@ pub fn build_batch_query_model_inputs(req: BatchUserRequest) -> PredictRequest {
 
     let mut inputs : HashMap<String, TensorProto> = HashMap::new();
 
+    // the TwoTowerDNN QueryModel saved model doesn't have a fixed batch_size
     let batch_size = req.user_ids.len();
 
     // Broadcast the single timestamp to match the batch size

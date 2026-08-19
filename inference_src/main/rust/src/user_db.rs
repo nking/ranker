@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::Result;
 use tonic::Request;
 
+#[derive(Debug)]
 pub struct UserDb {
     mmap: Mmap,
     record_size: usize,

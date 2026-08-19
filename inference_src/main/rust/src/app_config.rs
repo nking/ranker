@@ -58,6 +58,14 @@ pub struct AppConfig {
     // path to the movies catalog file
     #[arg(long, env = "MOVIES_PATH")]
     pub movies_path : String,
+
+    // path to the query model hyperparameters json file
+    #[arg(long, env = "QUERY_METADATA_URI")]
+    pub query_metadata_uri : String,
+
+    // path to the ranker model metadata json file.  expecting either metadata_single.json or metadata_batch.json
+    #[arg(long, env = "RANKER_METADATA_URI")]
+    pub ranker_metadata_uri : String,
 }
 
 impl AppConfig {

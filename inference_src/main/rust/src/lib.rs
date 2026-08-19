@@ -15,6 +15,8 @@ pub mod embeddings_ann;
 pub mod app_runner;
 pub mod app_config;
 
+pub mod ranker_model_metadata;
+pub mod query_model_metadata;
 pub mod pb {
     tonic::include_proto!("recommender");
 }

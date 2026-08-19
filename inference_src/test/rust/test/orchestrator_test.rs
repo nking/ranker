@@ -1,26 +1,26 @@
-#[cfg(test)]
-mod orchestrator_tests {
-    use std::collections::HashMap;
-    use std::fs::File;
-    use std::io::BufReader;
-    use std::path::PathBuf;
-    use serde_json::Value;
-    use tonic::{Response};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::PathBuf;
+use serde_json::Value;
 
-    // Assuming your UserRequest is accessible here
-    use inference_engine::pb::{RankedMovies, UserRequest};
-    mod helper {
-        // Tell Rust to literally include the code from helper.rs here
-        include!("helper.rs");
-    }
-    use inference_engine::app_config::AppConfig;
-    use inference_engine::orchestrator::Orchestrator;
-    use inference_engine::pb::recommender_service_server::RecommenderService;
-    use crate::orchestrator_tests::helper::{get_config_json_uri, get_train_val_test_liked_uris, DataSize};
+// Assuming your UserRequest is accessible here
+pub mod helper {
+    // Tell Rust to literally include the code from helper.rs here
+    include!("helper.rs");
+}
+use inference_engine::app_config::AppConfig;
+use inference_engine::orchestrator::Orchestrator;
+use inference_engine::pb::recommender_service_server::RecommenderService;
+use helper::{get_config_json_uri, get_train_val_test_liked_uris, DataSize};
 
-    #[tokio::test]
-    async fn test_orchestrator() {
+struct TestHarness {
+    orchestrator: Orchestrator,
+}
 
+impl TestHarness {
+    async fn new() -> Self {
+        println!("\n[SETUP]: Initializing test resource...");
         let config_path = get_config_json_uri();
         let config = AppConfig::load_from_file(&config_path).unwrap();
 
@@ -57,16 +57,42 @@ mod orchestrator_tests {
         let orchestrator = Orchestrator::new(
             query_uri,
             ranker_uri,
+            config.query_metadata_uri,
+            config.ranker_metadata_uri,
             &movie_embeddings_uri,
             ratings_uris,
-            max_history,
-            num_candidates,
-            num_catalog_users,
             ranker_n_local_devices,
             top_k,
             persisted_index_path,
             user_db_path
         ).await.unwrap();
+        Self {
+            orchestrator: orchestrator,
+        }
+    }
+}
+
+// --- TEARDOWN LOGIC ---
+impl Drop for TestHarness {
+    fn drop(&mut self) {
+        println!("[TEARDOWN]");
+    }
+}
+
+#[cfg(test)]
+mod orchestrator_tests {
+    // Bring everything from the outer scope (TestHarness, helper functions, etc.) into the test module
+    use super::*;
+
+    // 1. CRITICAL: You must bring the gRPC trait into scope so its methods (.predict) are visible
+    use inference_engine::pb::recommender_service_server::RecommenderService;
+    use inference_engine::pb::{RankedMovies, UserRequest};
+    use tonic::Response;
+
+    #[tokio::test]
+    async fn test_orchestrator() {
+        // Setup runs here
+        let _harness = TestHarness::new().await;
 
         let mock_request = UserRequest {
             user_id: 42,
@@ -78,17 +104,20 @@ mod orchestrator_tests {
 
         let tonic_req = tonic::Request::new(mock_request);
 
-        let results : Result<Response<RankedMovies>, tonic::Status>
-            = orchestrator.predict(tonic_req).await;
+        // Call .predict() directly on _harness.orchestrator (DO NOT move it out with `let orchestrator = ...`)
+        let results: Result<Response<RankedMovies>, tonic::Status> =
+            _harness.orchestrator.predict(tonic_req).await;
 
         assert!(results.is_ok(), "Prediction failed: {:?}", results.err());
         let response = results.unwrap().into_inner();
+
         println!("Got {} recommendations!", response.movie_ids.len());
         for i in 0..response.movie_ids.len() {
             println!("{} {}", response.movie_ids[i], response.scores[i]);
         }
-        assert_eq!(42, response.user_id)
 
+        assert_eq!(42, response.user_id);
+
+        // Teardown automatically runs here when `_harness` goes out of scope at the end of the test function
     }
-
 }

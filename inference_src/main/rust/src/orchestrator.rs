@@ -7,50 +7,87 @@ use crate::embeddings_ann::Searcher;
 use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
 use crate::user_history::{build_user_history, UserHistory};
 
-// Now you can use them directly!
 use crate::pb::{UserRequest, RankedMovies, BatchRankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse, BatchUserRequest};
 use tonic::{Request, Response, Status};
 use usearch::ffi::Matches;
 use crate::pb::recommender_service_server::RecommenderService;
+use crate::query_model_metadata::QueryModelMetadata;
+use crate::ranker_model_metadata::RankerModelMetadata;
 use crate::user_db::UserDb;
 use crate::util::sort_by_scores;
 
 // the number of local_devices attached to the ranker TFS.  e.g. = 2 for the kaggle T4x2 GPUs
 // max_history, num_candidates are hyper-parameters of the ranker_model
+#[derive(Debug)]
 pub struct Orchestrator {
     query_model: QueryModelClient,
     ranker_model: RankerModelClient,
+    query_model_metadata: QueryModelMetadata,
+    ranker_model_metadata: RankerModelMetadata,
     searcher: ArcSwap<Searcher>, // updatable
     user_history: UserHistory,  // can be made updatable in future
-    max_history: usize,
     user_db: UserDb,
     #[allow(dead_code)]
-    num_candidates: usize,
-    num_catalog_users: usize,
     ranker_n_local_devices : usize,
     persisted_index_path: PathBuf,
-    top_k : usize
+    top_k : usize,
 }
 
 impl Orchestrator {
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// * `query_uri`: endpoint uri of the dpeloyed twotower query model
+    /// * `ranker_uri`: endpoint uri of the deployed graphranker model
+    /// * `query_metadata_uri`: uri for the query model metadata and hyperparameters json file
+    /// * `ranker_metadata_uri`: uri for the ranker model metadata json file
+    /// * `movie_embeddings_uri`: uri to the movie_embeddings parquet file
+    /// * `ratings_uris`: Vector of ratings file uris usad to construct user histories
+    /// * `ranker_n_local_devices`:
+    /// * `top_k`:
+    /// * `persisted_index_path`:
+    /// * `user_db_path`:
+    ///
+    /// returns: Result<Orchestrator, Box<dyn Error+Send+Sync, Global>>
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
     // Note: We make this async because connecting to gRPC takes time
     pub async fn new(
         query_uri: String,
         ranker_uri: String,
+        query_metadata_uri : String,
+        ranker_metadata_uri : String,
         movie_embeddings_uri: &str,
         ratings_uris: Vec<&str>,
-        max_history: usize,
-        num_candidates: usize,
-        num_catalog_users: usize,
         ranker_n_local_devices : usize,
         top_k : usize,
         persisted_index_path: impl AsRef<Path>,
-        user_db_path : impl AsRef<Path>
+        user_db_path : impl AsRef<Path>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
 
-        let initial_searcher = Searcher::new(movie_embeddings_uri, num_candidates, &persisted_index_path)?;
+        let query_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri).unwrap();
+        let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri).unwrap();
+
+        if query_metadata.embed_len != ranker_metadata.embed_len {
+            return Err(format!(
+                "Query model embed_len {} does not match the Ranker model embed_len {}",
+                query_metadata.embed_len, ranker_metadata.embed_len
+            ).into()); // .into() converts the String into Box<dyn std::error::Error + Send + Sync>
+        }
+
+        // these are in ranker_metadata
+        //`max_history`
+        /// * `num_candidates`
+        /// * `num_catalog_users`:
+
+        let initial_searcher = Searcher::new(movie_embeddings_uri, ranker_metadata.num_candidates, &persisted_index_path)?;
         let query_client = QueryModelClient::new(query_uri).await;
-        let ranker_client = RankerModelClient::new(ranker_uri).await;
+        let ranker_client = RankerModelClient::new(ranker_uri, ranker_metadata.clone()).await;
 
         let user_history: UserHistory = build_user_history(&ratings_uris, 2048).await;
         let user_db : UserDb = UserDb::new(user_db_path).expect("Failed to initialize UserDb from binary path");
@@ -58,9 +95,8 @@ impl Orchestrator {
         Ok(Self {
             query_model: query_client,
             ranker_model: ranker_client,
-            max_history: max_history,
-            num_candidates: num_candidates,
-            num_catalog_users: num_catalog_users,
+            query_model_metadata : query_metadata,
+            ranker_model_metadata: ranker_metadata,
             searcher: ArcSwap::from_pointee(initial_searcher),
             user_history: user_history,
             ranker_n_local_devices: ranker_n_local_devices,
@@ -94,10 +130,10 @@ impl Orchestrator {
     async fn make_ranker_request(&self, user_id : i32, timestamp: i64,
         user_embedding : Vec<f32>, candidate_ids : Vec<i32>) ->Result<RankedMovies, Status> {
 
-        if candidate_ids.len() != self.num_candidates {
+        if candidate_ids.len() != self.ranker_model_metadata.embed_len {
             println!(
                 "[Warning] Expected candidate_ids length to be {}, but got {}",
-                self.num_candidates,
+                self.ranker_model_metadata.num_candidates,
                 candidate_ids.len()
             );
         }
@@ -117,8 +153,8 @@ impl Orchestrator {
             &candidate_ids,
             &labels,
             &self.user_history,
-            self.max_history,
-            self.num_catalog_users,
+            self.ranker_model_metadata.max_history,
+            self.ranker_model_metadata.num_catalog_users,
             searcher.get_num_catalog_movies(),
             searcher.get_embed_len(),
             searcher.get_movies_embedding_catalog_ref(),
@@ -179,7 +215,7 @@ impl RecommenderService for Orchestrator {
             &user_ids, &timestamps
         );
         // choose more than num_candidates to choose only unseen from them, then rank for top num_candidates
-        let n_srch = Some(self.num_candidates + n_hist[0]);
+        let n_srch = Some(self.ranker_model_metadata.num_candidates + n_hist[0]);
 
         // finds num_candidates approx nearest neighbors
         let searcher = self.searcher.load();
@@ -190,7 +226,7 @@ impl RecommenderService for Orchestrator {
         // reference frame num_catalog_users + 1 to num_catalog_users + 1 + num_catalog_movies
         let mut candidate_ids: Vec<i32> = nearest.keys
             .into_iter()
-            .map(|x| x as i32 + 1 + self.num_catalog_users as i32)
+            .map(|x| x as i32 + 1 + self.ranker_model_metadata.num_catalog_users as i32)
             .collect();
 
         // filter to keep only unseen movies
@@ -201,7 +237,7 @@ impl RecommenderService for Orchestrator {
 
         (&mut candidate_ids).retain(|id: &i32| !watched_set.contains(id));
 
-        let n_backfill = self.num_candidates.saturating_sub(candidate_ids.len());
+        let n_backfill = self.ranker_model_metadata.num_candidates.saturating_sub(candidate_ids.len());
         if n_backfill > 0 {
             (&mut candidate_ids).extend(
                 history.iter()
@@ -209,7 +245,7 @@ impl RecommenderService for Orchestrator {
                     .copied() // or .cloned() depending on the type inside history
             );
         } else {
-            (&mut candidate_ids).truncate(self.num_candidates);
+            (&mut candidate_ids).truncate(self.ranker_model_metadata.num_candidates);
         }
 
         Ok(Response::new(ApproxNearestNeighborsResponse {

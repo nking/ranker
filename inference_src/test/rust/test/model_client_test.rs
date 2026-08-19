@@ -4,7 +4,7 @@ mod client_tests {
     use std::error::Error;
     use std::fs::File;
     use std::io::BufReader;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use serde_json::Value;
     use inference_engine::app_config::AppConfig;
     use inference_engine::model_client::{QueryModelClient, RankerModelClient};
@@ -49,7 +49,7 @@ mod client_tests {
     async fn test_ranker_model_connection() -> Result<(), Box<dyn std::error::Error>>{
         let uri = String::from("http://172.17.0.1:8510");
 
-        let client = RankerModelClient::new(uri).await;let config_path = get_config_json_uri();
+        let client = RankerModelClient::new(uri, ).await;let config_path = get_config_json_uri();
         let config = AppConfig::load_from_file(&config_path).unwrap();
 
 

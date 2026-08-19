@@ -2,6 +2,7 @@ use std::{path::{Path, PathBuf}};
 use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 use usearch::ffi::Matches;
 use crate::embeddings_util::read_movie_embeddings;
+use std::fmt;
 
 pub struct Searcher {
     indexer : Index,
@@ -10,6 +11,21 @@ pub struct Searcher {
     embed_len : usize,
     num_candidates: usize,
     persisted_index_path: PathBuf,
+}
+
+impl fmt::Debug for Searcher {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Searcher")
+            .field("indexer_size", &self.indexer.size())         // Current vector count
+            .field("indexer_capacity", &self.indexer.capacity()) // Max allocated capacity
+            .field("indexer_dimensions", &self.indexer.dimensions())
+            .field("movie_embeddings_catalog", &self.movie_embeddings_catalog)
+            .field("num_catalog_movies", &self.num_catalog_movies)
+            .field("embed_len", &self.embed_len)
+            .field("num_candidates", &self.num_candidates)
+            .field("persisted_index_path", &self.persisted_index_path)
+            .finish()
+    }
 }
 
 impl Searcher {

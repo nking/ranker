@@ -87,6 +87,7 @@ pub fn get_embeddings_uris() -> (String, String) {
     movie_embedding_uri.unwrap().to_string_lossy().into_owned())
 }
 
+#[allow(dead_code)]
 pub fn get_embeddings_metadata_uris() -> (String, String) {
     let mut user_uri : Option<PathBuf> = get_project_dir();
     if let Some(ref mut p) = user_uri {
@@ -123,6 +124,32 @@ pub fn get_movies_uri() -> String {
         .expect("Project directory not found");
 
     movies_uri
+}
+
+pub fn get_ranker_metadata_single_uri() -> String {
+    let file_uri = get_project_dir()
+        .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_single.json"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .expect("Project directory not found");
+
+    file_uri
+}
+pub fn get_ranker_metadata_batch_uri() -> String {
+    let file_uri = get_project_dir()
+        .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_batch.json"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .expect("Project directory not found");
+
+    file_uri
+}
+
+pub fn get_query_metadata_uri() -> String {
+    let file_uri = get_project_dir()
+        .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/1/assets.extra/hyperparameters.json"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .expect("Project directory not found");
+
+    file_uri
 }
 
 #[allow(dead_code)]
