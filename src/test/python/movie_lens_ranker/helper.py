@@ -47,12 +47,16 @@ class DataSize(Enum):
     FULL = 'full'
     SMALL = 'small'
     TINY = 'tiny'
+    TINY3 = 'tiny3'  #made from recommender_systems/src/test/python/movie_lens_tfx/write_tiny2_tiered_liked_splits.py
     
 def get_train_val_test_liked_uris(data_size:DataSize=DataSize.TINY, use_gcs_uri:bool=False) -> Dict[str, str]:
     if use_gcs_uri:
         base_uri = "gs://data/"
     else:
         base_uri = os.path.join(get_project_dir(), "src/test/resources/data/")
+    if data_size == DataSize.TINY3:
+        return {key: os.path.join(base_uri, f"ratings_{key}.array_record")
+                for key in {"train_liked", "val_liked", "test_liked"}}
     if data_size == DataSize.SMALL:
         base_uri = os.path.join(base_uri, "small")
     elif data_size == DataSize.TINY:

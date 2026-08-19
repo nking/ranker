@@ -424,6 +424,12 @@ class TestRanker(unittest.TestCase):
         config['mlflow_experiment_name'] = config['study_name']
         config['connections_check'] = 0
 
+        #overriding the train, val, test liked datasets to make sure have all tiers in training.
+        ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY3, use_gcs_uri=True)
+        config["ratings_train_liked_uri"] = ratings_uri_dict["train_liked"]
+        config["ratings_val_liked_uri"] = ratings_uri_dict["val_liked"]
+        config["ratings_test_liked_uri"] = ratings_uri_dict["test_liked"]
+
         self.delete_vizier_project(config['vizier_endpoint'], config['project_id'], config['study_name'])
 
         self._run_and_assert_hpo(config)
@@ -616,7 +622,7 @@ class TestRanker(unittest.TestCase):
             key2 = f'val_{key}'
             self.assertTrue(key1 in output_metrics_dict)
             self.assertTrue(key2 in output_metrics_dict)
-        
+
     def _assert_export_test_results(self, config: Dict[str, Any]):
         # ===================================================
         output_metrics_path = f"gs://hpo-results-bucket/{config['project_id']}/{config['study_name']}/test/metrics.json"
