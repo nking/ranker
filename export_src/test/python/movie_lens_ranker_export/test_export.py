@@ -55,10 +55,9 @@ class ExportTest(unittest.TestCase):
         num_candidates = restore_dict['config']['num_candidates']
 
         #TODO: refactor num_users to num_catalog_users and num_movies to num_catalog_movies throughout code
-        #TODO: add git_commit_hash
         param_keys = {"max_history", "num_candidates", "embed_len",
                       #"num_catalog_users", "num_catalog_movies" ,
-                      "model_version", "trained_at_timestamp" }
+                      "git_commit_hash", "model_version", "trained_at_timestamp" }
         params = {key : restore_dict['config'][key] for key in param_keys}
         params["num_catalog_users"] = restore_dict['config']['num_users']
         params['num_catalog_movies'] = restore_dict['config']['num_movies']
@@ -90,11 +89,12 @@ class ExportTest(unittest.TestCase):
             n_edge = fake_single.n_edge,
         )
         predictions_single = response['outputs']
-        print(f'predictions_single={predictions_single}', flush=True)
+        #print(f'predictions_single={predictions_single}', flush=True)
         print(type(predictions_single), predictions_single.dtype)
-        self.assertEqual(num_candidates, predictions_single.shape[0])
+        expected_shape = (len(fake_single.n_node), num_candidates)
+        self.assertEqual( expected_shape, predictions_single.shape)
 
-        predictions_batch = batch_inference_sig(
+        response_batch = batch_inference_sig(
             node_candidate_mask = fake_batch.nodes["candidate_mask"],
             node_ids = fake_batch.nodes["ids"],
             node_label = fake_batch.nodes["label"],
@@ -106,10 +106,10 @@ class ExportTest(unittest.TestCase):
             n_node = fake_batch.n_node,
             n_edge = fake_batch.n_edge,
         )
-        predictions_batch = response['outputs']
-        print(f'predictions_batch={predictions_batch}', flush=True)
-        self.assertEqual(num_candidates, predictions_batch.shape[0])
-
+        predictions_batch = response_batch['outputs']
+        #print(f'predictions_batch={predictions_batch}', flush=True)
+        expected_shape = (len(fake_batch.n_node), num_candidates)
+        self.assertEqual( expected_shape, predictions_batch.shape)
 
         jax_module = make_jax_module(restore_dict['model'],  restore_dict['config']['num_candidates'])
 
@@ -182,7 +182,6 @@ class ExportTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
 
 
 

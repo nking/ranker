@@ -88,11 +88,16 @@ def make_jax_module(trained_model: GraphRanker,  num_candidates:int) -> JaxModul
             n_node=inputs["n_node"],
             n_edge=inputs["n_edge"]
         )
-        raw_scores = model(graph_batch)[:num_candidates]
+        # Model returns a 1D array of shape (max_graphs * num_candidates,)
+        flat_scores = model(graph_batch)
 
-        # Force it into a contiguous JAX array (collapses lists/tuples of scalars)
-        predictions_array = jnp.asarray(raw_scores)
+        # Dynamically determine max_graphs from the input shape
+        max_graphs = inputs["n_node"].shape[0]
 
+        # Reshape to (max_graphs, num_candidates)
+        predictions_array = jnp.reshape(flat_scores, (max_graphs, num_candidates))
+
+        #the dummy results should not be sliced out before returning in order to keep XLA from recompiling
         return {"outputs": predictions_array}
 
     jax_module = export.JaxModule(

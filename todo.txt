@@ -15,6 +15,21 @@
 -- download antigravity for linux
    and wire it up to use local Gemma model
 
+- consider storing the arguments used to construct GraphRanker
+  in the exported metadata json file.
+  - the rng needs special care:
+    graphdef, state = nnx.split(rngs)
+    rng_state_dict = nnx.to_pure_dict(state)
+    leaves, treedef = jax.tree_util.tree_flatten(graphdef)
+    graphdef_dict = {
+        "leaves": [int(x) if hasattr(x, 'item') else x for x in leaves],
+        "treedef_str": treedef.to_prefix_string() 
+    }
+    # Reconstruct in the exact same state later
+    restored_treedef = jax.tree_util.tree_unflatten_shape(graphdef_dict["treedef_str"])
+    restored_graphdef = jax.tree_util.tree_unflatten(restored_treedef, graphdef_dict["leaves"])
+    restored_state = nnx.State.from_pure_dict(rng_state_dict)
+    restored_rngs = nnx.merge(restored_graphdef, restored_state)
 
 - consider using a CliffordNet layer instead of the GATv2.
   - requires a change in the bi-encoder to make embeddings

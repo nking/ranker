@@ -20,6 +20,11 @@ class PlotTrainingTest(unittest.TestCase):
         in_path = os.path.join(get_project_dir(),
             "TMP7/hpo-results-bucket/kaggle-tune-train-test/kaggle-hpo/train/metrics.json")
 
+        in_path = os.path.join(get_project_dir(),
+            "tmp_mounts/fake-gcs-server/",
+            "hpo-results-bucket/tune-unittest-010/GraphRanker_tuning_unittest10/train/metrics.json"
+            )
+
         output_dir = os.path.join(get_bin_dir(), "training_metrics_pngs")
 
         with fsspec.open(in_path, mode='r') as f:
