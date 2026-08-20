@@ -42,10 +42,6 @@ impl AppRunner {
         let reader = BufReader::new(file);
         let dict: HashMap<String, Value> = serde_json::from_reader(reader)?;
 
-        let max_history = dict.get("max_history").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let num_candidates = dict.get("num_candidates").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let num_catalog_users = dict.get("num_catalog_users").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-
         let ratings_uris_refs: Vec<&str> = self.config.ratings_uris.iter().map(|s| s.as_str()).collect();
 
         println!("Building Orchestrator (loading embeddings and user history)...");
@@ -80,10 +76,16 @@ impl AppRunner {
 
         println!("Service State updated to Ready. Listening for gRPC traffic...");
 
+        // set to 256 MB.  this can handle a RankedMovieResponse for 700_000 user_ids in a UsersRequest
+        const MAX_MESSAGE_SIZE: usize = 256 * 1024 * 1024;
+
         // Start the server with BOTH the health service and your recommender service
         Server::builder()
             .add_service(health_service) // Injects the standard grpc.health.v1.Health service
-            .add_service(RecommenderServiceServer::new(orchestrator))
+            .add_service(
+                RecommenderServiceServer::new(orchestrator)
+                    .max_decoding_message_size(MAX_MESSAGE_SIZE)
+                    .max_encoding_message_size(MAX_MESSAGE_SIZE))
             .serve_with_incoming_shutdown(
                 tokio_stream::wrappers::TcpListenerStream::new(listener),
                 shutdown_signal,

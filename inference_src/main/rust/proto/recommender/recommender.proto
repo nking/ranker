@@ -4,27 +4,30 @@ package recommender;
 
 // input for the query model
 
-// input requests identifying a list of user and time, supplemented with demographic information
-message UserRequest {
-  repeated int64 user_ids = 1;
+// input requests identifying a list of user and time, supplemented with demographic information.
+// an individual UsersRequest shouldn't contain more than 256 requests, but it won't be strictly enforced.
+message UsersRequest {
+  repeated int32 user_ids = 1;
   repeated string genders = 2;
-  repeated int64 occupations = 3;
-  repeated int64 ages = 4;
-  repeated int64 timestamp = 5;
-  int32 n_users = 6;
+  repeated int32 occupations = 3;
+  repeated int32 ages = 4;
+  repeated int64 timestamps = 5;
+  uint32 n_users = 6;
 }
 
 // input for the graph ranker model
 
 // The output from your orchestrator containing parallel vectors of movie_ids and their model scores
+//NOTE: default gRPC max message size is 4MB.  For 100,000 user_ids, thie object is about 40MB,
+// so configure the Rust tonic server and the calling client to accept larger payloads using
+// .max_decoding_message_size() and .max_encoding_message_size().
 message RankedMovies {
-  repeated int32 movie_ids = 1; // "repeated" means it's a Vec in Rust
-  repeated float scores = 2;
-  int64 user_id = 3;
-}
-
-message BatchRankedMovies {
-  repeated RankedMovies user_rankings = 1;
+  repeated int32 user_ids = 1;
+  repeated int32 movie_ids = 2; // "repeated" means it's a Vec in Rust
+  repeated float scores = 3;
+  uint32 num_candidates = 4;
+  // if choose to pass titles back, use a map of unique ids to title to reduce space:
+  //map<int32, string> unique_movie_titles = 5;
 }
 
 // input request to return scored candidate_ids
@@ -36,22 +39,20 @@ message RankOnlyRequest {
 
 // Response message containing the user embedding and retrieved candidate IDs
 message ApproxNearestNeighborsResponse {
-  repeated float user_embedding = 1;
-  repeated int32 candidate_ids = 2;
+  repeated int32 user_ids = 1;
+  repeated float user_embeddings = 2;
+  repeated int32 candidate_ids = 3;
 }
 
 // methods available for the service
 service RecommenderService {
   // request to retun top_k unwatched recommended movies for the user, descending order by score
-  rpc Predict (UserRequest) returns (RankedMovies);
+  rpc Predict (UsersRequest) returns (RankedMovies);
   // request to return the top_k of the candidate_ids in order of descending score
   rpc RankOnly(RankOnlyRequest) returns (RankedMovies);
 
   // request to return all of the candidate_ids, not reordered nor truncated
   rpc RankOnlyReturnAll(RankOnlyRequest) returns (RankedMovies);
   // request to return return nearest neigbhors of user embedding
-  rpc ApproxNearestNeighbors(UserRequest) returns (ApproxNearestNeighborsResponse);
-
-  // request to retun top_k unwatched recommended movies for the user, descending order by score
-  rpc BatchPredict (BatchUserRequest) returns (BatchRankedMovies);
+  rpc ApproxNearestNeighbors(UsersRequest) returns (ApproxNearestNeighborsResponse);
 }

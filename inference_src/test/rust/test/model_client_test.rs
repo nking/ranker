@@ -34,7 +34,7 @@ mod client_tests {
 
         // If the docker container isn't running, or the model isn't loaded,
         // this will fail and print the gRPC status error.
-        let result : Result<Vec<f32>, Box<dyn Error>> = client.get_user_embedding(&mock_request).await;
+        let result : Result<Vec<f32>, Box<dyn Error>> = client.get_users_embeddings(&mock_request).await;
 
         assert!(result.is_ok(), "Failed to get embedding: {:?}", result.err());
 

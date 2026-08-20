@@ -91,6 +91,9 @@ impl UserHistory {
             // We do nothing, leaving that row in the output safely filled with pad_values.
         }
 
+        debug_assert!(ret_movie_ids.len() == n_requests * requested_max_hist);
+        debug_assert!(ret_ratings.len() == n_requests * requested_max_hist);
+
         (ret_movie_ids, ret_ratings)
     }
 

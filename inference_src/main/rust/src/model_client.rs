@@ -3,7 +3,7 @@ use std::error::Error;
 use tonic::transport::{Channel, Endpoint};
 // use crate:: means look inside this project
 use crate::graph_builder::{JraphGraph};
-use crate::pb::{BatchUserRequest, UserRequest};
+use crate::pb::{UsersRequest};
 
 pub mod tf_serving {
     tonic::include_proto!("tensorflow.serving");
@@ -18,6 +18,7 @@ use crate::ranker_model_metadata::RankerModelMetadata;
 #[derive(Debug)]
 pub struct QueryModelClient {
     pub client: PredictionServiceClient<Channel>,
+    pub embed_len: usize
 }
 
 #[derive(Debug)]
@@ -26,20 +27,8 @@ pub struct RankerModelClient {
     pub metadata: RankerModelMetadata,
 }
 
-
-//NOTE: in production, would probably separate the single inferece clients above from the batch service clients and have different hosts for theem
-#[derive(Debug)]
-pub struct BatchQueryModelClient {
-    pub client: PredictionServiceClient<Channel>,
-}
-
-#[derive(Debug)]
-pub struct BatchRankerModelClient {
-    pub client: PredictionServiceClient<Channel>,
-}
-
 impl QueryModelClient {
-    pub async fn new(uri: String) -> Self {
+    pub async fn new(uri: String, embed_len: usize) -> Self {
         let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
 
         let channel = endpoint
@@ -47,33 +36,25 @@ impl QueryModelClient {
             .await
             .expect("Failed to connect to TFS for query model");
         Self {
-            client: PredictionServiceClient::new(channel),
+            client: PredictionServiceClient::new(channel), embed_len: embed_len
         }
     }
 
-    pub async fn get_user_embedding(&self, request: &UserRequest) -> Result<Vec<f32>, Box<dyn Error>> {
+    pub async fn get_users_embeddings(&self, request: UsersRequest) -> Result<Vec<f32>, Box<dyn Error>> {
+
+        let n_valid_users : usize = request.n_users as usize;
 
         let predict_req: PredictRequest = build_query_model_inputs(request);
 
-        /*println!(
-            "DEBUG: Sending request for model: {}",
-            predict_req.model_spec.as_ref().unwrap().name
-        );
-        println!("Sending gRPC request to TF Serving for Query Embedding Model...");*/
-
         // Send the request
         let response = self.client.clone().predict(predict_req).await?;
-
         let inner_response = response.into_inner();
-
-        //debug:
-        //println!("serving Response for query model: {:#?}", inner_response);
 
         if let Some((_key, tensor_proto)) = inner_response.outputs.into_iter().next() {
 
-            if !tensor_proto.float_val.is_empty() {
-                // Easy path: It returned a pre-parsed float vector
-                Ok(tensor_proto.float_val)
+            // Extract the flat f32 vector
+            let mut flat_embedding = if !tensor_proto.float_val.is_empty() {
+                tensor_proto.float_val
             } else if !tensor_proto.tensor_content.is_empty() {
                 let raw_bytes = tensor_proto.tensor_content;
                 let mut embedding = Vec::with_capacity(raw_bytes.len() / 4);
@@ -81,14 +62,25 @@ impl QueryModelClient {
                     let val = f32::from_le_bytes(chunk.try_into()?);
                     embedding.push(val);
                 }
-                Ok(embedding)
+                embedding
             } else {
-                Err("Error: Tensor contained neither float_val nor tensor_content".into())
+                return Err("Error: Tensor contained neither float_val nor tensor_content".into());
+            };
+
+            // Reshape into batched vectors
+            let valid_len = n_valid_users * self.embed_len;
+
+            // 3. Truncate the flat vector to drop padding graphs at the end
+            if flat_embedding.len() > valid_len {
+                flat_embedding.truncate(valid_len);
             }
+
+            Ok(flat_embedding)
         } else {
             Err("Error: TFS response from query model contained no outputs".into())
         }
     }
+
 }
 
 impl RankerModelClient {
@@ -100,7 +92,14 @@ impl RankerModelClient {
             //.max_decoding_message_size(10 * 1024 * 1024) // 10MB example
             .connect()
             .await.expect("Failed to connect to TFS for ranker model");
-        Self { client: PredictionServiceClient::new(channel) , metadata: metadata }
+
+        // this can handle a RankedMovies response from a UsersRequest of 700_000 user_ids
+        const MAX_MESSAGE_SIZE: usize = 256 * 1024 * 1024;
+        let mut tfs_client = PredictionServiceClient::new(channel)
+            .max_decoding_message_size(MAX_MESSAGE_SIZE)
+            .max_encoding_message_size(MAX_MESSAGE_SIZE);
+
+        Self { client: tfs_client, metadata: metadata }
     }
 
     pub async fn get_candidate_ranks(&self, padded_super_graph: JraphGraph, embed_len : usize) -> Result<Vec<f32>, Box<dyn Error>> {
@@ -140,52 +139,25 @@ impl RankerModelClient {
     }
 }
 
-pub fn build_query_model_inputs(req: &UserRequest) -> PredictRequest {
-
-    let mut inputs = HashMap::new();
-
-    inputs.insert("user_id".into(), vec![req.user_id].into_tensor2d());
-
-    inputs.insert("age".into(), vec![req.age].into_tensor2d());
-
-    inputs.insert("gender".into(), vec![req.gender.clone()].into_tensor2d());
-
-    inputs.insert("occupation".into(), vec![req.occupation].into_tensor2d());
-
-    inputs.insert("timestamp".into(), vec![req.timestamp].into_tensor2d());
-
-    let mut predict_req = PredictRequest::default();
-    predict_req.model_spec = Some(ModelSpec {
-        name: "query".to_string(),
-        signature_name: "serving_default".to_string(),
-        ..Default::default()
-    });
-    predict_req.inputs = inputs;
-
-    predict_req
-
-}
-
-pub fn build_batch_query_model_inputs(req: BatchUserRequest) -> PredictRequest {
+pub fn build_query_model_inputs(req: UsersRequest) -> PredictRequest {
 
     let mut inputs : HashMap<String, TensorProto> = HashMap::new();
 
     // the TwoTowerDNN QueryModel saved model doesn't have a fixed batch_size
     let batch_size = req.user_ids.len();
 
-    // Broadcast the single timestamp to match the batch size
-    let timestamps = vec![req.timestamp; batch_size];
+    //currently: signature needs 64-bit inputs
 
-    inputs.insert("user_id".into(), req.user_ids.into_tensor2d());
-    inputs.insert("age".into(), req.ages.into_tensor2d());
-    inputs.insert("gender".into(), req.genders.into_tensor2d());
-    inputs.insert("occupation".into(), req.occupations.into_tensor2d());
-    inputs.insert("timestamp".into(), timestamps.into_tensor2d());
+    inputs.insert("user_id".into(), req.user_ids.into_64bit_tensor2d());
+    inputs.insert("age".into(), req.ages.into_64bit_tensor2d());
+    inputs.insert("gender".into(), req.genders.into_64bit_tensor2d());
+    inputs.insert("occupation".into(), req.occupations.into_64bit_tensor2d());
+    inputs.insert("timestamp".into(), req.timestamps.into_64bit_tensor2d());
 
     PredictRequest {
         model_spec: Some(ModelSpec {
             name: "query".to_string(),
-            signature_name: "serving_batch".to_string(),
+            signature_name: "serving_default".to_string(),
             ..Default::default()
         }),
         inputs: inputs,
@@ -284,6 +256,7 @@ pub fn build_batch_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, emb
 pub trait IntoTensorProto {
     fn into_tensor(self) -> TensorProto;
     fn into_tensor2d(self) -> TensorProto;
+    fn into_64bit_tensor2d(self) -> TensorProto;
 }
 
 // Implement for Vec<i32> (For nodes, edges, senders, receivers)
@@ -315,13 +288,27 @@ impl IntoTensorProto for Vec<i32> {
             }),
             version_number: 0,
             int_val: self, // Pack the data here
-            // ... all other fields must be empty vectors
-            tensor_content: vec![], half_val: vec![], float_val: vec![],
-            double_val: vec![], string_val: vec![], scomplex_val: vec![],
-            int64_val: vec![], bool_val: vec![], dcomplex_val: vec![],
-            resource_handle_val: vec![], variant_val: vec![],
-            uint32_val: vec![], uint64_val: vec![],
-            float8_val: vec![],
+            ..Default::default()
+        }
+    }
+    fn into_64bit_tensor2d(self) -> TensorProto {
+        let size = self.len() as i64;
+
+        // Cast i32 elements into i64 values
+        let int64_vals: Vec<i64> = self.into_iter().map(|x| x as i64).collect();
+
+        TensorProto {
+            dtype: DataType::DtInt64 as i32,
+            tensor_shape: Some(TensorShapeProto {
+                dim: vec![
+                    Dim { size, name: String::new() }, // Batch dimension (N)
+                    Dim { size: 1, name: String::new() }, // Feature dimension (1)
+                ],
+                unknown_rank: false,
+            }),
+            version_number: 0,
+            int64_val: int64_vals, // Note: TensorFlow protobufs store 64-bit ints in int64_val
+            ..Default::default()
         }
     }
 }
@@ -358,6 +345,9 @@ impl IntoTensorProto for Vec<f32> {
             ..Default::default()
         }
     }
+    fn into_64bit_tensor2d(self) -> TensorProto {
+        unimplemented!("use default 32 bit Vec<f32>")
+    }
 }
 
 // Implement for Vec<bool> (For candidate masks)
@@ -372,12 +362,7 @@ impl IntoTensorProto for Vec<bool> {
             }),
             version_number: 0,
             bool_val: self, // Pack the bools here
-            // ... empty out the rest just like above
-            tensor_content: vec![], half_val: vec![], float_val: vec![],
-            double_val: vec![], int_val: vec![], string_val: vec![], scomplex_val: vec![],
-            int64_val: vec![], dcomplex_val: vec![], resource_handle_val: vec![],
-            variant_val: vec![], uint32_val: vec![], uint64_val: vec![],
-            float8_val: vec![],
+            ..Default::default()
         }
     }
     fn into_tensor2d(self) -> TensorProto {
@@ -393,13 +378,11 @@ impl IntoTensorProto for Vec<bool> {
             }),
             version_number: 0,
             bool_val: self, // Pack the bools here
-            // ... empty out the rest just like above
-            tensor_content: vec![], half_val: vec![], float_val: vec![],
-            double_val: vec![], int_val: vec![], string_val: vec![], scomplex_val: vec![],
-            int64_val: vec![], dcomplex_val: vec![], resource_handle_val: vec![],
-            variant_val: vec![], uint32_val: vec![], uint64_val: vec![],
-            float8_val: vec![],
+            ..Default::default()
         }
+    }
+    fn into_64bit_tensor2d(self) -> TensorProto {
+        unimplemented!("Conversion to 64-bit tensor is invalid for Vec<bool>")
     }
 }
 
@@ -413,10 +396,6 @@ impl IntoTensorProto for Vec<i64> {
                 unknown_rank: false,
             }),
             int64_val: self, // Pack into int64_val
-            // Keep all other fields empty
-            int_val: vec![], float_val: vec![], bool_val: vec![],
-            string_val: vec![], tensor_content: vec![],
-            // ... (ensure all other fields like half_val, double_val, etc., are empty)
             ..Default::default()
         }
     }
@@ -432,12 +411,11 @@ impl IntoTensorProto for Vec<i64> {
                 unknown_rank: false,
             }),
             int64_val: self, // Pack into int64_val
-            // Keep all other fields empty
-            int_val: vec![], float_val: vec![], bool_val: vec![],
-            string_val: vec![], tensor_content: vec![],
-            // ... (ensure all other fields like half_val, double_val, etc., are empty)
             ..Default::default()
         }
+    }
+    fn into_64bit_tensor2d(self) -> TensorProto {
+        self.into_tensor2d()
     }
 }
 
@@ -453,9 +431,6 @@ impl IntoTensorProto for Vec<String> {
                 unknown_rank: false,
             }),
             string_val: bytes_data, // Pack into string_val
-            // Keep all other fields empty
-            int_val: vec![], int64_val: vec![], float_val: vec![], bool_val: vec![],
-            tensor_content: vec![],
             ..Default::default()
         }
     }
@@ -473,10 +448,10 @@ impl IntoTensorProto for Vec<String> {
                 unknown_rank: false,
             }),
             string_val: bytes_data, // Pack into string_val
-            // Keep all other fields empty
-            int_val: vec![], int64_val: vec![], float_val: vec![], bool_val: vec![],
-            tensor_content: vec![],
             ..Default::default()
         }
+    }
+    fn into_64bit_tensor2d(self) -> TensorProto {
+        unimplemented!("Conversion to 64-bit tensor is invalid for Vec<String>")
     }
 }

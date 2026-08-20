@@ -42,4 +42,5 @@ the checkpoint-bucket contents were trained on Kaggle T4x2 GPUs:
 users.bin was written in the project 
 github.com/nking/recommender_systems.git
 in file src/test/python/movie_lens_tfx/write_users_bin.py
+it holds gender, age, occupation and the implied user_id is index+1
 

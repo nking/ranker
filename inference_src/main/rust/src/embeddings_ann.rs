@@ -135,6 +135,18 @@ impl Searcher {
         Ok(index)
     }
 
+    /// given a flat vector of embeddings as query, search for the k nearest neighbors for each embedding
+    /// in the query.  let n be the number of embeddings in query, then the search
+    /// returns a Match structure having keys : Vec<k*n:u64> and distances: Vec<k*n:f32>
+    ///
+    /// # Arguments
+    ///
+    /// * `query`: a flat vector of user embeddings to search for ANNs for.
+    /// * `k`: the number of approximate nearest neighbors to return for each embedding in query
+    ///
+    /// returns: Result<Matches, Box<dyn Error, Global>>
+    ///   let n be the number of embeddings in query,
+    //    returns a Match structure having keys : Vec<k*n:u64> and distances: Vec<k*n:f32>
     pub fn search(&self, query: &[f32], k : Option<usize>) -> Result<Matches, Box<dyn std::error::Error>> {
         let n = k.unwrap_or(self.num_candidates);
         let r = self.indexer.search(&query, n)?;
