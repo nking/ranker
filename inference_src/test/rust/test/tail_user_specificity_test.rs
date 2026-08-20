@@ -242,6 +242,11 @@ mod tail_user_specificity_tests {
         };
         let endpoint = format!("http://{}", addr);
 
+        //first in MovieLens dataset is Tuesday, April 25, 2000, at 11:05:32 PM UTC == 956703932
+        //last is 1,046,454,590 which is February 28, 2003, at 17:23:10 UTC
+        //The Unix timestamp 964152495 corresponds to July 21, 2000, at 04:08:15 UTC and its in the training data time range.
+        const TIMESTAMP : i64 = 964152495;
+        let timestamps = vec![TIMESTAMP];
 
         // ===== E2E Purity loop  on `tail_users` to see if performance drops. =====
         let mut e2e_total_rec_score: f32 = 0.0;
@@ -255,7 +260,8 @@ mod tail_user_specificity_tests {
 
         for (_i, &user_id) in tail_user_ids.iter().enumerate() {
 
-            let user_req_opt = user_db.get_request(user_id as i64);
+            let user_ids = vec![user_id];
+            let user_req_opt = user_db.get_request(&user_ids, &timestamps);
             assert!(user_req_opt.is_some(), "User ID {} should exist in database", user_id);
             let tonic_req = user_req_opt.unwrap();
 
@@ -300,7 +306,7 @@ mod tail_user_specificity_tests {
 
             // look for popularity affinity in the ANN of embeddings from bi-encoder trained models ====
 
-            let user_req_opt = user_db.get_request(user_id as i64);
+            let user_req_opt = user_db.get_request(&user_ids, &timestamps);
             assert!(user_req_opt.is_some(), "User ID {} should exist in database", user_id);
             let tonic_req = user_req_opt.unwrap();
 
@@ -354,7 +360,8 @@ mod tail_user_specificity_tests {
 
         for (_i, &user_id) in global_user_ids.iter().enumerate() {
 
-            let user_req_opt = user_db.get_request(user_id as i64);
+            let user_ids = vec![user_id];
+            let user_req_opt = user_db.get_request(&user_ids, &timestamps);
 
             // Safe unwrap/continue in case some users are missing from the request DB
             if user_req_opt.is_none() {
@@ -392,7 +399,7 @@ mod tail_user_specificity_tests {
 
             // look for popularity affinity in the ANN of embeddings from bi-encoder trained models ====
 
-            let user_req_opt = user_db.get_request(user_id as i64);
+            let user_req_opt = user_db.get_request(&user_ids, &timestamps);
             assert!(user_req_opt.is_some(), "User ID {} should exist in database", user_id);
             let tonic_req = user_req_opt.unwrap();
 

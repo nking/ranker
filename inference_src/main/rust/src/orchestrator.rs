@@ -1,4 +1,3 @@
-use std::cmp::min;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,6 +22,7 @@ use crate::util::sort_by_scores;
 pub struct Orchestrator {
     query_model: QueryModelClient,
     ranker_model: RankerModelClient,
+    #[allow(dead_code)]
     query_model_metadata: QueryModelMetadata,
     ranker_model_metadata: RankerModelMetadata,
     searcher: ArcSwap<Searcher>, // updatable
@@ -80,12 +80,7 @@ impl Orchestrator {
                 query_metadata.embed_len, ranker_metadata.embed_len
             ).into()); // .into() converts the String into Box<dyn std::error::Error + Send + Sync>
         }
-
-        // these are in ranker_metadata
-        //`max_history`
-        /// * `num_candidates`
-        /// * `num_catalog_users`:
-
+        
         let initial_searcher = Searcher::new(movie_embeddings_uri, ranker_metadata.num_candidates, &persisted_index_path)?;
         let query_client = QueryModelClient::new(query_uri, query_metadata.embed_len).await;
         let ranker_client = RankerModelClient::new(ranker_uri, ranker_metadata.clone()).await;
@@ -146,7 +141,10 @@ impl Orchestrator {
         // target_movie_id should == 1
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
+        let batch_size : usize = self.ranker_model_metadata.batch_size;
+
         let padded_super_graph_arrays: JraphGraph = build_enriched_padded_supergraph(
+            batch_size,
             &user_ids,
             &timestamps,
             &candidate_ids,

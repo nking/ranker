@@ -255,7 +255,9 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
 
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
-        let padded_super_graph : JraphGraph = build_enriched_padded_supergraph(&user_ids, &timestamps,
+        let padded_super_graph : JraphGraph = build_enriched_padded_supergraph(
+            user_ids.len(),
+            &user_ids, &timestamps,
             &candidate_ids, &labels, &user_history, max_history,
             num_users, num_movies, embed_len, &movie_embeddings_catalog, &user_embeddings,
             n_local_devices);

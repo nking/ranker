@@ -1,7 +1,3 @@
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufReader;
-use serde_json::Value;
 use tonic::transport::Server;
 // Import the tonic-health reporter
 use tonic_health::server::health_reporter;
@@ -38,9 +34,9 @@ impl AppRunner {
             .await;
 
         // ... [Load JSON Hyperparameters] ...
-        let file = File::open(&self.config.params_json_path)?;
-        let reader = BufReader::new(file);
-        let dict: HashMap<String, Value> = serde_json::from_reader(reader)?;
+        //let file = File::open(&self.config.params_json_path)?;
+        //let reader = BufReader::new(file);
+        //let dict: HashMap<String, Value> = serde_json::from_reader(reader)?;
 
         let ratings_uris_refs: Vec<&str> = self.config.ratings_uris.iter().map(|s| s.as_str()).collect();
 

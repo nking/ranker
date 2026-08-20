@@ -1,9 +1,7 @@
 use clap::Parser;
 use serde::Deserialize;
-use std::path::PathBuf;
 use std::fs::File;
 use std::io::BufReader;
-use parquet::data_type::BoolType;
 
 /// Command-line arguments and environment variables
 #[derive(Parser, Debug, Deserialize, Clone)]

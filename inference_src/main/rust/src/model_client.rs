@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use std::error::Error;
+use std::time::Duration;
 use tonic::transport::{Channel, Endpoint};
 // use crate:: means look inside this project
 use crate::graph_builder::{JraphGraph};
 use crate::pb::{UsersRequest};
+
+const CLIENT_CONNECT_TIMEOUT: u64 = 5;
 
 pub mod tf_serving {
     tonic::include_proto!("tensorflow.serving");
@@ -32,6 +35,7 @@ impl QueryModelClient {
         let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
 
         let channel = endpoint
+            .connect_timeout(Duration::from_secs(CLIENT_CONNECT_TIMEOUT))
             .connect()
             .await
             .expect("Failed to connect to TFS for query model");
@@ -86,16 +90,18 @@ impl QueryModelClient {
 impl RankerModelClient {
 
     pub async fn new(uri: String, metadata: RankerModelMetadata) -> Self {
+
         let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
 
         let channel = endpoint
             //.max_decoding_message_size(10 * 1024 * 1024) // 10MB example
+            .connect_timeout(Duration::from_secs(CLIENT_CONNECT_TIMEOUT))
             .connect()
             .await.expect("Failed to connect to TFS for ranker model");
 
         // this can handle a RankedMovies response from a UsersRequest of 700_000 user_ids
         const MAX_MESSAGE_SIZE: usize = 256 * 1024 * 1024;
-        let mut tfs_client = PredictionServiceClient::new(channel)
+        let tfs_client = PredictionServiceClient::new(channel)
             .max_decoding_message_size(MAX_MESSAGE_SIZE)
             .max_encoding_message_size(MAX_MESSAGE_SIZE);
 
@@ -143,14 +149,11 @@ pub fn build_query_model_inputs(req: UsersRequest) -> PredictRequest {
 
     let mut inputs : HashMap<String, TensorProto> = HashMap::new();
 
-    // the TwoTowerDNN QueryModel saved model doesn't have a fixed batch_size
-    let batch_size = req.user_ids.len();
-
     //currently: signature needs 64-bit inputs
 
     inputs.insert("user_id".into(), req.user_ids.into_64bit_tensor2d());
     inputs.insert("age".into(), req.ages.into_64bit_tensor2d());
-    inputs.insert("gender".into(), req.genders.into_64bit_tensor2d());
+    inputs.insert("gender".into(), req.genders.into_tensor2d());
     inputs.insert("occupation".into(), req.occupations.into_64bit_tensor2d());
     inputs.insert("timestamp".into(), req.timestamps.into_64bit_tensor2d());
 

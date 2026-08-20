@@ -1,15 +1,11 @@
 #[cfg(test)]
 mod ranker_model_metadata_tests {
     //use super::*;
-    use std::io::Write;
-    use tempfile::NamedTempFile; // Requires adding `tempfile = "3"` to Cargo.toml [dev-dependencies]
     mod helper {
         // Tell Rust to literally include the code from helper.rs here
         include!("helper.rs");
     }
-    use crate::ranker_model_metadata_tests::helper::{get_config_json_uri};
 
-    use inference_engine::app_config::AppConfig;
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
     use crate::ranker_model_metadata_tests::helper::{get_ranker_metadata_single_uri, get_ranker_metadata_batch_uri};
 

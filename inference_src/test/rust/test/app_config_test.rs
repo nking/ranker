@@ -17,6 +17,8 @@ mod app_config_tests {
             "server_addr": "127.0.0.1:50051",
             "query_uri": "http://localhost:8500",
             "ranker_uri": "http://localhost:8510",
+            "query_metadata_uri" : "./path_to_file",
+            "ranker_metadata_uri" : "./path_to_file",
             "params_json_path": "./params.json",
             "movie_embeddings_path": "./movie_embeddings.bin",
             "ratings_uris": ["file1.csv", "file2.csv"],

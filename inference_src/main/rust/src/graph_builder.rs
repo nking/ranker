@@ -114,7 +114,7 @@ fn build_graph_arrays(
 }
 
 #[derive(Debug)]
-// A struct to hold your final GraphTuple equivalent
+// A struct to hold final GraphTuple
 pub struct JraphGraph {
     pub n_node: Vec<i32>,
     pub n_edge: Vec<i32>,
@@ -128,8 +128,29 @@ pub struct JraphGraph {
     pub candidate_mask: Vec<bool>,
 }
 
+/// creates a padded supergraph in some format that the python SuperGraphPaddingTransform.py map produces///
+/// # Arguments
+///
+/// * `batch_size`: the batch_size of the deployed ranker model.  graph must be padded up to it.
+/// * `user_ids`:
+/// * `history_movie_ids`:
+/// * `history_ratings`:
+/// * `history_lengths`:
+/// * `candidate_ids`:
+/// * `labels`:
+/// * `num_candidates`:
+/// * `max_history`:
+/// * `num_catalog_users`:
+/// * `num_catalog_movies`:
+/// * `embed_len`:
+/// * `movie_embeddings_catalog`:
+/// * `user_embeddings`:
+/// * `n_local_devices`:
+///
+/// returns: JraphGraph
 #[allow(unused_variables)]
 pub fn build_padded_super_graph(
+    batch_size: usize,
     user_ids: &[i32],
     history_movie_ids: &[i32],
     history_ratings: &[i32],
@@ -147,7 +168,6 @@ pub fn build_padded_super_graph(
 
     n_local_devices: usize,
 ) -> JraphGraph {
-    let batch_size = user_ids.len();
 
     let (max_nodes, max_edges, max_graphs) = util::calc_number_jax_graph_components(
         batch_size, max_history, num_candidates, n_local_devices,
@@ -173,7 +193,7 @@ pub fn build_padded_super_graph(
     let mut current_node_offset = 0;
     let mut current_edge_offset = 0;
 
-    for i in 0..batch_size {
+    for i in 0..user_ids.len() {
         let c_offset = i * num_candidates;
         let h_offset = i * max_history;
 
@@ -282,7 +302,8 @@ pub fn build_padded_super_graph(
 /// ```
 ///
 /// ```
-pub fn create_fake_padded_super_batch(batch_size: usize,
+pub fn create_fake_padded_super_batch(
+    batch_size: usize,
     max_history: usize,
     num_candidates: usize,
     user_id_range: (usize, usize),
@@ -297,7 +318,6 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
 
     let (user_embeddings_catalog, num_users, embed_len) = read_user_embeddings(&user_embeddings_uri);
     let (movie_embeddings_catalog, num_movies, _) = read_movie_embeddings(&movie_embeddings_uri);
-
 
     let mut user_ids: Vec<i32> = vec![0; batch_size];
     let mut movie_ids: Vec<i32> = vec![0; batch_size];
@@ -336,6 +356,7 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
     }
 
     let padded_super_graph = build_padded_super_graph(
+            batch_size,
             &user_ids,
             &history_movie_ids,
             &history_ratings,
@@ -354,6 +375,7 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
         padded_super_graph
     }
     pub fn build_enriched_padded_supergraph(
+        batch_size : usize,
         user_ids: &[i32],
         timestamps: &[i64],
         candidate_ids: &[i32],
@@ -367,8 +389,7 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
         user_embeddings : &[f32],
         n_local_devices: usize) -> JraphGraph {
 
-        let batch_size = user_ids.len();
-        let num_candidates = candidate_ids.len() / batch_size;
+        let num_candidates = candidate_ids.len() / user_ids.len();
 
         // get max_history lengths of most recent histories of user_ids, but only if before timestamp.
         // empty elements are represented by user_history.pad_value
@@ -380,6 +401,7 @@ pub fn create_fake_padded_super_batch(batch_size: usize,
             batch_size, max_history, &history_movie_ids, user_history.pad_value);
 
         let padded_super_graph = build_padded_super_graph(
+            batch_size,
             &user_ids,
             &history_movie_ids,
             &history_ratings,

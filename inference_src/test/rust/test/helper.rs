@@ -126,6 +126,7 @@ pub fn get_movies_uri() -> String {
     movies_uri
 }
 
+#[allow(dead_code)]
 pub fn get_ranker_metadata_single_uri() -> String {
     let file_uri = get_project_dir()
         .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_single.json"))
@@ -134,6 +135,8 @@ pub fn get_ranker_metadata_single_uri() -> String {
 
     file_uri
 }
+
+#[allow(dead_code)]
 pub fn get_ranker_metadata_batch_uri() -> String {
     let file_uri = get_project_dir()
         .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_batch.json"))
@@ -143,6 +146,7 @@ pub fn get_ranker_metadata_batch_uri() -> String {
     file_uri
 }
 
+#[allow(dead_code)]
 pub fn get_query_metadata_uri() -> String {
     let file_uri = get_project_dir()
         .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/1/assets.extra/hyperparameters.json"))
@@ -155,7 +159,7 @@ pub fn get_query_metadata_uri() -> String {
 #[allow(dead_code)]
 pub fn get_model_param_json_uri() -> String {
     let params_uri = get_project_dir()
-        .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/cross-encoder/metadata_single.json"))
+        .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_single.json"))
         .map(|p| p.to_string_lossy().into_owned())
         .expect("Project directory not found");
     params_uri

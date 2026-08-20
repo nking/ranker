@@ -1,8 +1,4 @@
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufReader;
 use std::path::PathBuf;
-use serde_json::Value;
 
 // Assuming your UserRequest is accessible here
 pub mod helper {
@@ -11,7 +7,6 @@ pub mod helper {
 }
 use inference_engine::app_config::AppConfig;
 use inference_engine::orchestrator::Orchestrator;
-use inference_engine::pb::recommender_service_server::RecommenderService;
 use helper::{get_config_json_uri, get_train_val_test_liked_uris, DataSize};
 
 struct TestHarness {
@@ -30,18 +25,9 @@ impl TestHarness {
         let top_k = config.top_k;
         let user_db_path: PathBuf = config.user_db_path.clone();
         let persisted_index_path : PathBuf = config.persisted_index_path.clone();
-        let params_json_uri : String = config.params_json_path;
+        let _params_json_uri : String = config.params_json_path;
 
         let movie_embeddings_uri : String = config.movie_embeddings_path;
-
-        let file = File::open(params_json_uri).unwrap();
-        let reader = BufReader::new(file);
-        let dict: HashMap<String, Value> = serde_json::from_reader(reader)
-            .expect("reading json file of model params into a dictionary");
-
-        let max_history = dict.get("max_history").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let num_candidates = dict.get("num_candidates").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let num_catalog_users = dict.get("num_catalog_users").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
         // we want to be able to test against this recommender, so don't include the test uris
         let ratings_map = get_train_val_test_liked_uris(DataSize::Tiny, false);
@@ -84,9 +70,9 @@ mod orchestrator_tests {
     // Bring everything from the outer scope (TestHarness, helper functions, etc.) into the test module
     use super::*;
 
-    // 1. CRITICAL: You must bring the gRPC trait into scope so its methods (.predict) are visible
+    //bring the gRPC trait into scope so its methods (.predict) are visible
     use inference_engine::pb::recommender_service_server::RecommenderService;
-    use inference_engine::pb::{RankedMovies, UserRequest};
+    use inference_engine::pb::{RankedMovies, UsersRequest};
     use tonic::Response;
 
     #[tokio::test]
@@ -94,12 +80,13 @@ mod orchestrator_tests {
         // Setup runs here
         let _harness = TestHarness::new().await;
 
-        let mock_request = UserRequest {
-            user_id: 42,
-            gender: "M".to_string(),
-            occupation: 10,
-            age: 25,
-            timestamp: 1620000000,
+        let mock_request = UsersRequest {
+            user_ids: vec![42],
+            genders: vec!["M".to_string()],
+            occupations: vec![10],
+            ages: vec![25],
+            timestamps: vec![1620000000],
+            n_users: 1
         };
 
         let tonic_req = tonic::Request::new(mock_request);
@@ -116,7 +103,7 @@ mod orchestrator_tests {
             println!("{} {}", response.movie_ids[i], response.scores[i]);
         }
 
-        assert_eq!(42, response.user_id);
+        assert_eq!(42, response.user_ids[0]);
 
         // Teardown automatically runs here when `_harness` goes out of scope at the end of the test function
     }

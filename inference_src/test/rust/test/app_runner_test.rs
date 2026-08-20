@@ -4,7 +4,7 @@ mod app_runner_tests {
     use tokio::sync::oneshot;
     //use tokio::time::{sleep, Duration};
     use inference_engine::pb::recommender_service_client::RecommenderServiceClient;
-    use inference_engine::pb::UserRequest;
+    use inference_engine::pb::UsersRequest;
 
     use inference_engine::app_config::AppConfig;
     use inference_engine::app_runner::AppRunner;
@@ -52,12 +52,13 @@ mod app_runner_tests {
             .await
             .expect("Failed to connect to test server");
 
-        let request = tonic::Request::new(UserRequest {
-            user_id: 42,
-            gender: "M".to_string(),
-            occupation: 10,
-            age: 25,
-            timestamp: 1620000000,
+        let request = tonic::Request::new(UsersRequest {
+            user_ids: vec![42],
+            genders: vec!["M".to_string()],
+            occupations: vec![10],
+            ages: vec![25],
+            timestamps: vec![1620000000],
+            n_users: 1
         });
 
         // Assert success

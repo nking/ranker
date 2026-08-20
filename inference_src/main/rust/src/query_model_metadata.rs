@@ -15,13 +15,16 @@ pub struct QueryModelMetadata {
     pub embed_len : usize,
 
     #[arg(long, env = "NUM_CATALOG_USERS",  default_value_t = 6040)]
+    #[serde(alias = "n_users")] // Automatically pulls from "n_users" if "num_catalog_users" isn't found
     pub num_catalog_users : usize,
 
     #[arg(long, env = "NUM_CATALOG_MOVIES",  default_value_t = 3883)]
+    #[serde(alias = "n_movies")] // Automatically pulls from "n_movies" if "num_catalog_users" isn't found
     pub num_catalog_movies : usize,
 
     /// git commit hash for code used to train the model
     #[arg(long, env = "GIT_COMMIT_HASH")]
+    #[serde(alias = "git_hash")] // Automatically pulls from "git_hash" if "num_catalog_users" isn't found
     pub git_commit_hash : String
 }
 

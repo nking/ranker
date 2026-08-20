@@ -46,7 +46,7 @@ mod embedding_ann_tests {
             -0.222184, -0.078174, 0.158795, 0.096952, -0.291931
         ];*/
 
-        let (query_embeddings_vec, num_catalog_users, embed_len) = read_user_embeddings(&*_user_embeddings_uri);
+        let (query_embeddings_vec, _num_catalog_users, embed_len) = read_user_embeddings(&*_user_embeddings_uri);
 
         let results : Result<Matches, Box<dyn std::error::Error>> = search.search(&query_embeddings_vec[0..embed_len], None);
 

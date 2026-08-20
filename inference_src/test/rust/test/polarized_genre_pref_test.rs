@@ -56,11 +56,13 @@ mod pairwise_pref_tests {
     use tonic::transport::Channel;
     use inference_engine::pb::RankOnlyRequest;
     use inference_engine::pb::recommender_service_client::RecommenderServiceClient;
-    use inference_engine::util::timestamp_now;
+    //use inference_engine::util::timestamp_now;
     use crate::pairwise_pref_tests::helper::{get_project_dir};
     use rand::Rng;
     use inference_engine::user_db::UserDb;
 
+    //TODO: this could be imrpoved now that the default request is a batch request
+    
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_pairwise_pref() -> Result<(), Box<dyn Error>> {
 
@@ -487,6 +489,13 @@ mod pairwise_pref_tests {
         user_db_path : impl AsRef<Path>
     ) -> Result<f64, tonic::Status> {
 
+        //first in MovieLens dataset is Tuesday, April 25, 2000, at 11:05:32 PM UTC == 956703932
+        //last is 1,046,454,590 which is February 28, 2003, at 17:23:10 UTC
+        //The Unix timestamp 964152495 corresponds to July 21, 2000, at 04:08:15 UTC and its in the training data time range.
+        const TIMESTAMP : i64 = 964152495;
+
+        let timestamps = vec![TIMESTAMP];
+
         // variables for the parity metrics:
         let mut wins = 0;
         let mut valid_tests = 0;
@@ -530,10 +539,9 @@ mod pairwise_pref_tests {
 
                 //println!("CANDIDATE_IDS {:?}", candidate_ids.clone());
 
-                let ts = timestamp_now();
                 let req = RankOnlyRequest {
                     user_id: user.user_id,
-                    timestamp: ts as i64,
+                    timestamp: TIMESTAMP,
                     candidate_ids,
                 };
 
@@ -590,7 +598,7 @@ mod pairwise_pref_tests {
                 }
 
                 // ==========================================
-                // NEW: Top-K Genre Purity Evaluation
+                // Top-K Genre Purity Evaluation
                 // ==========================================
 
                 // 1. Zip the IDs and scores together so we can sort them listwise
@@ -632,7 +640,8 @@ mod pairwise_pref_tests {
             }
 
             // ============ test for genre purity of recommended  movies =======================
-            let user_req_opt = user_db.get_request(user.user_id as i64);
+            let user_ids = vec![user.user_id];
+            let user_req_opt = user_db.get_request(&user_ids, &timestamps);
             assert!(user_req_opt.is_some(), "User ID {} should exist in database", user.user_id);
             let tonic_req = user_req_opt.unwrap();
 
