@@ -21,6 +21,8 @@ mod tail_user_specificity_tests {
     use inference_engine::app_runner::AppRunner;
     use inference_engine::embeddings_util::read_user_embeddings;
 
+    use serial_test::serial;
+
     //use super::*;
     mod helper {
         // Tell Rust to literally include the code from helper.rs here
@@ -53,6 +55,7 @@ mod tail_user_specificity_tests {
     /// tested for specificity of recommendations here:
     ///
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial]
     pub async fn test_Y() {
 
         // files for use in tests:
@@ -133,6 +136,7 @@ mod tail_user_specificity_tests {
     /// calculate the centroid of the latent space embeddings and find the users who are furthest
     /// from the centroid at as the tail users. and test for specificity here
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial]
     pub async fn test_X() {
 
         let (user_embeddings_uri, _) = get_embeddings_uris();
@@ -246,48 +250,57 @@ mod tail_user_specificity_tests {
         //last is 1,046,454,590 which is February 28, 2003, at 17:23:10 UTC
         //The Unix timestamp 964152495 corresponds to July 21, 2000, at 04:08:15 UTC and its in the training data time range.
         const TIMESTAMP : i64 = 964152495;
-        let timestamps = vec![TIMESTAMP];
 
-        // ===== E2E Purity loop  on `tail_users` to see if performance drops. =====
+        // ===== E2E Purity loop on `tail_users` to see if performance drops. =====
         let mut e2e_total_rec_score: f32 = 0.0;
         let mut e2e_eval_count: usize = 0;
 
         let mut tail_ann_score = 0.0;
         let mut tail_ann_count = 0;
 
-        let user_db : UserDb = UserDb::new(config.user_db_path).expect("Failed to initialize UserDb from binary path");
+        let user_db: UserDb = UserDb::new(config.user_db_path).expect("Failed to initialize UserDb from binary path");
         let client = RecommenderServiceClient::connect(endpoint.clone()).await.unwrap();
 
-        for (_i, &user_id) in tail_user_ids.iter().enumerate() {
+        // The proto documentation recommends not exceeding 256 users per request[cite: 3].
+        let batch_size = 256;
 
-            let user_ids = vec![user_id];
-            let user_req_opt = user_db.get_request(&user_ids, &timestamps);
-            assert!(user_req_opt.is_some(), "User ID {} should exist in database", user_id);
-            let tonic_req = user_req_opt.unwrap();
+        let timestamps = vec![TIMESTAMP; tail_user_ids.len()];
+        for (user_batch, time_batch) in tail_user_ids.chunks(batch_size).zip(timestamps.chunks(batch_size)) {
+
+            // Fetch request from DB for the whole batch[cite: 2]
+            let user_req_opt = user_db.get_request(user_batch, time_batch);
+            assert!(user_req_opt.is_some(), "Batch chunk should exist in database");
+
+            let users_request_msg = user_req_opt.unwrap().into_inner();
+
+            // =====================================================================
+            // Predict (Graph Ranker) Evaluation
+            // =====================================================================
 
             let mut active_client = client.clone();
+            let predict_req = tonic::Request::new(users_request_msg.clone());
+
             let response_response = active_client
-                .predict(tonic_req)
+                .predict(predict_req)
                 .await
                 .map_err(|err| Status::internal(format!("ranking request failed: {}", err)))
                 .unwrap();
 
             let response = response_response.into_inner();
 
-            let retrieved_ids = response.movie_ids;
-            let actual_k = retrieved_ids.len();
+            // Group parallel arrays by user_id to maintain per-user bias checking[cite: 3]
+            let mut user_stats: HashMap<i32, (f32, usize)> = HashMap::new();
 
-            if actual_k > 0 {
-                let mut rec_score_sum = 0.0;
-                let mut scored_items = 0;
-
-                for &movie_id in &retrieved_ids {
-                    if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
-                        rec_score_sum += s_i;
-                        scored_items += 1;
-                    }
+            for (&uid, &movie_id) in response.user_ids.iter().zip(response.movie_ids.iter()) {
+                if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
+                    let stat = user_stats.entry(uid).or_insert((0.0, 0));
+                    stat.0 += s_i;  // Sum of scores
+                    stat.1 += 1;    // Count of scored items
                 }
+            }
 
+            // Calculate per-user averages and check for popularity bias
+            for (&uid, &(rec_score_sum, scored_items)) in &user_stats {
                 if scored_items > 0 {
                     let user_avg_s_i = rec_score_sum / scored_items as f32;
                     e2e_total_rec_score += user_avg_s_i;
@@ -298,35 +311,30 @@ mod tail_user_specificity_tests {
                     if user_avg_s_i > 4.5 {
                         println!(
                             "\n[Popularity Bias Warning] User {}: Avg Rec S_i is {:.2}. Model may be falling back to global popularity.",
-                            user_id, user_avg_s_i
+                            uid, user_avg_s_i
                         );
                     }
                 }
             }
 
-            // look for popularity affinity in the ANN of embeddings from bi-encoder trained models ====
-
-            let user_req_opt = user_db.get_request(&user_ids, &timestamps);
-            assert!(user_req_opt.is_some(), "User ID {} should exist in database", user_id);
-            let tonic_req = user_req_opt.unwrap();
+            // =====================================================================
+            // 2. ANN Evaluation
+            // =====================================================================
 
             let mut active_client = client.clone();
-            if let Ok(response_response)
-                = active_client.approx_nearest_neighbors(tonic_req).await {
+            let ann_req = tonic::Request::new(users_request_msg); // Consume the final copy
+
+            if let Ok(response_response) = active_client.approx_nearest_neighbors(ann_req).await {
                 let response = response_response.into_inner();
-                let retrieved_ids = response.candidate_ids;
-                let _actual_k = retrieved_ids.len();
-                for &movie_id in &retrieved_ids {
+
+                // ApproxNearestNeighborsResponse returns a flat list of candidate_ids[cite: 3].
+                for &movie_id in &response.candidate_ids {
                     if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
                         tail_ann_score += s_i;
                         tail_ann_count += 1;
                     }
                 }
             }
-
-            //use std::io::{self, Write};
-            //print!("\rProgress: {}/{} users tested", i + 1, tail_user_ids.len());
-            //io::stdout().flush().unwrap();
         }
 
         let tail_avg_ann_retrieval_s_i = if tail_ann_count > 0 {
@@ -356,39 +364,49 @@ mod tail_user_specificity_tests {
         let mut global_ann_score = 0.0;
         let mut global_ann_count = 0;
 
-        println!("\nStarting Global Baseline Evaluation...");
+        println!("\nStarting Global Batched Baseline Evaluation...");
 
-        for (_i, &user_id) in global_user_ids.iter().enumerate() {
+        // The proto documentation recommends not exceeding 256 users per request.
+        let batch_size = 256;
 
-            let user_ids = vec![user_id];
-            let user_req_opt = user_db.get_request(&user_ids, &timestamps);
+        let timestamps = vec![TIMESTAMP; global_user_ids.len()];
+        // Zip through chunks of users and their parallel timestamps
+        for (user_chunk, time_chunk) in global_user_ids.chunks(batch_size).zip(timestamps.chunks(batch_size)) {
 
-            // Safe unwrap/continue in case some users are missing from the request DB
+            // Fetch once from DB for the whole batch
+            let user_req_opt = user_db.get_request(user_chunk, time_chunk);
+
             if user_req_opt.is_none() {
                 continue;
             }
-            let tonic_req = user_req_opt.unwrap();
+
+            // Extract the inner message so we can clone it for both Predict and ANN calls
+            let users_request_msg = user_req_opt.unwrap().into_inner();
+
+            // =====================================================================
+            // Predict (Graph Ranker) Evaluation
+            // =====================================================================
 
             let mut active_client = client.clone();
+            let predict_req = tonic::Request::new(users_request_msg.clone());
 
-            // We use Ok() to gracefully skip errors if the server drops a request
-            // under high load, rather than panicking the entire test loop.
-            if let Ok(response_response) = active_client.predict(tonic_req).await {
+            if let Ok(response_response) = active_client.predict(predict_req).await {
                 let response = response_response.into_inner();
-                let retrieved_ids = response.movie_ids;
-                let actual_k = retrieved_ids.len();
 
-                if actual_k > 0 {
-                    let mut rec_score_sum = 0.0;
-                    let mut scored_items = 0;
+                // RankedMovies returns parallel arrays. Group them by user_id to maintain
+                // the original macro-average math (average per user, then global sum).
+                let mut user_stats: HashMap<i32, (f32, usize)> = HashMap::new();
 
-                    for &movie_id in &retrieved_ids {
-                        if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
-                            rec_score_sum += s_i;
-                            scored_items += 1;
-                        }
+                for (&uid, &movie_id) in response.user_ids.iter().zip(response.movie_ids.iter()) {
+                    if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
+                        let stat = user_stats.entry(uid).or_insert((0.0, 0));
+                        stat.0 += s_i;  // Sum of scores
+                        stat.1 += 1;    // Count of scored items
                     }
+                }
 
+                // Calculate the user average and add to global scores
+                for (_, (rec_score_sum, scored_items)) in user_stats {
                     if scored_items > 0 {
                         let user_avg_s_i = rec_score_sum / scored_items as f32;
                         global_total_rec_score += user_avg_s_i;
@@ -397,29 +415,25 @@ mod tail_user_specificity_tests {
                 }
             }
 
-            // look for popularity affinity in the ANN of embeddings from bi-encoder trained models ====
-
-            let user_req_opt = user_db.get_request(&user_ids, &timestamps);
-            assert!(user_req_opt.is_some(), "User ID {} should exist in database", user_id);
-            let tonic_req = user_req_opt.unwrap();
+            // =====================================================================
+            // ANN Evaluation
+            // =====================================================================
 
             let mut active_client = client.clone();
-            if let Ok(response_response)
-                = active_client.approx_nearest_neighbors(tonic_req).await {
+            let ann_req = tonic::Request::new(users_request_msg); // Consume the final copy
+
+            if let Ok(response_response) = active_client.approx_nearest_neighbors(ann_req).await {
                 let response = response_response.into_inner();
-                let retrieved_ids = response.candidate_ids;
-                let _actual_k = retrieved_ids.len();
-                for &movie_id in &retrieved_ids {
+
+                // ApproxNearestNeighborsResponse returns a flat list of candidate_ids.
+                // We can just iterate through and sum them exactly like the original code.
+                for &movie_id in &response.candidate_ids {
                     if let Some(&s_i) = catalog_stats.bayesian_scores.get(&movie_id) {
                         global_ann_score += s_i;
                         global_ann_count += 1;
                     }
                 }
             }
-
-            //use std::io::{self, Write};
-            //print!("\rProgress: {}/{} global users tested", i + 1, global_user_ids.len());
-            //io::stdout().flush().unwrap();
         }
 
         let global_avg_ann_retrieval_s_i = if global_ann_count > 0 {
@@ -481,6 +495,7 @@ mod tail_user_specificity_tests {
     }
 
     #[test]
+    #[serial]
     pub fn test_load_movies() {
 
         let config_path = "./config/default.json";

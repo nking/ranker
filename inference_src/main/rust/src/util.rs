@@ -27,7 +27,7 @@ pub fn parse_uri(uri_string: &str) -> (Arc<dyn ObjectStore>, object_store::path:
 }
 
 /// given a 2D array flattened into 1D and the number of rows, and number of columns,
-/// for each row, coult the number of non-padded elements.
+/// for each row, count the number of non-padded elements.
 ///
 /// # Arguments
 ///

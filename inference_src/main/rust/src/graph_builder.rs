@@ -398,7 +398,7 @@ pub fn create_fake_padded_super_batch(
         );
 
         let history_lengths = util::get_non_padded_lengths_of_flattened_arrays(
-            batch_size, max_history, &history_movie_ids, user_history.pad_value);
+            user_ids.len(), max_history, &history_movie_ids, user_history.pad_value);
 
         let padded_super_graph = build_padded_super_graph(
             batch_size,

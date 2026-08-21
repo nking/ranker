@@ -147,13 +147,7 @@ impl Searcher {
     /// returns: Result<Matches, Box<dyn Error, Global>>
     ///   let n be the number of embeddings in query,
     //    returns a Match structure having keys : Vec<k*n:u64> and distances: Vec<k*n:f32>
-    pub fn search(&self, query: &[f32], k : Option<usize>) -> Result<Matches, Box<dyn std::error::Error>> {
-        let n = k.unwrap_or(self.num_candidates);
-        let r = self.indexer.search(&query, n)?;
-        Ok(r)
-    }
-
-    pub fn search_batch(&self, query: &[f32], k : Option<usize>) -> Result<Vec<Matches>, Box<dyn std::error::Error>> {
+    pub fn search(&self, query: &[f32], k : Option<usize>) -> Result<Vec<Matches>, Box<dyn std::error::Error>> {
         let num_queries = query.len() / self.embed_len;
         let mut results: Vec<Matches> = Vec::with_capacity(num_queries);
         let n = k.unwrap_or(self.num_candidates);

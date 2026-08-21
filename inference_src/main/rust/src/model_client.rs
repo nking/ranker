@@ -110,7 +110,7 @@ impl RankerModelClient {
 
     pub async fn get_candidate_ranks(&self, padded_super_graph: JraphGraph, embed_len : usize) -> Result<Vec<f32>, Box<dyn Error>> {
 
-        let predict_req : PredictRequest = build_graph_ranker_proto_inputs(padded_super_graph, embed_len);
+        let predict_req : PredictRequest = build_graph_ranker_proto_inputs(padded_super_graph, embed_len, self.metadata.batch_size > 1);
 
         //println!("Sending gRPC request to TF Serving for GraphRanker...");
 
@@ -168,7 +168,7 @@ pub fn build_query_model_inputs(req: UsersRequest) -> PredictRequest {
     }
 }
 
-pub fn build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len : usize) -> PredictRequest {
+pub fn build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len : usize, client_is_batch: bool) -> PredictRequest {
     /*
     //MAX_GRAPHS:
     padded_super_graph.n_node
@@ -186,10 +186,16 @@ pub fn build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len
 
     let inputs : HashMap<String, TensorProto> = _build_graph_ranker_proto_inputs(padded_super_graph, embed_len);
 
+    let signature_name = if client_is_batch {
+        "serving_batch"
+    } else {
+        "serving_default"
+    }.into();
+
     // using the batch_size=1 default signature:
     let model_spec = ModelSpec {
         name: "graph-ranker".into(),
-        signature_name: "serving_default".into(),
+        signature_name: signature_name,
         version_choice: None,
     };
 

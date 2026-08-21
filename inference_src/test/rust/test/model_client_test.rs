@@ -59,7 +59,11 @@ mod client_tests {
         let config_path = get_config_json_uri();
         let config = AppConfig::load_from_file(&config_path).unwrap();
 
-        let ranker_metadata = RankerModelMetadata::load_from_file(&config.ranker_metadata_uri).unwrap();
+        // the default conig is for the batch ranker model, so change to the single inference model:
+        let ranker_metadat_uri = &config.ranker_metadata_uri;
+        let single_uri = ranker_metadat_uri.replace("batch", "single");
+
+        let ranker_metadata = RankerModelMetadata::load_from_file(&single_uri).unwrap();
 
         let client = RankerModelClient::new(config.ranker_uri, ranker_metadata).await;
 

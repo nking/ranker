@@ -1,3 +1,4 @@
+use std::cmp::min;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -159,6 +160,8 @@ impl Orchestrator {
             self.ranker_n_local_devices
         );
 
+        println!("padded graph n_node={:?}", padded_super_graph_arrays.n_node);
+
         // Send to TFS Ranker model
         let final_response = self.ranker_model.get_candidate_ranks(
             padded_super_graph_arrays,searcher.get_embed_len()).await;
@@ -196,6 +199,10 @@ impl Orchestrator {
         // length: n_users * num_candidates
         let candidate_ids = ann_res.candidate_ids;
 
+        println!("_predict: n_users={}, num_candidates={}, embed_len={}, n_user_embeddings={}",
+            user_ids.len(), candidate_ids.len()/user_ids.len(), self.ranker_model_metadata.embed_len,
+            user_embeddings.len()/self.ranker_model_metadata.embed_len);
+
         let ranked_movies = self.make_ranker_request(user_ids.clone(),
             user_reqs.timestamps, user_embeddings, candidate_ids).await?;
 
@@ -219,44 +226,51 @@ impl Orchestrator {
         let user_embeddings : Vec<f32> = self.query_model.get_users_embeddings(users_req.clone()).await
             .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
 
+        //let _embed_len = user_embeddings.len() / users_req.user_ids.len();
+        //println!("_ann: n_users={}, user_embed.len={}, _embed_len={}", users_req.user_ids.len(), user_embeddings.len(), _embed_len);
+
         // length is n_users
         let n_hists : Vec<usize> = self.user_history.get_history_count_before_timestamp(
             &users_req.user_ids, &users_req.timestamps
         );
 
+        // finds num_candidates approx nearest neighbors
+        let searcher = self.searcher.load();
+
         //TODO: consider limiting this to keep the search quick:
         let max_n_hist : usize = *(n_hists.iter().max().unwrap());
 
-        // choose more than num_candidates to choose only unseen from them, then rank for top num_candidates
-        let _n_srch : usize = self.ranker_model_metadata.num_candidates + max_n_hist;
-        let n_srch = Some(_n_srch);
-
-        // finds num_candidates approx nearest neighbors
-        let searcher = self.searcher.load();
-        // returns Match{ keys:Vec<n_users*n_srch:u64>, distances: Vec<n_users*n_srch:f32>)
-        let nearest: Matches = searcher.search(&user_embeddings, n_srch)
-            .map_err(|e| Status::internal(format!("Vector search failed: {}", e)))?;
-
-        // candidate_ids length is n_users * n_srch
-        // candidate_ids are in "reference frame" of 0 to num_catalog_movies  - 1, so translate to
-        // reference frame num_catalog_users + 1 to num_catalog_users + 1 + num_catalog_movies
-        let raw_candidate_ids: Vec<i32> = nearest.keys
-            .into_iter()
-            .map(|x| x as i32 + 1 + self.ranker_model_metadata.num_catalog_users as i32)
-            .collect();
+        let num_candidates = self.ranker_model_metadata.num_candidates as usize;
+        let num_catalog_users = self.ranker_model_metadata.num_catalog_users as i32;
 
         // history is length n_users * max_n_hist
         let (history, _ratings) : (Vec<i32>, Vec<i32>) = self.user_history.get_history_before_timestamp(
             &users_req.user_ids, &users_req.timestamps, max_n_hist);
 
-        // filter candidate_ids to keep only unseen movies
-        let target_len = self.ranker_model_metadata.num_candidates;
-
         // Pre-allocate the exact size needed for the final flattened candidates
-        let mut final_candidates: Vec<i32> = Vec::with_capacity(users_req.user_ids.len() * target_len);
+        let mut final_candidates: Vec<i32> = Vec::with_capacity(users_req.user_ids.len() * num_candidates);
 
-        // Filter and backfill
-        for i in 0..users_req.user_ids.len() {
+
+        // choose more than num_candidates to choose only unseen from them, then rank for top num_candidates
+        let _n_srch : usize = min(self.ranker_model_metadata.num_candidates + max_n_hist, searcher.get_num_catalog_movies());
+        let n_srch = Some(_n_srch);
+
+        let nearest : Vec<Matches>
+            = searcher.search(&user_embeddings, n_srch)
+            .map_err(|e| Status::internal(format!("Vector search failed: {}", e)))?;
+
+        for i in 0..nearest.len() {
+            // candidate_ids length is n_users * n_srch
+            // candidate_ids are in "reference frame" of 0 to num_catalog_movies  - 1, so translate to
+            // reference frame num_catalog_users + 1 to num_catalog_users + 1 + num_catalog_movies
+            let raw_candidate_ids: Vec<i32> = nearest[i].keys
+                .iter()
+                .map(|x| *x as i32 + 1 + num_catalog_users)
+                .collect();
+
+            let _distances = &nearest[i].distances;
+            //let user_id = users_req.user_ids[i];
+
             let hist_start = i * max_n_hist;
             let hist_end = hist_start + max_n_hist;
 
@@ -273,8 +287,8 @@ impl Orchestrator {
                 .collect();
 
             // Backfill if we filtered out too many
-            if unwatched.len() < target_len {
-                let n_backfill = target_len - unwatched.len();
+            if unwatched.len() < num_candidates {
+                let n_backfill = num_candidates - unwatched.len();
 
                 // NOTE: Backfilling with history means injecting watched movies.
                 // If you have a padding ID (like 0) or popular fallback catalog IDs, use those instead.
@@ -284,7 +298,7 @@ impl Orchestrator {
             }
 
             // Ensure we have exactly num_candidates items for this user
-            unwatched.truncate(target_len);
+            unwatched.truncate(num_candidates);
 
             // Append this user's fixed-length candidates into the final flat vector
             final_candidates.extend_from_slice(&unwatched);
@@ -338,6 +352,8 @@ impl RecommenderService for Orchestrator {
         let user_reqs = req.into_inner();
 
         let n_users = user_reqs.user_ids.len();
+
+        println!("batch_size={}, n_users={}", batch_size, n_users);
 
         if n_users == batch_size {
             return self._predict(Request::new(user_reqs.clone())).await;
