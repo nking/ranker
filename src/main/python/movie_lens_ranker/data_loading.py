@@ -160,7 +160,7 @@ def _create_dataloader(
     process_count = jax.process_count()
     logging.debug(f"num_records={num_records}, batch_size={batch_size}, process_count={process_count}")
     if ((num_records // batch_size) // process_count) == 0:
-        raise ValueError(f"batch_size is too small.  num_records={num_records} divided by "
+        raise ValueError(f"num_records is too small or batch_size too large.  num_records={num_records} divided by "
             f"batch_size={batch_size} then partitioned over {process_count} processes is 0")
     
     ra_sampler = BatchSampler(num_records=datasource.__len__(),
