@@ -113,6 +113,7 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
     #jax.debug.print("all_scores={all_scores}", all_scores=all_scores, ordered=True)
     num_total_graphs = padded_graph.n_node.shape[0]  # batch_size + padding
     total_candidate_slots = num_total_graphs * model.num_candidates
+
     # Extract Candidate Data. length is model.num_candidates * num_total_graphs
     #node.type: 1=user_id, 2=real_history, 3=candidate or negative
     #node.label = 1 for target movie_id
@@ -121,6 +122,13 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
         size=total_candidate_slots,
         fill_value=0
     )[0]
+    #TODO: redundant infomation, so consider removing nodes["candidate_mask"]
+    #cand_indices_2 = jnp.where(
+    #    padded_graph.nodes["candidate_mask"],
+    #    size=total_candidate_slots,
+    #    fill_value=0
+    #)[0]
+
     #jax.debug.print("cand_indices={cand_indices}", cand_indices=cand_indices, ordered=True)
     # lengths are K * num_total_graphs
     labels_flat = padded_graph.nodes["label"][cand_indices]
@@ -131,18 +139,11 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
     labels_2d = labels_flat.reshape((num_total_graphs, model.num_candidates))
     cand_ids_2d = cand_ids_flat.reshape((num_total_graphs, model.num_candidates))
 
-    # true for real graphs Boolean array of shape [total_num_graphs] containing True for real graphs,
-    # and False for padding graphs.
-    n_dummy = jnp.argmin(padded_graph.n_node[::-1] == 0)
-    # Handle edge case where there are no zeros (all graphs are real)
-    n_dummy = jnp.where(jnp.all(padded_graph.n_node != 0), 0, n_dummy)
-    n_real = num_total_graphs - n_dummy
-    # Create boolean mask: True for real graphs, False for the trailing dummy graphs
-    is_real_graph = jnp.arange(num_total_graphs) < n_real
+    is_real_graph = jraph.get_graph_padding_mask(padded_graph)
 
     final_mask = jnp.broadcast_to(is_real_graph[:, None], (num_total_graphs, model.num_candidates))
 
-    # We return cand_ids_2d so eval_step can easily find the target movie!
+    # We return cand_ids_2d so eval_step can easily find the target movie
     return scores_2d, labels_2d, final_mask, cand_ids_2d
 
 @nnx.jit
@@ -222,7 +223,7 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     w_torso:float=0.55
     w_tail:float=0.2
 
-    #shapes: (total number of graphs including dummy grpahs, model.num_candidates).
+    #shapes: (total number of graphs including dummy graphs, model.num_candidates).
     # main_mask is True for real data and False for dummy graph data
     scores_2d, labels_2d, main_mask, cand_ids_2d = score_and_shape_results(model, padded_graph)
     safe_scores = jnp.where(main_mask, scores_2d, -1e9)

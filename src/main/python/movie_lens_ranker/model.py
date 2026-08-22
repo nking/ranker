@@ -47,8 +47,9 @@ class GraphRanker(nnx.Module):
         )
         # pure data paralellism, no sharding of the model:
         self.score_head = nnx.Linear(out_features * 2, 1, rngs=rngs,
+            use_bias=False,
             kernel_init=nnx.initializers.lecun_normal(),
-            bias_init=nnx.initializers.zeros_init(),
+            #bias_init=nnx.initializers.zeros_init(),
         )
     
     def __call__(self, graph: jraph.GraphsTuple) -> jnp.ndarray:
@@ -67,7 +68,7 @@ class GraphRanker(nnx.Module):
         
         edge_attr = self.rating_embed(edge_indices)
         
-        num_total_nodes = x.shape[0]
+        num_total_nodes = x.shape[0] #real + dummy graph nodes of (user_id, history, candidates)
         batch_indices = jnp.repeat(
             jnp.arange(len(graph.n_node)),
             graph.n_node,
@@ -78,6 +79,7 @@ class GraphRanker(nnx.Module):
         # Returns (num_nodes, out_features)
         #returns node embeddings as final representation of each node after
         # all message-passing layers.
+        # shape (num_total_nodes, num_total_candidates)
         node_repr = self.gatv2(
             x=x,
             edge_index = jnp.stack([graph.senders, graph.receivers]),

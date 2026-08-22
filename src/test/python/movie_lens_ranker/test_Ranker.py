@@ -344,6 +344,9 @@ class TestRanker(unittest.TestCase):
             'vizier_endpoint': vizier_endpoint,
             'mlflow_tracking_uri': mlflow_uri,
             'mlflow_experiment_name': STUDY_NAME,
+
+            'num_users':6040,
+            'num_movies' : 3883,
         }
         
         # check that docker fake gcs server is running
@@ -396,6 +399,40 @@ class TestRanker(unittest.TestCase):
         print(f'local device count={jax.local_device_count()}')
         print(f'process_count={jax.process_count()}')
         print(f'process_index={jax.process_index()}')
+
+    def test_dataloading(self):
+        config = self.config.copy()
+        config['batch_size'] = 4
+        config['max_history'] = 2
+        config['num_candidates'] = 4
+        train_dataloader, val_dataloader = create_train_and_val_dataloaders(
+            num_users = config['num_users'],
+            user_embeddings_uri = config['user_embeddings_uri'],
+            movie_embeddings_uri = config['movie_embeddings_uri'],
+            movies_uri=config['movies_uri'],
+            recommendations_uri=config['recommendations_uri'],
+            recommendations_ts_uri=config['recommendations_ts_uri'],
+            ratings_train_data_uri=config['ratings_train_liked_uri'],
+            ratings_train_history_uris=[config['ratings_train_liked_uri'], config['ratings_train_3_uri'],
+                                        config['ratings_train_disliked_uri']],
+            ratings_train_disliked_uris=[config['ratings_train_disliked_uri']],
+            ratings_val_data_uri=config['ratings_val_liked_uri'],
+            ratings_val_history_uris=[
+                config['ratings_train_liked_uri'], config['ratings_train_3_uri'],
+                config['ratings_train_disliked_uri'],
+                config['ratings_val_liked_uri'], config['ratings_val_3_uri'],
+                config['ratings_val_disliked_uri']],
+            ratings_val_disliked_uris=[config['ratings_train_disliked_uri'], config['ratings_val_disliked_uri']],
+            max_history=config['max_history'],
+            num_candidates=config['num_candidates'],
+            num_epochs=config['num_epochs'],
+            batch_size=config['batch_size'],
+            seed=config.get('seed', 0),)
+
+        for batch in val_dataloader:
+            graph = batch
+            break
+
     
     def test_run_app_check(self):
         config = self.config.copy()

@@ -1,4 +1,5 @@
 import json
+import os
 
 import jax
 import jax.numpy as jnp
@@ -7,7 +8,9 @@ import numpy as np
 import unittest
 
 from movie_lens_ranker.model import GraphRanker
-from movie_lens_ranker.train import eval_step, score_and_shape_results
+from movie_lens_ranker.train import eval_step, score_and_shape_results, create_dummy_super_padded_graph
+from movie_lens_ranker.util_plots import get_project_dir
+
 
 class TestModelMethods(unittest.TestCase):
 
@@ -19,7 +22,21 @@ class TestModelMethods(unittest.TestCase):
         - Graph 3: Targets a 'Tail' movie (tier 2) at candidate index 0 (within top_k=2)
         - Graph 4: 0 Nodes (Dummy padding graph)
         """
+        batch_size = 4
+        max_history = 2
+        '''
+        user_id_range=(1,4)
+        movie_id_range=(6041, 6060)
+        user_embeddings_uri = os.path.join(get_project_dir(),
+            "src/test/resources/data/user_emb-00000-of-00001.array_record")
+        movie_embeddings_uri = os.path.join(get_project_dir(),
+            "src/test/resources/data/movie_emb-00000-of-00001.array_record")
+        #movie_embeddings_uri =  self.transform_to_gs_uri(movie_embeddings_uri),
+        #user_embeddings_uri = self.transform_to_gs_uri(user_embeddings_uri),
 
+        fake0 = create_dummy_super_padded_graph(batch_size, max_history, num_candidates,
+                user_id_range, movie_id_range, user_embeddings_uri, movie_embeddings_uri)
+        '''
         # --- Graph 1: 1 User (type 1), 2 History (type 2), K Candidates (type 3) ---
         g1_n_hist = 2
         g1_nodes = 1 + g1_n_hist + num_candidates
@@ -27,9 +44,12 @@ class TestModelMethods(unittest.TestCase):
 
         g1_types = [1] + [2]*g1_n_hist + [3]*num_candidates
         # user(0), history(0,0), candidates(0, 0, 1, 0 -> target at index 2)
-        g1_cand_labels = [0, 0, 1] + [0] * (num_candidates - 3)
-        g1_labels = [0] + [0]*g1_n_hist + g1_cand_labels
-        g1_movie_ids = [99] + [88, 77] + [100, 101, 10, 102][:num_candidates] # ID 10 is at index 2
+        g1_labels = [0] + [0]*g1_n_hist + [0,0,1,0]
+        g1_ids    = [1] + [88, 77] + [100, 101, 10, 102]
+        #ratings are edges, so no user entry.  has real_history=4 or 5, candidates are 0
+        g1_ratings = [4, 5] + [0]*num_candidates
+        g1_senders = [1, 2] + [0]*num_candidates
+        g1_receivers = [0]*g1_n_hist + [1+g1_n_hist+i for i in range(num_candidates)]
 
         # --- Graph 2: 1 User (type 1), 1 History (type 2), K Candidates (type 3) ---
         g2_n_hist = 1
@@ -38,9 +58,11 @@ class TestModelMethods(unittest.TestCase):
 
         g2_types = [1] + [2]*g2_n_hist + [3]*num_candidates
         # user(0), history(0), candidates(0, 1, 0, 0 -> target at index 1)
-        g2_cand_labels = [0, 1] + [0] * (num_candidates - 2)
-        g2_labels = [0] + [0]*g2_n_hist + g2_cand_labels
-        g2_movie_ids = [98] + [87] + [200, 20, 201, 202][:num_candidates] # ID 20 is at index 1
+        g2_labels = [0] + [0]*g2_n_hist + [0,1,0,0]
+        g2_ids = [2] + [87] + [200, 20, 201, 202] # ID 20 is at index 1
+        g2_ratings = [5] + [0]*num_candidates
+        g2_senders = [1] + [0]*num_candidates
+        g2_receivers = [0]*g2_n_hist + [1+g2_n_hist+i for i in range(num_candidates)]
 
         # --- Graph 3: 1 User (type 1), 1 History (type 2), K Candidates (type 3) ---
         g3_n_hist = 1
@@ -49,38 +71,44 @@ class TestModelMethods(unittest.TestCase):
 
         g3_types = [1] + [2]*g3_n_hist + [3]*num_candidates
         # user(0), history(0), candidates(1, 0, 0, 0 -> target at index 0, within top_k=2)
-        g3_cand_labels = [1] + [0] * (num_candidates - 1)
-        g3_labels = [0] + [0]*g3_n_hist + g3_cand_labels
-        g3_movie_ids = [97] + [86] + [30, 300, 301, 302][:num_candidates] # ID 30 is at index 0
+        g3_labels = [0] + [0]*g3_n_hist + [1, 0,0,0]
+        g3_ids = [3] + [86] + [30, 300, 301, 302]
+        g3_ratings = [4] + [0]*num_candidates
+        g3_senders = [1] + [0]*num_candidates
+        g3_receivers = [0]*g3_n_hist + [1+g3_n_hist+i for i in range(num_candidates)]
 
-        # --- Graph 4: Dummy Padding Graph ---
-        g4_nodes = 0
-        g4_edges = 0
+        # --- Graph 4: no Dummy Padding Graph ---
+        g4_n_hist = 0
+        g4_nodes = num_candidates
+        g4_edges = num_candidates
+        g4_types = [0]*num_candidates
+        g4_labels = [0]*num_candidates
+        g4_ids =  [0]*num_candidates
+        g4_ratings = [0]*num_candidates
+        g4_senders = [0]*num_candidates
+        g4_receivers = [1+i for i in range(num_candidates)]
 
-        total_nodes = g1_nodes + g2_nodes + g3_nodes
-        total_edges = g1_edges + g2_edges + g3_edges
+        total_nodes = g1_nodes + g2_nodes + g3_nodes + g4_nodes
+        total_edges = g1_edges + g2_edges + g3_edges + g4_edges
 
         embeddings = jax.random.normal(jax.random.PRNGKey(0), (total_nodes, embed_dim))
 
-        senders = jnp.zeros(total_edges, dtype=jnp.int32)
-        receivers = jnp.zeros(total_edges, dtype=jnp.int32)
-        ratings = jnp.ones(total_edges, dtype=jnp.int32)
-
-        return jraph.GraphsTuple(
-            n_node=jnp.array([g1_nodes, g2_nodes, g3_nodes, g4_nodes], dtype=jnp.int32),
-            n_edge=jnp.array([g1_edges, g2_edges, g3_edges, g4_edges], dtype=jnp.int32),
+        fake = jraph.GraphsTuple(
+            n_node=jnp.array([g1_nodes, g2_nodes, g3_nodes, g4_nodes, 0], dtype=jnp.int32),
+            n_edge=jnp.array([g1_edges, g2_edges, g3_edges, g4_edges, 0], dtype=jnp.int32),
             nodes={
-                "ids": jnp.array(g1_movie_ids + g2_movie_ids + g3_movie_ids, dtype=jnp.int32),
-                "label": jnp.array(g1_labels + g2_labels + g3_labels, dtype=jnp.int32),
-                "type": jnp.array(g1_types + g2_types + g3_types, dtype=jnp.int32),
-                "candidate_mask": jnp.array(g1_types + g2_types + g3_types) == 3,
+                "ids": jnp.array(g1_ids + g2_ids + g3_ids + g4_ids, dtype=jnp.int32),
+                "label": jnp.array(g1_labels + g2_labels + g3_labels + g4_labels, dtype=jnp.int32),
+                "type": jnp.array(g1_types + g2_types + g3_types + g4_types, dtype=jnp.int32),
+                "candidate_mask": jnp.array(g1_types + g2_types + g3_types + g4_types) == 3,
                 "embeddings": embeddings
             },
-            edges={"rating": ratings},
-            senders=senders,
-            receivers=receivers,
+            edges={"rating": jnp.array(g1_ratings + g2_ratings + g3_ratings + g4_ratings, dtype=jnp.int32)},
+            senders=jnp.array(g1_senders + g2_senders + g3_senders + g4_senders, dtype=jnp.int32),
+            receivers=jnp.array(g1_receivers + g2_receivers + g3_receivers + g4_receivers, dtype=jnp.int32),
             globals=None
         )
+        return fake
 
     def test_score_and_shape_results(self):
         NUM_CANDIDATES = 4
@@ -125,8 +153,8 @@ class TestModelMethods(unittest.TestCase):
 
         mock_graph = self.build_mock_graph_batch(NUM_CANDIDATES, EMBED_DIM)
         scores = model(mock_graph)
-
-        expected_shape = (4 * NUM_CANDIDATES,)
+        n_graphs = len(mock_graph.n_node)
+        expected_shape = (n_graphs * NUM_CANDIDATES,)
         assert scores.shape == expected_shape, "Output shape mismatch!"
         assert not jnp.isnan(scores).any(), "Model produced NaNs!"
 
