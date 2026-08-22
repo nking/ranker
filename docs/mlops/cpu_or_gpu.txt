@@ -1,0 +1,93 @@
+Arithmetic intensity and ridge point for understanding when to use GPUs
+for training and inference.
+
+* arithmetic intensity = flops / (data loads + stores in bytes)
+* hardware ridge point = (peak hardware flops/sec) / (peak hardware bandwidth bytes/sec)
+    is hardware specific and measured (see [roofline analysis](https://docs.nersc.gov/tools/performance/roofline/))
+    * nvidia T4 GPU:  81 GFLOPS / 320 GBs<br/>
+        **= 25 FLOPs/Byte** <br/>
+    * kaggle CPU: 100 GFLOPS / 20 GBs<br/>
+        **= 5 FLOPs/Byte**<br/>
+
+The arithmetic intensity of the model processing shows whether
+the hardware memory or logic gates are the processing bottleneck
+by comparing the arith inten to the hardware ridge point.
+
+For a typical set of GraphRanker parameters we have:
+
+The number of trainable parameters is:
+{'gatv2': 181680, 'rating_embed': 96, 'score_head': 97, 'total_trainable_params': 181873}
+jax_graph_comp_dict_single={'max_nodes': 192, 'max_edges': 192, 'max_graphs': 3}
+jax_graph_comp_dict_batch_256={'max_nodes': 38720, 'max_edges': 38464, 'max_graphs': 258}
+
+* arithmetic intensity = flops / (data loads + stores in bytes)
+
+w/ 32-bit floats and a model size of P=182_000 trainable params,
+Memory:  182_000 f32s * 4 bytes/f32bit = 728_000 Bytes
+Flops: (primarily gatv2)
+       1 multiply op + 1 add op = 2
+       and runtime complexity is O(P * (V + E))
+       => 2 * P * (V + E)
+    single inference:
+          = 2 * 182_000 * (192 + 192)
+          = 140 M Flops
+    batch 256 inference:
+          double the computations to include backward pass:
+          = 2 * 2 * 182_000 * (38720 + 38464)
+          = 56_200 M Flops
+
+single inference arithmetic intensity:
+    140 M Flops / 728_000 Bytes
+    = 192 Flops/Byte
+
+batch arithmetic intensity:
+    56_200 M Flops / (256*728_000) Bytes  where 256 for optimizer and intermed states
+    = 139 Flops/Byte
+
+Both the single inference and batch training are greater than
+the hardware ridge points of 5 and 25, so on those hardware
+the processing would be compute bound.
+
+To improve the performance:
+   ** changing the batch size will not help because the numerator
+      and denominator of the arithmetic intensity both scale roughly
+      with batch size.
+   ** raise the hardware's compute ceiling
+      - nvidia GPU Tensor Cores can use float16 or bfloat16 to execute
+        these half-precision floats expoentially faster than FP32.
+        - FP32 nvidia hardware peak ~ 8.1 Terra Flops (10^12 floating point ops per sec)
+        - FP16 nvidia hardware peak ~ 65 Terra Flops
+          => cast the inputs and layer computations to FP16
+             (the Jax ai stack is compat to half-precision floats, including export
+             to savedmodel.  caveat is running half-precision on some CPUs)
+   ** lower the total number of arithmetic operations
+      - experiment w/ reducing GATv2 params: heads, hidden_features
+
+CPU vs GPU
+single inference for GraphRanker:
+    - choose CPU because:
+      - GPU communication cost:
+        the latency in sending 728_000 Byte graph across PCIe bus
+        and launching a CUDA kernel (~100µs to 1ms) plus GPU math time
+        is about same or more than the time for CPU computation.
+      - the computation on GPUs would not be anywhere near fully loading the GPUs
+      - the cost of keeping a GPU serving always on is very high compared to CPU hosting.
+batch training for GraphRanker:
+    - choose GPU:
+      - computation need is large, 56.2 GFlops
+        - T4 GPU  hardware peak of 8.1 TFlops
+        - CPU harward peak 100 GFlops
+        => the GPUs ability to do math 81 times faster and in parallel
+           efficiently even with the one time communication cost per batch
+           results in smaller latency than the CPU even though the CPU has
+           multicore processing and SIMD.
+
+In general for a project one can use these guidelines:
+   - choose GPU if any of these are true:
+     - arith intensity > hardware ridge point, the processing is compute bound.
+       if the processing # of FLOPs are large enough to make the CPU to GPU communication
+       cost negigible in comparison, choose GPU (>= billions of FLOPS).
+     - the dataset or model size is large enough to overburden the CPU RAM
+       - choose GPU even if the process is memory bound
+     - deep learning frameworks with great amount of linear algebra
+

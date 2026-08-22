@@ -842,3 +842,38 @@ def _get_git_commit_hash_if_match():
             return None
     except FileNotFoundError:
         return None
+
+import jax
+from flax import nnx
+
+def summarize_trainable_params(model: nnx.Module, use_print:bool=False) -> Dict[str, int]:
+    #trainable params:
+    params = nnx.state(model, nnx.Param)
+
+    # Flatten the state tree to get (path, value) pairs
+    paths_and_values, _ = jax.tree_util.tree_flatten_with_path(params)
+
+    layer_counts = {}
+    total_params = 0
+
+    # Iterate through each parameter tensor
+    for path, value in paths_and_values:
+        # Extract the top-level layer name (e.g., 'gatv2' from 'gatv2.Dense_0.kernel')
+        top_layer = str(path[0].key) if path else "root"
+        count = value.size
+
+        layer_counts[top_layer] = layer_counts.get(top_layer, 0) + count
+        total_params += count
+
+    if use_print:
+        # Print the formatted summary table
+        print(f"{'Layer Name':<30} | {'Parameter Count':>15}")
+        print("-" * 50)
+        for layer, count in layer_counts.items():
+            print(f"{layer:<30} | {count:>15,}")
+        print("-" * 50)
+        print(f"{'Total Trainable Parameters':<30} | {total_params:>15,}")
+
+    out = { layer: count for layer, count in layer_counts.items()}
+    out["total_trainable_params"] = total_params
+    return out
