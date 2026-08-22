@@ -1,3 +1,5 @@
+- consider changing next_64 to next_8 in the calculation of max_edges, max_nodes, and max_graphs
+
 - make the code for inputs to monitoring:
    input data
    input features
