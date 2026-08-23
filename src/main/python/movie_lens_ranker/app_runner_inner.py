@@ -79,7 +79,8 @@ def get_or_create_mlflow_experiment(experiment_name:str):
 
 def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
     config = {}
-    int_keys = {"top_k", "num_layers", "num_heads","hidden_dim","max_history","num_candidates","out_dim","edge_embed_dim"}
+    int_keys = {"top_k", "num_layers", "num_heads","hidden_dim","max_history",
+        "num_candidates","out_dim","edge_embed_dim"}
     for k, v in params.items():
         if k in int_keys:
             if isinstance(v, ParameterValue):
@@ -131,6 +132,9 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:in
         scale_type=vz.ScaleType.LOG)
     root.add_float_param("weight_decay", min_value=1e-4, max_value=1e-2, default_value=1e-3,
         scale_type=vz.ScaleType.LOG)
+
+    root.add_float_param("temperature", min_value=0.05, max_value=0.15, default_value=0.1,
+        scale_type=vz.ScaleType.LINEAR)
 
     # out_dim avoids bottlenecking the incoming embeddings.
     # For embed_in_dim=32, yields [32, 48, 64] (multiples of 16 for JAX vector alignment)
@@ -216,7 +220,7 @@ def sync_hyperparams(params_dict) -> Dict[str, Union[int, float]]:
     # Others initialize with zeros
     sync_keys = ["top_k", "num_layers", "num_heads", "hidden_dim",
         "max_history","num_candidates", "learning_rate", "weight_decay", "out_dim",
-        "edge_embed_dim","dropout_rate"]
+        "edge_embed_dim","dropout_rate", "temperature"]
     num_keys = len(sync_keys)
     if jax.process_index() == 0:
         #extract ParameterValue to primitives:

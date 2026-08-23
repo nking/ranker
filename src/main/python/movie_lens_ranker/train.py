@@ -121,6 +121,13 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
         size=total_candidate_slots,
         fill_value=0
     )[0]
+    #TODO: redundant infomation, so consider removing nodes["candidate_mask"]
+    #cand_indices_2 = jnp.where(
+    #    padded_graph.nodes["candidate_mask"],
+    #    size=total_candidate_slots,
+    #    fill_value=0
+    #)[0]
+
     #jax.debug.print("cand_indices={cand_indices}", cand_indices=cand_indices, ordered=True)
     # lengths are K * num_total_graphs
     labels_flat = padded_graph.nodes["label"][cand_indices]
@@ -131,14 +138,7 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
     labels_2d = labels_flat.reshape((num_total_graphs, model.num_candidates))
     cand_ids_2d = cand_ids_flat.reshape((num_total_graphs, model.num_candidates))
 
-    # true for real graphs Boolean array of shape [total_num_graphs] containing True for real graphs,
-    # and False for padding graphs.
-    n_dummy = jnp.argmin(padded_graph.n_node[::-1] == 0)
-    # Handle edge case where there are no zeros (all graphs are real)
-    n_dummy = jnp.where(jnp.all(padded_graph.n_node != 0), 0, n_dummy)
-    n_real = num_total_graphs - n_dummy
-    # Create boolean mask: True for real graphs, False for the trailing dummy graphs
-    is_real_graph = jnp.arange(num_total_graphs) < n_real
+    is_real_graph = jraph.get_graph_padding_mask(padded_graph)
 
     final_mask = jnp.broadcast_to(is_real_graph[:, None], (num_total_graphs, model.num_candidates))
 
@@ -765,7 +765,9 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
             out_features=config['out_dim'],
             heads=config['num_heads'],
             edge_embed_dim=config['edge_embed_dim'],
-            dropout_rate=config['dropout_rate'], rngs=rngs)
+            dropout_rate=config['dropout_rate'],
+            temperature=config['temperature'],
+            rngs=rngs)
         
         #initialize the layers with same fake data
         user_id_range = (1, config['num_users'])
@@ -1333,6 +1335,7 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
         logging.info(f'worker_rank={jax.process_index()}: key={key}, model={global_avg_val_metrics_current[key]}, restored={global_avg_val_metrics_restored[key]}')
         if not jnp.allclose(global_avg_val_metrics_current[key], global_avg_val_metrics_restored[key]):
             all_similar = False
+            print(f'not same for key {key}, values={global_avg_val_metrics_current[key]}, {global_avg_val_metrics_restored[key]}')
     
     model.train()
     

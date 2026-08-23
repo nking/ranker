@@ -55,7 +55,7 @@ def get_train_val_test_liked_uris(data_size:DataSize=DataSize.TINY, use_gcs_uri:
     else:
         base_uri = os.path.join(get_project_dir(), "src/test/resources/data/")
     if data_size == DataSize.TINY3:
-        return {key: os.path.join(base_uri, f"ratings_{key}.array_record")
+        return {key: os.path.join(base_uri, "tiny3", f"ratings_{key}.array_record")
                 for key in {"train_liked", "val_liked", "test_liked"}}
     if data_size == DataSize.SMALL:
         base_uri = os.path.join(base_uri, "small")

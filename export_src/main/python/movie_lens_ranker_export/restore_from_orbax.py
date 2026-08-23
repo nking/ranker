@@ -102,7 +102,9 @@ def _build_model_only(config:dict, rngs:nnx.Rngs) -> Dict[str, Any]:
         out_features=config['out_dim'],
         heads=config['num_heads'],
         edge_embed_dim=config['edge_embed_dim'],
-        dropout_rate=config['dropout_rate'], rngs=rngs)
+        dropout_rate=config['dropout_rate'],
+        temperature=config['temperature'],
+        rngs=rngs)
 
     #initialize the layers with same fake data
     user_id_range = (1, config['num_users'])

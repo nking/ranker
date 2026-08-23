@@ -239,9 +239,9 @@ class TestRanker(unittest.TestCase):
         env_file = os.path.join(get_project_dir(), ".env_unittests")
         for k, v in dotenv_values(env_file).items():
             os.environ[k] = v
-        
+
         ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY, use_gcs_uri=True)
-        
+
         self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]
         self.ratings_val_liked_uri = ratings_uri_dict["val_liked"]
         self.ratings_test_liked_uri = ratings_uri_dict["test_liked"]
@@ -278,7 +278,7 @@ class TestRanker(unittest.TestCase):
             "src/test/resources/data/movies-00000-of-00001.array_record")
         
         STUDY_NAME = "GraphRanker_tuning_unittest3"
-        
+
         num_epochs = 4  # keep this to > 2 and < 10 for the restore tests at end of this method
         batch_size = 64
         seed = 234
@@ -332,7 +332,7 @@ class TestRanker(unittest.TestCase):
             
             'latest_checkpoint_uri': latest_checkpoint_uri,
             'best_checkpoint_uri': best_checkpoint_uri,
-            
+
             'num_epochs': num_epochs,
             'batch_size': batch_size,
             'seed': seed,
@@ -387,6 +387,9 @@ class TestRanker(unittest.TestCase):
             pass
     
     def transform_to_gs_uri(self, file_path:str):
+        #DEBUG: temporarily commenting out 
+        if True:
+            return file_path
         idx = file_path.find("/data/")
         tr = f'gs://{file_path[idx+1:]}'
         return tr
@@ -419,13 +422,14 @@ class TestRanker(unittest.TestCase):
         
         config = self.config.copy()
 
-        config['study_name'] = "GraphRanker_tuning_unittest10"
-        config['project_id'] =  'tune-unittest-010'
+        config['study_name'] = "GraphRanker_tuning_unittest_best"
+        config['project_id'] =  'tune-unittest-best'
         config['mlflow_experiment_name'] = config['study_name']
         config['connections_check'] = 0
 
         #overriding the train, val, test liked datasets to make sure have all tiers in training.
         ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY3, use_gcs_uri=True)
+
         config["ratings_train_liked_uri"] = ratings_uri_dict["train_liked"]
         config["ratings_val_liked_uri"] = ratings_uri_dict["val_liked"]
         config["ratings_test_liked_uri"] = ratings_uri_dict["test_liked"]
@@ -433,13 +437,13 @@ class TestRanker(unittest.TestCase):
         self.delete_vizier_project(config['vizier_endpoint'], config['project_id'], config['study_name'])
 
         self._run_and_assert_hpo(config)
-        
+
         config['phase'] = 'train-best'
         config['train_id'] = 1234567
         config['validate_checkpoint_restores'] = True
 
         restore_dict, train_run = self._run_train_and_restore_chkpoint_and_assert(config)
-        
+
         config['phase'] = 'test-best'
         test_id = 234567
         config['test_id'] = test_id
@@ -542,7 +546,8 @@ class TestRanker(unittest.TestCase):
 
         hparams = {'top_k': 20, 'num_layers': 2, 'num_heads': 4, 'hidden_dim': 128,
             'max_history': 70, 'num_candidates': 70, 'learning_rate': 0.001,
-            'weight_decay': 0.001, 'out_dim': 32, 'edge_embed_dim': 16, 'dropout_rate': 0.2}
+            'weight_decay': 0.001, 'out_dim': 32, 'edge_embed_dim': 16, 'dropout_rate': 0.2,
+            'temperature' : 0.1}
         config.update(hparams)
         
         config['phase'] = 'train-given'
@@ -795,6 +800,7 @@ class TestRanker(unittest.TestCase):
         config['num_heads'] = 4
         config['edge_embed_dim'] = 8
         config['dropout_rate'] = 0.05
+        config['temperature'] = 0.1
         
         model = GraphRanker(
             emb_in_dim = embed_len,
@@ -804,7 +810,9 @@ class TestRanker(unittest.TestCase):
             out_features=config['out_dim'],
             heads=config['num_heads'],
             edge_embed_dim=config['edge_embed_dim'],
-            dropout_rate=config['dropout_rate'], rngs=rngs)
+            dropout_rate=config['dropout_rate'],
+            temperature=config['temperature'],
+            rngs=rngs)
         
         model.eval()
         all_scores = model(fake_data)

@@ -58,6 +58,7 @@ model_params_trainable_keys = {
     'num_candidates',
     'edge_embed_dim',
     'dropout_rate',
+    'temperature',
     'num_epochs',
     'batch_size',
 }
@@ -291,7 +292,10 @@ def define_flags():
         help="number of layers in the GATv2 layer of the GraphRanker"
     )
     flags.DEFINE_integer("num_heads", default=4,
-        help="number of attention heads in the GATv2 layer of the GraphRanker"
+        help="number of attention heads in the GATv2 layer of the GraphRanker."
+    )
+    flags.DEFINE_float("temperature", default=0.1,
+        help="applied to the logits after L2 normalization to sharpen the distribution."
     )
     flags.DEFINE_integer("edge_embed_dim", default=8,
         help="size of output of the GATv2 layer of GraphRanker"

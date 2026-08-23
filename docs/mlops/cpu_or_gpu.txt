@@ -91,3 +91,14 @@ In general for a project one can use these guidelines:
        - choose GPU even if the process is memory bound
      - deep learning frameworks with great amount of linear algebra
 
+=========================
+Observed:
+
+Kaggle T4x2 GPUs:
+    *this may change soon
+    1 epoch of training takes 10 min.
+    (note, limited by loading onto GPUs (not concurrent due to PIL lock)).
+    a pipeline training 1 trial for 20 epochs takes 6.5 hours.
+
+2.8 GHz CPU w/ 4 cores and 32 GB RAM:
+    1 epoch of training takes anywhere in range 16 to 44 min
