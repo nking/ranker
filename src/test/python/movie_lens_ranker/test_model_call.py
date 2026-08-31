@@ -120,7 +120,8 @@ class TestModelMethods(unittest.TestCase):
             hidden_features=32,
             num_layers=1,
             out_features=16,
-            heads=2
+            heads=2,
+            temperature=0.1,
         )
 
         mock_graph = self.build_mock_graph_batch(NUM_CANDIDATES, EMBED_DIM)
@@ -148,7 +149,8 @@ class TestModelMethods(unittest.TestCase):
             hidden_features=32,
             num_layers=1,
             out_features=16,
-            heads=2
+            heads=2,
+            temperature=10.
         )
 
         mock_graph = self.build_mock_graph_batch(NUM_CANDIDATES, EMBED_DIM)
@@ -172,7 +174,8 @@ class TestModelMethods(unittest.TestCase):
             hidden_features=32,
             num_layers=1,
             out_features=16,
-            heads=2
+            heads=2,
+            temperature=0.1,
         )
 
         mock_graph = self.build_mock_graph_batch(NUM_CANDIDATES, EMBED_DIM)

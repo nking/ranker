@@ -54,10 +54,12 @@ model_params_trainable_keys = {
     'hidden_dim',
     'num_layers',
     'num_heads',
+    'mlp_hidden_dim',
     'max_history',
     'num_candidates',
     'edge_embed_dim',
     'dropout_rate',
+    'temperature',
     'num_epochs',
     'batch_size',
 }
@@ -287,11 +289,17 @@ def define_flags():
     flags.DEFINE_integer("hidden_dim", default=64,
         help="size of hidden layers per head in the GATv2 layer of GraphRanker"
     )
+    flags.DEFINE_float("mlp_hidden_dim", default=0.5,
+        help="size of output layers in 2-layer MLP preceding the score head with respect to out_dim"
+    )
     flags.DEFINE_integer("num_layers", default=2,
         help="number of layers in the GATv2 layer of the GraphRanker"
     )
     flags.DEFINE_integer("num_heads", default=4,
-        help="number of attention heads in the GATv2 layer of the GraphRanker"
+        help="number of attention heads in the GATv2 layer of the GraphRanker."
+    )
+    flags.DEFINE_float("temperature", default=0.1,
+        help="applied to the logits after L2 normalization to sharpen the distribution."
     )
     flags.DEFINE_integer("edge_embed_dim", default=8,
         help="size of output of the GATv2 layer of GraphRanker"
@@ -842,3 +850,38 @@ def _get_git_commit_hash_if_match():
             return None
     except FileNotFoundError:
         return None
+
+import jax
+from flax import nnx
+
+def summarize_trainable_params(model: nnx.Module, use_print:bool=False) -> Dict[str, int]:
+    #trainable params:
+    params = nnx.state(model, nnx.Param)
+
+    # Flatten the state tree to get (path, value) pairs
+    paths_and_values, _ = jax.tree_util.tree_flatten_with_path(params)
+
+    layer_counts = {}
+    total_params = 0
+
+    # Iterate through each parameter tensor
+    for path, value in paths_and_values:
+        # Extract the top-level layer name (e.g., 'gatv2' from 'gatv2.Dense_0.kernel')
+        top_layer = str(path[0].key) if path else "root"
+        count = value.size
+
+        layer_counts[top_layer] = layer_counts.get(top_layer, 0) + count
+        total_params += count
+
+    if use_print:
+        # Print the formatted summary table
+        print(f"{'Layer Name':<30} | {'Parameter Count':>15}")
+        print("-" * 50)
+        for layer, count in layer_counts.items():
+            print(f"{layer:<30} | {count:>15,}")
+        print("-" * 50)
+        print(f"{'Total Trainable Parameters':<30} | {total_params:>15,}")
+
+    out = { layer: count for layer, count in layer_counts.items()}
+    out["total_trainable_params"] = total_params
+    return out

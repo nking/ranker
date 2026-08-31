@@ -2,7 +2,7 @@ import unittest
 from tensorflow import saved_model as tf_saved_model
 from helper import *
 from movie_lens_ranker.train import create_dummy_super_padded_graph
-from movie_lens_ranker.util import calc_number_jax_graph_components
+from movie_lens_ranker.util import calc_number_jax_graph_components, summarize_trainable_params
 from movie_lens_ranker_export.export import export_models, make_jax_module, create_serving_signature
 from movie_lens_ranker_export.restore_from_orbax import restore_model_from_checkpoint
 from orbax.export.validate import ValidationManager, ValidationReportOption
@@ -61,6 +61,11 @@ class ExportTest(unittest.TestCase):
         params = {key : restore_dict['config'][key] for key in param_keys}
         params["num_catalog_users"] = restore_dict['config']['num_users']
         params['num_catalog_movies'] = restore_dict['config']['num_movies']
+
+        from flax import nnx
+        print("model summary:")
+        #print(nnx.state(restore_dict['model'], nnx.Param))
+        print(summarize_trainable_params(restore_dict['model']))
 
         export_models(
             trained_model=restore_dict['model'],

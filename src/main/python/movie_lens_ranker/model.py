@@ -10,15 +10,21 @@ class GraphRanker(nnx.Module):
             num_candidates: int,
             hidden_features: int = 128, num_layers: int = 2,
             out_features: int = 64, heads: int = 4, edge_embed_dim:int=8,
-            dropout_rate: float = 0.1, rngs: nnx.Rngs = nnx.Rngs(0)):
+            mlp_hidden_dim : float = 0.5,
+            dropout_rate: float = 0.1,
+            temperature: float= 0.1,
+            rngs: nnx.Rngs = nnx.Rngs(0)):
         """
         :param num_candidates: number per user of negatives + positive to use for their final graph
         :param hidden_features: size of hidden layers per head in the GATv2 layer
         :param num_layers: number of layers in the GATv2 layer
         :param out_features: output dimension of the score head dense layer
         :param heads: number of attention heads in the GATv2 layer
-        :param edge_embed_dim: typically a value in range 4 to 16. size of output of GATv2 layer
+        :param edge_embed_dim: typically a value in range 4 to 16. size of output of GATv2 layer.
+        :param mlp_hidden_dim the output dimension of the 2 layer MLP that precedes the score head expressed
+            as a multiple of out_features value.
         :param dropout_rate: the dropout probability of a layer in the GATv2 layer
+        :param temperature: a factor to use after L2 normalizing the user and candidate representations
         :param rngs: the pseudo random number generator
         """
         self.edge_embed_dim = edge_embed_dim
@@ -26,7 +32,8 @@ class GraphRanker(nnx.Module):
         self.embed_in_dim = emb_in_dim
 
         self.num_candidates = num_candidates
-        
+        self.temperature = temperature
+
         # 6 embeddings: 0 (No Rating/Candidate), 1, 2, 3, 4, 5 (Ratings)
         self.rating_embed = nnx.Embed(num_embeddings=6, features=edge_embed_dim, rngs=rngs)
         
@@ -45,11 +52,28 @@ class GraphRanker(nnx.Module):
             jk="max",  # JumpingKnowledge aggregation
             rngs=rngs
         )
+
+        # nearest multiple of 8, then lower bound of 16
+        mlp_hidden_dim_int = max(16, int(round(mlp_hidden_dim * out_features / 8.0) * 8.0))
+
+        # The Hidden Layer (Accepts U, C, U*C, |U-C|)
+        self.interaction_hidden = nnx.Linear(
+            out_features * 4,
+            mlp_hidden_dim_int,
+            use_bias=True,
+            rngs=rngs,
+            bias_init=nnx.initializers.zeros_init(),
+            kernel_init=nnx.initializers.he_normal() # He init is better for ReLU/GELU
+        )
+
+        ## Output projection accepts 4 * out_features (u, c, u*c, |u-c|)
         # pure data paralellism, no sharding of the model:
-        self.score_head = nnx.Linear(out_features * 2, 1, rngs=rngs,
+        self.score_head = nnx.Linear(
+            mlp_hidden_dim_int,
+            1,
             use_bias=False,
             kernel_init=nnx.initializers.lecun_normal(),
-            #bias_init=nnx.initializers.zeros_init(),
+            rngs=rngs,
         )
     
     def __call__(self, graph: jraph.GraphsTuple) -> jnp.ndarray:
@@ -68,26 +92,39 @@ class GraphRanker(nnx.Module):
         
         edge_attr = self.rating_embed(edge_indices)
         
-        num_total_nodes = x.shape[0] #real + dummy graph nodes of (user_id, history, candidates)
+        num_total_nodes = x.shape[0]
         batch_indices = jnp.repeat(
             jnp.arange(len(graph.n_node)),
             graph.n_node,
             total_repeat_length=num_total_nodes
         )
         #batch_indices length is num_total_nodes
-        
+
+        #flow: Literal["source_to_target", "target_to_source"] = "source_to_target",
+        #Inward: senders array holds the history movie edges and have implied receiver of user (where type==1)
+        #Outward: receivers array holds the candidate movie edges and have implied send of user (where type==1)
+        #How the GATV2 here acts as a cross-endcoder via multi-hop flow:
+        #num_layers=2
+        #    Layer 1 (these happen in parallel):
+        #       h_u': user node gathers information from its history node embeddings, learning the user profile.
+        #       h_c': the candidate nodes gather information from the user node embeddings, to learn who is evaluating them.
+        #    Layer 2 (these happen in parallel):
+        #       h_u'': user node gathers information from history node embeddings again
+        #       h_c'': the candidate nodes gather information from h_u'  <==== interaction to inform candidates about user
         # Returns (num_nodes, out_features)
         #returns node embeddings as final representation of each node after
         # all message-passing layers.
-        # shape (num_total_nodes, num_total_candidates)
+
         node_repr = self.gatv2(
             x=x,
-            edge_index = jnp.stack([graph.senders, graph.receivers]),
+            edge_index = jnp.stack([graph.senders, graph.receivers]), #must be shape [2, num_edges]
             edge_weight = None,
             edge_attr = edge_attr,
             batch=batch_indices,
             batch_size=graph.n_node.shape[0]
         )
+        #NOTE: cannot append to the sends and receives candidates -> user edges because it would cause
+        # target leakage.  also it would consume alot of memory.
 
         num_total_graphs = len(graph.n_node) # number of batches + number of dummy padding graphs
         num_total_candidates = num_total_graphs * self.num_candidates
@@ -110,14 +147,39 @@ class GraphRanker(nnx.Module):
         user_reprs = node_repr[user_indices]
         cand_reprs = node_repr[cand_indices]
 
-        # Cross-Encoder Concatenation
-        # Repeat each user self.num_candidates times to pair with their respective candidates
-        # Result: [U1, U1... (num_candidate times), U2, U2... (K times), U_pad, U_pad... (K times)]
-        user_expanded = jnp.repeat(user_reprs, self.num_candidates, axis=0)
+        # NaN-Safe L2 Normalization (epsilon INSIDE the square root)
+        def safe_l2_normalize(x, eps=1e-8):
+            norm = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True) + eps)
+            return x / norm
 
-        combined = jnp.concatenate([user_expanded, cand_reprs], axis=-1)
+        user_norm = safe_l2_normalize(user_reprs)
+        cand_norm = safe_l2_normalize(cand_reprs)
 
-        scores = self.score_head(combined)
+        user_expanded = jnp.repeat(user_norm, self.num_candidates, axis=0)
 
-        return jnp.squeeze(scores, axis=-1)
+        dot_product = user_expanded * cand_norm         #element-wise cosine similarity
+        abs_diff = jnp.sqrt(jnp.square(user_expanded - cand_norm) + 1e-8) #prevents gradient explosion if values diffs are 0
 
+        ## Concatenate into a Lean Matching Vector [U, C, U*C, |U-C|]
+        matching_vector = jnp.concatenate([user_expanded, cand_norm, dot_product, abs_diff], axis=-1)
+
+        ## the following was used for linear interaction for a 2 * out_features improvement in rumtime.
+        ## the savings during training is nearly negigible though if the T4x2 GPUs are used because the bottleneck is loading data onto the GPUs
+        ## and then the math is done extremely quickly.
+        ## so commenting out this linear interaction to add a non-linear interaction using 1 2 layer MLP
+        # Single Bias-Free Linear Projection + Temperature Scaling
+        #scores = self.score_head(matching_vector)
+        #scores = jnp.squeeze(scores, axis=-1) / self.temperature
+
+        hidden = self.interaction_hidden(matching_vector)
+
+        # Apply non-linearity (GELU is standard for modern recsys, ReLU is slightly faster on CPU)
+        hidden = nnx.gelu(hidden)
+
+        # Project to final scalar score
+        scores = self.score_head(hidden)
+
+        # --- SCALING ---
+        scores = jnp.squeeze(scores, axis=-1) / self.temperature
+
+        return scores

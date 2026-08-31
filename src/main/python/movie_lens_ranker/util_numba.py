@@ -344,6 +344,9 @@ np.ndarray, np.ndarray, np.ndarray, int, int]:
     edge_features[n_real_history:n_real_history + n_candidates] = 0
     senders[n_real_history:n_real_history + n_candidates] = 0
 
+    #senders array holds the history movie edges and have implied receiver of user (where type==1)
+    #receivers array holds the candidate movie edges and have implied send of user (where type==1)
+
     # Nodes (User + History + Candidates)
     node_ids = np.empty(total_nodes, dtype=np.int32)
     node_ids[0] = user_id

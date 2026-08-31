@@ -113,7 +113,6 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
     #jax.debug.print("all_scores={all_scores}", all_scores=all_scores, ordered=True)
     num_total_graphs = padded_graph.n_node.shape[0]  # batch_size + padding
     total_candidate_slots = num_total_graphs * model.num_candidates
-
     # Extract Candidate Data. length is model.num_candidates * num_total_graphs
     #node.type: 1=user_id, 2=real_history, 3=candidate or negative
     #node.label = 1 for target movie_id
@@ -122,7 +121,7 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
         size=total_candidate_slots,
         fill_value=0
     )[0]
-    #TODO: redundant infomation, so consider removing nodes["candidate_mask"]
+    #TODO: redundant information, so consider removing nodes["candidate_mask"]
     #cand_indices_2 = jnp.where(
     #    padded_graph.nodes["candidate_mask"],
     #    size=total_candidate_slots,
@@ -143,7 +142,7 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
 
     final_mask = jnp.broadcast_to(is_real_graph[:, None], (num_total_graphs, model.num_candidates))
 
-    # We return cand_ids_2d so eval_step can easily find the target movie
+    # We return cand_ids_2d so eval_step can easily find the target movie!
     return scores_2d, labels_2d, final_mask, cand_ids_2d
 
 @nnx.jit
@@ -223,7 +222,7 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     w_torso:float=0.55
     w_tail:float=0.2
 
-    #shapes: (total number of graphs including dummy graphs, model.num_candidates).
+    #shapes: (total number of graphs including dummy grpahs, model.num_candidates).
     # main_mask is True for real data and False for dummy graph data
     scores_2d, labels_2d, main_mask, cand_ids_2d = score_and_shape_results(model, padded_graph)
     safe_scores = jnp.where(main_mask, scores_2d, -1e9)
@@ -255,6 +254,7 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
 
     # Mean and Standard Deviation over valid unpadded candidates
     logit_mean = jnp.sum(masked_scores) / safe_num_valid
+    #logit_mean = jnp.mean(jnp.where(main_mask, scores_2d, jnp.inf))
     logit_var = jnp.sum(jnp.where(main_mask, jnp.square(scores_2d - logit_mean), 0.0)) / safe_num_valid
     logit_std = jnp.sqrt(logit_var)
     # Extreme values bounded strictly within the masked region
@@ -766,7 +766,10 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
             out_features=config['out_dim'],
             heads=config['num_heads'],
             edge_embed_dim=config['edge_embed_dim'],
-            dropout_rate=config['dropout_rate'], rngs=rngs)
+            mlp_hidden_dim=config['mlp_hidden_dim'],
+            dropout_rate=config['dropout_rate'],
+            temperature=config['temperature'],
+            rngs=rngs)
         
         #initialize the layers with same fake data
         user_id_range = (1, config['num_users'])
@@ -1334,7 +1337,8 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
         logging.info(f'worker_rank={jax.process_index()}: key={key}, model={global_avg_val_metrics_current[key]}, restored={global_avg_val_metrics_restored[key]}')
         if not jnp.allclose(global_avg_val_metrics_current[key], global_avg_val_metrics_restored[key]):
             all_similar = False
-    
+            print(f'not same for key {key}, values={global_avg_val_metrics_current[key]}, {global_avg_val_metrics_restored[key]}')
+
     model.train()
     
     #logging.info(f'worker_rank={jax.process_index()}:\n    summary of model={str(model)}\n    summary of restored={str(restore_dict["model"])}')

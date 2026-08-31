@@ -190,4 +190,8 @@ def export_models(trained_model: GraphRanker, batch_size:int,
 
     print(f"saved model and metadata to {output_savedmodel_dir_uri}")
 
+    #NOTE: if the serving infra is not TFS, could further use tf2onnx to make an ONNX export here
+    #  and then still use gRPC with a ONNX Runtime Server (ORTS) or NVIDIA Triton Inference Server
+    #  Else, the TPUs and AWS neuron can run the trained jax AI stack model as is, restored from orbax checkpoint.
+
 
