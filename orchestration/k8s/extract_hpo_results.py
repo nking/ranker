@@ -68,7 +68,8 @@ def get_best_parameters_for_training(config:Dict[str, Any]) -> Dict[str, Union[f
 
 def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
     config = {}
-    int_keys = {"top_k", "num_layers", "num_heads","hidden_dim","max_history","num_candidates","out_dim","edge_embed_dim"}
+    int_keys = {"top_k", "num_layers", "num_heads","hidden_dim","max_history",
+        "num_candidates","out_dim", "edge_embed_dim"}
     for k, v in params.items():
         if k in int_keys:
             if isinstance(v, ParameterValue):

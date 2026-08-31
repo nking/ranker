@@ -54,6 +54,7 @@ model_params_trainable_keys = {
     'hidden_dim',
     'num_layers',
     'num_heads',
+    'mlp_hidden_dim',
     'max_history',
     'num_candidates',
     'edge_embed_dim',
@@ -287,6 +288,9 @@ def define_flags():
     )
     flags.DEFINE_integer("hidden_dim", default=64,
         help="size of hidden layers per head in the GATv2 layer of GraphRanker"
+    )
+    flags.DEFINE_float("mlp_hidden_dim", default=0.5,
+        help="size of output layers in 2-layer MLP preceding the score head with respect to out_dim"
     )
     flags.DEFINE_integer("num_layers", default=2,
         help="number of layers in the GATv2 layer of the GraphRanker"

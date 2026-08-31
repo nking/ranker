@@ -18,11 +18,11 @@ class PlotTrainingTest(unittest.TestCase):
 
         in_path = os.path.join(get_project_dir(), "src/test/resources/train_val_metrics.json")
         in_path = os.path.join(get_project_dir(),
-            "TMP8/hpo-results-bucket/kaggle-tune-train-test/kaggle-hpo/train/metrics.json")
+            "TMP10/hpo-results-bucket/kaggle-tune-train-test/kaggle-hpo/train/metrics.json")
 
         output_dir = os.path.join(get_bin_dir(), "training_metrics_pngs")
 
-        with fsspec.open(in_path, mode='r') as f:
+        with fsspec.open(in_path, morail_de='r') as f:
             content = f.read()
             metrics_dict = json.loads(content)
 

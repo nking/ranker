@@ -96,7 +96,7 @@ def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
 
 def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:int=32):
     """
-    get the Vizier study config of hyperparameter ranges.
+    get the Vizier study config of hyperparameter ranges. for HPO.
     :param top_k:  the top_k rankings for the model
     :param use_batching_alg: if True, uses study_config.algorithm = 'GP_UCB_PE'
     else study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
@@ -136,12 +136,16 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:in
     root.add_float_param("temperature", min_value=0.05, max_value=0.15, default_value=0.1,
         scale_type=vz.ScaleType.LINEAR)
 
+    feasible_out_dim = [embed_in_dim, int(embed_in_dim * 1.5), embed_in_dim * 2] # e.g., [32, 48, 64]
+
     # out_dim avoids bottlenecking the incoming embeddings.
     # For embed_in_dim=32, yields [32, 48, 64] (multiples of 16 for JAX vector alignment)
-    root.add_discrete_param(
+    out_dim_param = root.add_discrete_param(
         "out_dim",
-        feasible_values=[embed_in_dim, int(embed_in_dim * 1.5), embed_in_dim * 2]
+        feasible_values=feasible_out_dim
     )
+    ## ths will be applied to out_dim which is out_features in GraphRanker.  max value allowed is 2*out_features
+    root.add_float_param("mlp_hidden_dim", min_value=0.5, max_value=2.0)
 
     # Deduplicated edge embedding dimension logic
     # For embed_in_dim=32, yields [8, 16, 24]
@@ -220,7 +224,7 @@ def sync_hyperparams(params_dict) -> Dict[str, Union[int, float]]:
     # Others initialize with zeros
     sync_keys = ["top_k", "num_layers", "num_heads", "hidden_dim",
         "max_history","num_candidates", "learning_rate", "weight_decay", "out_dim",
-        "edge_embed_dim","dropout_rate", "temperature"]
+        "mlp_hidden_dim", "edge_embed_dim","dropout_rate", "temperature"]
     num_keys = len(sync_keys)
     if jax.process_index() == 0:
         #extract ParameterValue to primitives:

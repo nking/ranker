@@ -10,6 +10,7 @@ class GraphRanker(nnx.Module):
             num_candidates: int,
             hidden_features: int = 128, num_layers: int = 2,
             out_features: int = 64, heads: int = 4, edge_embed_dim:int=8,
+            mlp_hidden_dim : float = 0.5,
             dropout_rate: float = 0.1,
             temperature: float= 0.1,
             rngs: nnx.Rngs = nnx.Rngs(0)):
@@ -19,7 +20,9 @@ class GraphRanker(nnx.Module):
         :param num_layers: number of layers in the GATv2 layer
         :param out_features: output dimension of the score head dense layer
         :param heads: number of attention heads in the GATv2 layer
-        :param edge_embed_dim: typically a value in range 4 to 16. size of output of GATv2 layer
+        :param edge_embed_dim: typically a value in range 4 to 16. size of output of GATv2 layer.
+        :param mlp_hidden_dim the output dimension of the 2 layer MLP that precedes the score head expressed
+            as a multiple of out_features value.
         :param dropout_rate: the dropout probability of a layer in the GATv2 layer
         :param temperature: a factor to use after L2 normalizing the user and candidate representations
         :param rngs: the pseudo random number generator
@@ -49,10 +52,24 @@ class GraphRanker(nnx.Module):
             rngs=rngs
         )
 
+        # nearest multiple of 8, then lower bound of 16
+        mlp_hidden_dim_int = max(16, int(round(mlp_hidden_dim * out_features / 8.0) * 8.0))
+
+        # The Hidden Layer (Accepts U, C, U*C, |U-C|)
+        self.interaction_hidden = nnx.Linear(
+            out_features * 4,
+            mlp_hidden_dim_int,
+            use_bias=True,
+            rngs=rngs,
+            bias_init=nnx.initializers.zeros_init(),
+            kernel_init=nnx.initializers.he_normal() # He init is better for ReLU/GELU
+        )
+
         ## Output projection accepts 4 * out_features (u, c, u*c, |u-c|)
         # pure data paralellism, no sharding of the model:
         self.score_head = nnx.Linear(
-            out_features * 4,1,
+            mlp_hidden_dim_int,
+            1,
             use_bias=False,
             kernel_init=nnx.initializers.lecun_normal(),
             rngs=rngs,
@@ -129,7 +146,7 @@ class GraphRanker(nnx.Module):
         user_reprs = node_repr[user_indices]
         cand_reprs = node_repr[cand_indices]
 
-        # 1. NaN-Safe L2 Normalization (epsilon INSIDE the square root)
+        # NaN-Safe L2 Normalization (epsilon INSIDE the square root)
         def safe_l2_normalize(x, eps=1e-8):
             norm = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True) + eps)
             return x / norm
@@ -139,15 +156,31 @@ class GraphRanker(nnx.Module):
 
         user_expanded = jnp.repeat(user_norm, self.num_candidates, axis=0)
 
-        # Explicit Cross-Encoder Matching Terms
         dot_product = user_expanded * cand_norm         #element-wise cosine similarity
         abs_diff = jnp.sqrt(jnp.square(user_expanded - cand_norm) + 1e-8) #prevents gradient explosion if values diffs are 0
 
-        # Concatenate into a Lean Matching Vector [U, C, U*C, |U-C|]
+        ## Concatenate into a Lean Matching Vector [U, C, U*C, |U-C|]
         matching_vector = jnp.concatenate([user_expanded, cand_norm, dot_product, abs_diff], axis=-1)
 
+        ## the following was used for linear interaction for a 2 * out_features improvement in rumtime.
+        ## the savings during training is nearly negigible though if the T4x2 GPUs are used because the bottleneck is loading data onto the GPUs
+        ## and then the math is done extremely quickly.
+        ## so commenting out this linear interaction to add a non-linear interaction using 1 2 layer MLP
         # Single Bias-Free Linear Projection + Temperature Scaling
-        scores = self.score_head(matching_vector)
+        #scores = self.score_head(matching_vector)
+        #scores = jnp.squeeze(scores, axis=-1) / self.temperature
+
+        hidden = self.interaction_hidden(matching_vector)
+
+        # Apply non-linearity (GELU is standard for modern recsys, ReLU is slightly faster on CPU)
+        hidden = nnx.gelu(hidden)
+
+        # Project to final scalar score
+        scores = self.score_head(hidden)
+
+        # --- SCALING ---
         scores = jnp.squeeze(scores, axis=-1) / self.temperature
+
+        return scores
 
         return scores

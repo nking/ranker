@@ -241,6 +241,7 @@ class TestRanker(unittest.TestCase):
             os.environ[k] = v
 
         ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY, use_gcs_uri=True)
+        #ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.FULL, use_gcs_uri=True)
 
         self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]
         self.ratings_val_liked_uri = ratings_uri_dict["val_liked"]
@@ -429,7 +430,6 @@ class TestRanker(unittest.TestCase):
 
         #overriding the train, val, test liked datasets to make sure have all tiers in training.
         ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY3, use_gcs_uri=True)
-
         config["ratings_train_liked_uri"] = ratings_uri_dict["train_liked"]
         config["ratings_val_liked_uri"] = ratings_uri_dict["val_liked"]
         config["ratings_test_liked_uri"] = ratings_uri_dict["test_liked"]
@@ -546,7 +546,7 @@ class TestRanker(unittest.TestCase):
 
         hparams = {'top_k': 20, 'num_layers': 2, 'num_heads': 4, 'hidden_dim': 128,
             'max_history': 70, 'num_candidates': 70, 'learning_rate': 0.001,
-            'weight_decay': 0.001, 'out_dim': 32, 'edge_embed_dim': 16, 'dropout_rate': 0.2,
+            'weight_decay': 0.001, 'out_dim': 32, 'mlp_hidden_dim':0.5, 'edge_embed_dim': 16, 'dropout_rate': 0.2,
             'temperature' : 0.1}
         config.update(hparams)
         
@@ -797,6 +797,7 @@ class TestRanker(unittest.TestCase):
         config['hidden_dim'] = 64
         config['num_layers'] = 2
         config['out_dim'] = 32
+        config['mlp_hidden_dim'] = 0.5,
         config['num_heads'] = 4
         config['edge_embed_dim'] = 8
         config['dropout_rate'] = 0.05
@@ -810,6 +811,7 @@ class TestRanker(unittest.TestCase):
             out_features=config['out_dim'],
             heads=config['num_heads'],
             edge_embed_dim=config['edge_embed_dim'],
+            mlp_hidden_dim=config['mlp_hidden_dim'],
             dropout_rate=config['dropout_rate'],
             temperature=config['temperature'],
             rngs=rngs)
