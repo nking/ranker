@@ -178,9 +178,7 @@ class GraphRanker(nnx.Module):
         # Project to final scalar score
         scores = self.score_head(hidden)
 
-        # --- SCALING ---
+        # --- temperature SCALING ---
         scores = jnp.squeeze(scores, axis=-1) / self.temperature
-
-        return scores
 
         return scores
