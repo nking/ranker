@@ -286,6 +286,8 @@ def define_flags():
     flags.DEFINE_integer("out_dim", default=32,
         help="output dimension of the score head dense layer in GraphRanker"
     )
+    flags.DEFINE_float("focal_loss_gamma", default=2.0, help="power used in the focal loss used only in training")
+
     flags.DEFINE_integer("hidden_dim", default=64,
         help="size of hidden layers per head in the GATv2 layer of GraphRanker"
     )

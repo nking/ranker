@@ -155,6 +155,9 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:in
     # Dropout range [0.10, 0.40] to stabilize GNN message passing
     root.add_discrete_param("dropout_rate", feasible_values=[round(i * 0.05, 2) for i in range(2, 9)])
 
+    #feasible_gammas = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0]
+    root.add_discrete_param('focal_loss_gamma', feasible_values=[0.5, 2.0, 4.0], default_value=2.0)
+
     problem.metric_information.append(
         vz.MetricInformation(name=f'composite_ndcg_{top_k}',
         goal=vz.ObjectiveMetricGoal.MAXIMIZE)
@@ -224,7 +227,7 @@ def sync_hyperparams(params_dict) -> Dict[str, Union[int, float]]:
     # Others initialize with zeros
     sync_keys = ["top_k", "num_layers", "num_heads", "hidden_dim",
         "max_history","num_candidates", "learning_rate", "weight_decay", "out_dim",
-        "mlp_hidden_dim", "edge_embed_dim","dropout_rate", "temperature"]
+        "mlp_hidden_dim", "edge_embed_dim","dropout_rate", "temperature", "focal_loss_gamma"]
     num_keys = len(sync_keys)
     if jax.process_index() == 0:
         #extract ParameterValue to primitives:
@@ -358,7 +361,8 @@ def run_tune(config):
       
         # if worker_Rank !=0, then mlflow_run_id is ""
         best_val_composite_ndcg_k, mlflow_run_id = run_train_phase(config2,
-            movie_tiers=movie_tiers, movie_offset=movie_offset, trial=trial_suggestion,
+            movie_tiers=movie_tiers, movie_offset=movie_offset,
+            trial=trial_suggestion,
             save_checkpoints=False)
         
         if worker_rank == 0:
