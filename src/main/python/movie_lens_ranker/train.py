@@ -147,28 +147,59 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
 
 @nnx.jit
 def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
-        optimizer: nnx.Optimizer) -> Array:
+               optimizer: nnx.Optimizer,
+               movie_tiers:np.ndarray, movie_offset:int = 6040+1,
+               tier_weights_config: jnp.ndarray = jnp.array([0.25, 0.55, 0.2]),
+               focal_loss_gamma: float = 2.0,
+               ) -> Array:
     """
     train step over a batch, where padded_graph contains super graph of the batch
-    :param model:
-    :param padded_graph:
-    :param optimizer:
-    :return:
+    :param movie_offset:  offset from 0 of movie_ids
+    :param movie_tiers: 0, 1, 2 for head, torso, tail respectively
+    :param tier_weights_config: weights for each movie_tier.  will be normalized to sum to 1.
+    :param model: the GRaphRankr model to be trained
+    :param padded_graph: the input super padded graph of enriched user history and contrastive list of positive and hard negatives.
+    :param optimizer: an algorithm that updates a model's internal trainable parameters (such as weights and biases)
+    to minimize or maximize an objective function (such as a loss function).
+    :param focal_loss_gamma : the power to use in focal loss
+    :return: the loss calculated as an in-batch softmax loss weighted by a muliplicative combaintion of focal loss and Inverse propensity weighting
     """
 
     #debug_weight_before = jnp.linalg.norm(model.score_head.kernel.get_value())
 
+    normalized_weights = tier_weights_config / jnp.sum(tier_weights_config)
+
     def loss_fn(model, padded_graph) -> Array:
+
+        # adding focal loss and IPW (Inverse Propensity Weighting) to train, but not eval.
+        # adding them to given more attention to rare tail elements.
 
         scores_2d, labels_2d, main_mask, cand_ids_2d = score_and_shape_results(model, padded_graph)
         safe_scores = jnp.where(main_mask, scores_2d, -1e9)
 
-        # Rax Ranking Loss & Metrics
-        # Rax is designed to ignore entries where master_mask is False
+        # FOCAL WEIGHTING ---
+        # Calculate target probability p_t.
+        # scales gradient by hard/easy predictions)
+        probs = jax.nn.softmax(safe_scores, axis=-1)
+        target_probs = jnp.sum(probs * labels_2d, axis=-1, keepdims=True)
+        focal_weights = jnp.power(1.0 - target_probs, focal_loss_gamma)
+
+        # IPW TIER WEIGHTING
+        # Look up tier weight based on target item ID.
+        # scales gradient by catalog frequency tier
+        batch_target_ids = jnp.sum(cand_ids_2d * labels_2d, axis=1) - movie_offset
+        safe_target_ids = jnp.clip(batch_target_ids, 0, normalized_weights.shape[0] - 1)
+        batch_target_tiers = movie_tiers[safe_target_ids]
+        ipw_weights = normalized_weights[batch_target_tiers][:, None]
+
+        # COMBINED LOSS
+        combined_weights = focal_weights * ipw_weights
+
         loss = rax.softmax_loss(
             scores=safe_scores,
             labels=labels_2d,
             where=main_mask,
+            weights=combined_weights,
             reduce_fn=jnp.mean
         )
         return loss
@@ -195,7 +226,9 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
 
 @nnx.jit(static_argnames=('top_k',))
 def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
-    movie_tiers:np.ndarray, movie_offset:int, top_k:int) -> dict[str, Array]:
+    movie_tiers:np.ndarray, movie_offset:int,
+    tier_weights_config: jnp.ndarray = jnp.array([0.25, 0.55, 0.2]),
+    top_k:int=20) -> dict[str, Array]:
     """
     train step over a batch, where padded_graph contains super graph of the batch
     :param model:
@@ -204,6 +237,7 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         head, torso, tail, respectively of the movie frequency distribution (where distribution
         was determined from train dataset).
     :param movie_offset: offset from 0 of movie_ids
+    :param tier_weights_config : holds the weights of the tiers head, torso, and tail, respectively.  They will be normalized to sum to 1 if not already.
     :param top_k:
     :return: dictionary with keys:
         "loss",
@@ -218,9 +252,10 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     """
 
     #FIXED values decided in the TwoTowerDNN bi-encoder:
-    w_head:float=0.25
-    w_torso:float=0.55
-    w_tail:float=0.2
+    normalized_weights = tier_weights_config / jnp.sum(tier_weights_config)
+    w_head:float= normalized_weights[0] # 0.25
+    w_torso:float= normalized_weights[1] # 0.55
+    w_tail:float= normalized_weights[2]  # 0.2
 
     #shapes: (total number of graphs including dummy grpahs, model.num_candidates).
     # main_mask is True for real data and False for dummy graph data
@@ -341,12 +376,14 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
 
     device_iterator = enumerate(_async_device_prefetcher(val_dataloader_iter, buffer_size=2))
 
+    tier_weights_config : jnp.ndarray = jnp.array([0.25, 0.55, 0.2])
+
     for loop_idx, padded_super_graph in device_iterator:
 
         #each n_node in array is (1 + n_real_history + n_candidates)
         n_samples_tot += sum(padded_super_graph.n_node)
 
-        val_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, top_k)
+        val_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, tier_weights_config, top_k)
         
         # val_metrics['ndcg_20'] is now an array of shape (Num_Batches,)
         local_avg_val_metrics = jax.tree.map(jnp.mean, val_metrics)
@@ -434,7 +471,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         val_dataloader: grain.DataLoader,
         optimizer: nnx.Optimizer,
         top_k:int, latest_checkpoint_uri: str, best_checkpoint_uri:str,
-        rngs:nnx.Rngs, config_dict:Dict[str, Union[str, int, float]],
+        rngs:nnx.Rngs,
+        config_dict:Dict[str, Union[str, int, float]],
         movie_tiers:np.ndarray, movie_offset:int,
         trial: Trial = None, save_checkpoints: bool=False,
         restored_train_dataloader_iter=None, restored_global_step:int=None,
@@ -543,6 +581,9 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     
     data_mesh = jax.sharding.Mesh(jax.devices(), axis_names=('data',))
     data_sharding = jax.sharding.NamedSharding(data_mesh, P("data"))
+
+    tier_weights_config : jnp.ndarray = jnp.array([0.25, 0.55, 0.2])
+    focal_loss_gamma = config_dict['focal_loss_gamma']
     
     jax_graph_comp_dict = calc_number_jax_graph_components(config_dict['batch_size'],
         config_dict['max_history'], config_dict['num_candidates'], n_local_devices=n_local_devices)
@@ -569,7 +610,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
         last_epoch = epoch
 
-        loss = train_step(model, padded_super_graph, optimizer)
+        loss = train_step(model, padded_super_graph, optimizer, movie_tiers=movie_tiers, movie_offset=movie_offset,
+            tier_weights_config=tier_weights_config, focal_loss_gamma=focal_loss_gamma)
         
         epoch_avg_train_loss.append(loss)
         
@@ -586,7 +628,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             epoch_avg_train_loss.clear()
             
             model.eval()
-            train_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, top_k)
+            train_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, tier_weights_config, top_k)
             
             # val_dataloader is also sharded, so don't isolate this to only shard 0.
             # Also, this is synced across all shards, so all shards have same conditional logic for global_avg_val_metrics below here
@@ -855,7 +897,7 @@ def run_train_phase(config: dict, movie_tiers:np.ndarray, movie_offset:int, tria
         'ratings_train_liked_uri',
         'ratings_train_3_uri', 'ratings_train_disliked_uri',
         'ratings_val_liked_uri', 'ratings_val_3_uri',
-        'ratings_val_disliked_uri',
+        'ratings_val_disliked_uri', 'focal_loss_gamma',
         'max_history', 'num_epochs', 'batch_size', 'seed'}
     for key in req_keys:
         if key not in config:
@@ -1238,7 +1280,7 @@ def resume_train_fn(config: dict, trial: Trial=None, save_checkpoints: bool=Fals
         'ratings_train_3_uri', 'ratings_train_disliked_uri',
         'ratings_val_liked_uri', 'ratings_val_3_uri',
         'ratings_val_disliked_uri',
-        'movie_tiers_uri',
+        'movie_tiers_uri', 'focal_loss_gamma',
         'max_history', 'num_epochs', 'batch_size', 'seed'}
     for key in req_keys:
         if key not in config:
