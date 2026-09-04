@@ -1,5 +1,3 @@
-- consider changing next_64 to next_8 in the calculation of max_edges, max_nodes, and max_graphs
-
 - make the code for inputs to monitoring:
    input data
    input features
@@ -13,9 +11,6 @@
         - earth movers distance
         - jenson-shannon divergence
    - also see notes below to use tfdv etc
-
--- download antigravity for linux
-   and wire it up to use local Gemma model
 
 - consider storing the arguments used to construct GraphRanker
   in the exported metadata json file.
