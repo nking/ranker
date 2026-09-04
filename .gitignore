@@ -5,6 +5,8 @@ __pycache__/
 *logs*txt
 hpo_results.txt
 
+TMP*/
+
 # Visual Studio Code local folder
 .vscode/*
 # BUT keep these specific files often shared

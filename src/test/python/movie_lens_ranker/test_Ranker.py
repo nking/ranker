@@ -240,7 +240,7 @@ class TestRanker(unittest.TestCase):
         for k, v in dotenv_values(env_file).items():
             os.environ[k] = v
 
-        ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY, use_gcs_uri=True)
+        ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY3, use_gcs_uri=True)
         #ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.FULL, use_gcs_uri=True)
 
         self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]
@@ -427,12 +427,6 @@ class TestRanker(unittest.TestCase):
         config['project_id'] =  'tune-unittest-best'
         config['mlflow_experiment_name'] = config['study_name']
         config['connections_check'] = 0
-
-        #overriding the train, val, test liked datasets to make sure have all tiers in training.
-        ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY3, use_gcs_uri=True)
-        config["ratings_train_liked_uri"] = ratings_uri_dict["train_liked"]
-        config["ratings_val_liked_uri"] = ratings_uri_dict["val_liked"]
-        config["ratings_test_liked_uri"] = ratings_uri_dict["test_liked"]
 
         self.delete_vizier_project(config['vizier_endpoint'], config['project_id'], config['study_name'])
 

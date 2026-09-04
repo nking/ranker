@@ -1,3 +1,8 @@
+2026-09-04 11:14:01.553256: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2026-09-04 11:14:01.602227: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2026-09-04 11:14:03.576313: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+
 MetaGraphDef with tag-set: 'serve' contains the following SignatureDefs:
 
 signature_def['__saved_model_init_op']:
@@ -50,7 +55,7 @@ signature_def['serving_default_examples']:
         shape: (-1, 32)
         name: StatefulPartitionedCall_4:0
   Method name is: tensorflow/serving/predict
-The MetaGraph with tag set ['serve'] contains the following ops: {'DisableCopyOnRead', 'Timestamp', 'NotEqual', 'ReadVariableOp', 'HashTableV2', 'Reshape', 'Mul', 'NoOp', 'OneHot', 'FloorMod', 'Tile', 'Identity', 'Pack', 'Cos', 'SelectV2', 'SaveV2', 'Prod', 'VarIsInitializedOp', 'Squeeze', 'AddV2', 'Where', 'StaticRegexReplace', 'ExpandDims', 'RealDiv', 'Less', 'UnsortedSegmentSum', 'Sum', 'ShardedFilename', 'Sub', 'Range', 'StringJoin', 'Rsqrt', 'FloorDiv', 'Shape', 'IdentityN', 'StringSplitV2', 'BroadcastTo', 'Equal', 'Minimum', 'PlaceholderWithDefault', 'Placeholder', 'Max', 'StaticRegexFullMatch', 'StridedSlice', 'Cumprod', 'Square', 'Fill', 'LookupTableImportV2', 'MergeV2Checkpoints', 'VarHandleOp', 'ConcatV2', 'Const', 'Sin', 'AssignVariableOp', 'StatefulPartitionedCall', 'Sigmoid', 'Cast', 'RestoreV2', 'LookupTableFindV2', 'RaggedTensorToTensor', 'ParseExampleV2', 'MatMul', 'GatherV2', 'Cumsum', 'Maximum', 'Select'}
+The MetaGraph with tag set ['serve'] contains the following ops: {'Pack', 'OneHot', 'Mul', 'ConcatV2', 'PlaceholderWithDefault', 'StringSplitV2', 'LookupTableFindV2', 'Where', 'Cast', 'Const', 'Fill', 'DisableCopyOnRead', 'Sin', 'Select', 'Square', 'FloorDiv', 'SaveV2', 'LookupTableImportV2', 'MergeV2Checkpoints', 'BroadcastTo', 'Less', 'Rsqrt', 'IdentityN', 'StaticRegexFullMatch', 'SelectV2', 'Elu', 'Sub', 'StaticRegexReplace', 'MatMul', 'RestoreV2', 'Tile', 'VarHandleOp', 'Mean', 'Cumprod', 'AssignVariableOp', 'ParseExampleV2', 'Sum', 'UnsortedSegmentSum', 'NotEqual', 'Neg', 'StridedSlice', 'StopGradient', 'ExpandDims', 'Max', 'Minimum', 'SquaredDifference', 'Timestamp', 'Maximum', 'StatefulPartitionedCall', 'Cumsum', 'Placeholder', 'RaggedTensorToTensor', 'Sigmoid', 'Shape', 'Squeeze', 'ShardedFilename', 'GatherV2', 'ReadVariableOp', 'Prod', 'NoOp', 'HashTableV2', 'RealDiv', 'Equal', 'VarIsInitializedOp', 'AddV2', 'Reshape', 'FloorMod', 'Range', 'StringJoin', 'Identity', 'Cos'}
 
 Concrete Functions:
   Function Name: 'serving_default'
@@ -58,7 +63,7 @@ Concrete Functions:
       Callable with:
         Argument #1
           DType: dict
-          Value: {'timestamp': TensorSpec(shape=(None, 1), dtype=tf.int64, name='timestamp'), 'age': TensorSpec(shape=(None, 1), dtype=tf.int64, name='age'), 'user_id': TensorSpec(shape=(None, 1), dtype=tf.int64, name='user_id'), 'occupation': TensorSpec(shape=(None, 1), dtype=tf.int64, name='occupation'), 'gender': TensorSpec(shape=(None, 1), dtype=tf.string, name='gender'), }
+          Value: {'user_id': TensorSpec(shape=(None, 1), dtype=tf.int64, name='user_id'), 'age': TensorSpec(shape=(None, 1), dtype=tf.int64, name='age'), 'gender': TensorSpec(shape=(None, 1), dtype=tf.string, name='gender'), 'occupation': TensorSpec(shape=(None, 1), dtype=tf.int64, name='occupation'), 'timestamp': TensorSpec(shape=(None, 1), dtype=tf.int64, name='timestamp'), }
 
   Function Name: 'serving_default_examples'
     Option #1
