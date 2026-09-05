@@ -174,6 +174,8 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         # adding focal loss and IPW (Inverse Propensity Weighting) to train, but not eval.
         # adding them to given more attention to rare tail elements.
 
+        # labels_2d = 1 for target movie_id, else 0
+        # shapes [Batch, model.num_candidates]
         scores_2d, labels_2d, main_mask, cand_ids_2d = score_and_shape_results(model, padded_graph)
         safe_scores = jnp.where(main_mask, scores_2d, -1e9)
 
