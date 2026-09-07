@@ -1,0 +1,11 @@
+{
+    "version": 2,
+    "last_seen_indices": {
+        "0": 6272,
+        "1": 6271
+    },
+    "last_worker_index": 0,
+    "worker_count": 2,
+    "sampler": "BatchSampler(num_records=459586, num_epochs=15,batch_size=1024, shuffle=True, seed=12345shard_options=ShardByJaxProcess(shard_index=0, shard_count=1, drop_remainder=False))",
+    "data_source": "RandomAccessArrayRecordDataSource /tmp/gcs_data/data/ratings_train_liked.array_record"
+}

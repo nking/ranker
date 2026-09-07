@@ -1,0 +1,4 @@
+dcg shape is [batch_size]
+batch_movie_tiers shape is [batch_size 1]
+sample_weight shape is [batch_size 1]
+reshaped into [batch_size]
