@@ -43,7 +43,7 @@ mod graph_builder_tests {
         let user_id_range : (usize, usize) = (1, 6040);
         let movie_id_range : (usize, usize) = (6041, 6041+3883);
 
-        let n_local_devices = 1;
+        let n_local_devices : usize = 1;
 
         let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
 
@@ -56,44 +56,79 @@ mod graph_builder_tests {
         print!("padded_super_graph={:?}", padded_super_graph);
 
         // compare to python version used in training:
-        //editing
+        let output_path = "../../../bin/expected_fake_graph.safetensors";
 
-        let expected_n_node : Vec<i32> = vec![7,  8,  9, 40,  0];
-        let expected_n_edge : Vec<i32> = vec![6,  7,  8, 43,  0];
+        let user_id_range = serde_json::to_string(&user_id_range)
+            .expect("Failed to serialize user_id_range");
+        let movie_id_range = serde_json::to_string(&movie_id_range)
+            .expect("Failed to serialize movie_id_range");
+        let user_embeddings_uri = user_embeddings_uri.replace("parquet", "array_record");
+        let movie_embeddings_uri = movie_embeddings_uri.replace("parquet", "array_record");
 
-        let expected_senders : Vec<i32> = vec![1,  0,  0,  0,  0,  0,  8,  9,  7,  7,  7,  7,  7, 16, 17, 18, 15,
-            15, 15, 15, 15, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-            24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-            24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24];
-        let expected_receivers : Vec<i32> = vec![0,  2,  3,  4,  5,  6,  7,  7, 10, 11, 12, 13, 14, 15, 15, 15, 19,
-            20, 21, 22, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-            24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-            24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24];
-        let expected_edge_features : Vec<i32> = vec![3, 0, 0, 0, 0, 0, 4, 5, 0, 0, 0, 0, 0, 3, 4, 3, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let expected_node_ids : Vec<i32> = vec![1, 6042, 6041, 6046, 6047, 6048, 6049,    2, 6043, 6044, 6042, 6046,
-            6047, 6048, 6049,    3, 6044, 6045, 6046, 6043, 6046, 6047, 6048, 6049,
-            0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-            0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-            0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-            0,    0,    0,    0];
-        let expected_node_labels : Vec<i32> = vec![0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let expected_node_types : Vec<i32> = vec![1, 2, 3, 3, 3, 3, 3, 1, 2, 2, 3, 3, 3, 3, 3, 1, 2, 2, 2, 3, 3, 3,
-            3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let expected_candidate_mask : Vec<bool> = vec![
-            false, false,  true,  true,  true,  true, true, false, false,
-            false, true,  true,  true,  true,  true, false, false, false,
-            false, true,  true,  true,  true,  true, false, false, false,
-            false, false, false, false, false, false, false, false, false,
-            false, false, false, false, false, false, false, false, false,
-            false, false, false, false, false, false, false, false, false,
-            false, false, false, false, false, false, false, false, false,
-            false];
+        // get the conda venv:
+        let python_bin = get_python_path();
 
+        let status = Command::new(&python_bin)
+            .arg("../../../src/test/python/movie_lens_ranker/write_fake_paddedsupergraph.py")
+            .arg("--output_path").arg(output_path)
+            .arg("--user_embeddings_uri").arg(user_embeddings_uri)
+            .arg("--movie_embeddings_uri").arg(movie_embeddings_uri)
+            .arg("--max_history").arg(max_history.to_string())
+            .arg("--batch_size").arg(batch_size.to_string())
+            .arg("--num_candidates").arg(num_candidates.to_string())
+            .arg("--user_id_range").arg(user_id_range)
+            .arg("--movie_id_range").arg(movie_id_range)
+            .arg("--n_local_devices").arg(n_local_devices.to_string())
+            .status()
+            .expect("Failed to execute Python script");
+
+        assert!(status.success());
+
+        // Read output file
+        let buffer = fs::read(output_path).expect("Failed to read safetensors file");
+        let tensors = SafeTensors::deserialize(&buffer).expect("Failed to parse safetensors");
+
+        // Helper closure to pull i32 slices
+        let get_i32_vec = |name: &str| -> Vec<i32> {
+            let tensor = tensors.tensor(name).unwrap();
+            // Convert raw byte slice to i32 slice safely
+            tensor
+                .data()
+                .chunks_exact(4)
+                .map(|chunk| i32::from_ne_bytes(chunk.try_into().unwrap()))
+                .collect()
+        };
+
+        // Helper for 32-bit float vectors
+        let get_f32_vec = |name: &str| -> Vec<f32> {
+            let tensor = tensors.tensor(name).unwrap();
+            tensor
+                .data()
+                .chunks_exact(4)
+                .map(|chunk| f32::from_ne_bytes(chunk.try_into().unwrap()))
+                .collect()
+        };
+
+        let get_bool_vec = |name: &str| -> Vec<bool> {
+            let tensor = tensors.tensor(name).unwrap();
+            tensor
+                .data()
+                .iter()
+                .map(|&byte| byte != 0)
+                .collect()
+        };
+
+        let expected_n_node: Vec<i32> = get_i32_vec("n_node");
+        let expected_n_edge: Vec<i32> = get_i32_vec("n_edge");
+        let expected_senders: Vec<i32> = get_i32_vec("senders");
+        let expected_receivers: Vec<i32> = get_i32_vec("receivers");
+        let expected_edge_features: Vec<i32> = get_i32_vec("edge_features");
+        let expected_node_ids: Vec<i32> = get_i32_vec("node_ids");
+        let expected_node_labels: Vec<i32> = get_i32_vec("node_label");
+        let expected_node_types: Vec<i32> = get_i32_vec("node_type");
+
+        let expected_node_embeddings: Vec<f32> = get_f32_vec("embeddings");
+        let expected_candidate_mask : Vec<bool> = get_bool_vec("candidate_mask");
 
         assert_eq!(padded_super_graph.n_node, expected_n_node);
         assert_eq!(padded_super_graph.n_edge, expected_n_edge);
@@ -105,46 +140,11 @@ mod graph_builder_tests {
         assert_eq!(padded_super_graph.node_types, expected_node_types);
         assert_eq!(padded_super_graph.candidate_mask, expected_candidate_mask);
 
-        /*
-        EXPECTED from python:
-        padded_super_graph_1=
-       GraphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  true,  true,  true, false, false,
-       false,  true,  true,  true,  true,  true, false, false, false,
-       false,  true,  true,  true,  true,  true, false, false, false,
-       false, false, false, false, false, false, false, false, false,
-       false, false, false, false, false, false, false, false, false,
-       false, false, false, false, false, false, false, false, false,
-       false, false, false, false, false, false, false, false, false,
-       false]), 'ids': array([1, 2, 1, 6, 7, 8, 9, 2, 3, 4, 2, 6, 7, 8, 9, 3, 4, 5, 6, 3, 6, 7,
-       8, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-       'label': array([0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
-       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-       'type': array([0, 1, 2, 2, 2, 2, 2, 0, 1, 1, 2, 2, 2, 2, 2, 0, 1, 1, 1, 2, 2, 2,
-       2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      dtype=int32)}, edges={
-      'rating': array([3, 0, 0, 0, 0, 0, 4, 5, 0, 0, 0, 0, 0, 3, 4, 3, 0, 0, 0, 0, 0, 0,
-       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])},
-       receivers=array([ 0,  2,  3,  4,  5,  6,  7,  7, 10, 11, 12, 13, 14, 15, 15, 15, 19,
-       20, 21, 22, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-       24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-       24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24]),
-       senders=array([ 1,  0,  0,  0,  0,  0,  8,  9,  7,  7,  7,  7,  7, 16, 17, 18, 15,
-       15, 15, 15, 15, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-       24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-       24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24]),
-       globals=None,
-       n_node=array([ 7,  8,  9, 40,  0]),
-       n_edge=array([ 6,  7,  8, 43,  0]))
-
-         */
+        assert_slices_nearly_equal(&padded_super_graph.node_embeddings, &expected_node_embeddings, 1E-6);
 
     }
 
-    fn read_user_timestamps(ratings_uri: &str, read_rows: &[i32]) -> (Vec<i32>, Vec<i32>, Vec<i32>, Vec<i64>) {
+    fn read_user_ratings(ratings_uri: &str, read_rows: &[i32]) -> (Vec<i32>, Vec<i32>, Vec<i32>, Vec<i64>) {
         let file = File::open(ratings_uri).expect("Failed to open the parquet file");
 
         // Build the reader without projection.
@@ -236,7 +236,7 @@ mod graph_builder_tests {
         let ratings_uri = ratings_map.get("train_liked").unwrap();
         let rows : Vec<i32> = vec![3, 4];
 
-        let (user_ids, movie_ids, ratings, timestamps) = read_user_timestamps(&ratings_uri, &rows);
+        let (user_ids, movie_ids, ratings, timestamps) = read_user_ratings(&ratings_uri, &rows);
 
         assert!(&6040 >= &user_ids[0] && &1 <= &user_ids[0]);
         assert!(&6040 >= &user_ids[1] && &1 <= &user_ids[1]);

@@ -3,7 +3,6 @@ import json
 from array_record.python import array_record_module
 
 import jraph
-import msgpack
 
 #pip install safetensors==0.8.0
 import numpy as np
@@ -28,7 +27,7 @@ def test_inference_inputs(
         max_history:int=4,
         batch_size:int=2,
         num_candidates:int=5,
-        jax_n_local_devices:int=1) -> jraph.GraphsTuple:
+        jax_n_local_devices:int=1):
     """
     making a graph for inference to compare to rust code graph
     ratings_uri:
