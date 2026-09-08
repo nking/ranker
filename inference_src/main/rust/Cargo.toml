@@ -55,6 +55,7 @@ tonic-prost-build = "0.14.6"
 # Test-only dependencies go here
 polars = { version = "0.54.4", features = ["lazy", "strings", "parquet", "polars-lazy", "is_in"] }
 serial_test = "4.0.1"
+safetensors = "0.8.0"
 
 # Force Cargo to look outside its project root for the test file
 [[test]]

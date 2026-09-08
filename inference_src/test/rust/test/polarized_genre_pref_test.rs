@@ -116,17 +116,17 @@ mod pairwise_pref_tests {
         let proj_dir : String = get_project_dir().unwrap().to_string_lossy().into_owned();
 
         let train_val_liked = vec![
-            format!("{}/src/test/resources/data/ratings_train_liked-00000-of-00001.parquet",  proj_dir),
-            format!("{}/src/test/resources/data/ratings_val_liked-00000-of-00001.parquet", proj_dir)];
+            format!("{}/src/test/resources/data/ratings_train_liked.parquet",  proj_dir),
+            format!("{}/src/test/resources/data/ratings_val_liked.parquet", proj_dir)];
         let train_val_liked: &[&str] = &[&train_val_liked[0], &train_val_liked[1]];
 
         let train_val_disliked = vec![
-            format!("{}/src/test/resources/data/ratings_train_disliked-00000-of-00001.parquet",  proj_dir),
-            format!("{}/src/test/resources/data/ratings_val_disliked-00000-of-00001.parquet", proj_dir)];
+            format!("{}/src/test/resources/data/ratings_train_disliked.parquet",  proj_dir),
+            format!("{}/src/test/resources/data/ratings_val_disliked.parquet", proj_dir)];
         let train_val_disliked: &[&str] = &[&train_val_disliked[0], &train_val_disliked[1]];
 
         let test_liked = vec![
-            format!("{}/src/test/resources/data/ratings_test_liked-00000-of-00001.parquet", proj_dir)];
+            format!("{}/src/test/resources/data/ratings_test_liked.parquet", proj_dir)];
         let test_liked: &[&str] = &[&test_liked[0]];
 
 

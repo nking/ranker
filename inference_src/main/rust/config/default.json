@@ -5,12 +5,12 @@
   "params_json_path": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_single.json",
   "movie_embeddings_path": "../../../src/test/resources/data/movie_emb-00000-of-00001.parquet",
   "ratings_uris": [
-    "../../../src/test/resources/data/ratings_train_liked-00000-of-00001.parquet",
-    "../../../src/test/resources/data/ratings_train_3-00000-of-00001.parquet",
-    "../../../src/test/resources/data/ratings_train_disliked-00000-of-00001.parquet",
-    "../../../src/test/resources/data/ratings_val_liked-00000-of-00001.parquet",
-    "../../../src/test/resources/data/ratings_val_3-00000-of-00001.parquet",
-    "../../../src/test/resources/data/ratings_val_disliked-00000-of-00001.parquet"
+    "../../../src/test/resources/data/ratings_train_liked.parquet",
+    "../../../src/test/resources/data/ratings_train_3.parquet",
+    "../../../src/test/resources/data/ratings_train_disliked.parquet",
+    "../../../src/test/resources/data/ratings_val_liked.parquet",
+    "../../../src/test/resources/data/ratings_val_3.parquet",
+    "../../../src/test/resources/data/ratings_val_disliked.parquet"
   ],
   "user_db_path":"../../../src/test/resources/data/users.bin",
   "movies_path": "../../../src/test/resources/data/movies.parquet",
