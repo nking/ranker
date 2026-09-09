@@ -21,6 +21,7 @@ mod app_config_tests {
             "ranker_metadata_uri" : "./path_to_file",
             "params_json_path": "./params.json",
             "movie_embeddings_path": "./movie_embeddings.bin",
+            "movie_tiers_path" : "./movie_tiers.json",
             "ratings_uris": ["file1.csv", "file2.csv"],
             "ranker_n_local_devices": 2,
             "top_k": 50,

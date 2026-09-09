@@ -9,6 +9,8 @@ pub mod embeddings_util;
 
 pub mod calc_metrics;
 pub mod util;
+
+pub mod movie_tiers;
 pub mod model_client;
 pub mod orchestrator;
 pub mod embeddings_ann;

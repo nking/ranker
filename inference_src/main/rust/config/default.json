@@ -4,6 +4,7 @@
   "ranker_uri": "http://172.17.0.1:8510",
   "params_json_path": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_single.json",
   "movie_embeddings_path": "../../../src/test/resources/data/movie_emb-00000-of-00001.parquet",
+  "movie_tiers_path": "../../../src/test/resources/data/movie_tiers.json",
   "ratings_uris": [
     "../../../src/test/resources/data/ratings_train_liked.parquet",
     "../../../src/test/resources/data/ratings_train_3.parquet",

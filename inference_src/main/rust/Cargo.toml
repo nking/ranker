@@ -125,3 +125,7 @@ path= "../../test/rust/test/tail_user_specificity_test.rs"
 [[test]]
 name = "bayesian_tests"
 path= "../../test/rust/test/bayesian_test.rs"
+
+[[test]]
+name = "movie_tiers"
+path= "../../test/rust/test/movie_tiers_test.rs"

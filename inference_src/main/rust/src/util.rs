@@ -175,4 +175,21 @@ pub fn ceiling_search(arr: &[i64], srch: i64) -> usize {
     }
 }
 
+pub(crate) fn check_path(path_str: &str, description: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let path = std::path::Path::new(path_str);
+    if !path.exists() {
+        // We use canonicalize() to show the absolute path, which helps
+        // debugging when working with relative paths in different environments
+        let full_path = path.canonicalize()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| path.to_string_lossy().to_string());
+
+        eprintln!("CRITICAL ERROR: {} not found.", description);
+        eprintln!("Looked for: {}", full_path);
+
+        return Err(format!("Required file missing: {}", path_str).into());
+    }
+    Ok(())
+}
+
 

@@ -4,6 +4,7 @@ use tonic_health::server::health_reporter;
 use crate::app_config::AppConfig;
 use crate::orchestrator::Orchestrator;
 use crate::pb::recommender_service_server::RecommenderServiceServer;
+use crate::util::{check_path};
 
 pub struct AppRunner {
     config: AppConfig,
@@ -95,30 +96,14 @@ impl AppRunner {
 
         println!("Running from directory: {:?}", std::env::current_dir()?);
 
-        self.check_path(&self.config.params_json_path, "Hyperparameters JSON")?;
-        self.check_path(&self.config.movie_embeddings_path, "Movie Embeddings Binary")?;
+        check_path(&self.config.params_json_path, "Hyperparameters JSON")?;
+        check_path(&self.config.movie_embeddings_path, "Movie Embeddings Binary")?;
 
         // 2. Iterate through the vector of dynamic ratings paths
         for (index, uri) in self.config.ratings_uris.iter().enumerate() {
-            self.check_path(uri, &format!("Ratings File #{}", index + 1))?;
+            check_path(uri, &format!("Ratings File #{}", index + 1))?;
         }
 
-        Ok(())
-    }
-    fn check_path(&self, path_str: &str, description: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let path = std::path::Path::new(path_str);
-        if !path.exists() {
-            // We use canonicalize() to show the absolute path, which helps
-            // debugging when working with relative paths in different environments
-            let full_path = path.canonicalize()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| path.to_string_lossy().to_string());
-
-            eprintln!("CRITICAL ERROR: {} not found.", description);
-            eprintln!("Looked for: {}", full_path);
-
-            return Err(format!("Required file missing: {}", path_str).into());
-        }
         Ok(())
     }
 }

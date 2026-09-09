@@ -66,6 +66,8 @@ mod tail_user_specificity_tests {
 
         let catalog_stats : CatalogStats = build_bayesian_catalog(&movies_map);
 
+        //let movie_tiers = load_movie_tiers(&config.movie_tiers_path);
+
         let ratings_uris = &config.ratings_uris;
         let tmp: Vec<&str> = ratings_uris.iter().map(|s| s.as_str()).collect();
         let slice: &[&str] = tmp.as_slice();
