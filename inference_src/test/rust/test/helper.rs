@@ -187,6 +187,7 @@ pub fn assert_slices_nearly_equal(a: &[f32], b: &[f32], epsilon: f32) {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_python_path() -> PathBuf {
     // Get the user's home directory from environment
     let home_dir = env::var("HOME")

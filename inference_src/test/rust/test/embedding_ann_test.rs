@@ -14,7 +14,6 @@ mod embedding_ann_tests {
     use usearch::ffi::Matches;
     use inference_engine::app_config::AppConfig;
     use inference_engine::embeddings_ann::Searcher;
-    use inference_engine::embeddings_util::read_user_embeddings;
     use crate::embedding_ann_tests::helper::{get_embeddings_uris};
 
     #[tokio::test]
