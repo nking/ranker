@@ -2,8 +2,6 @@
 mod client_tests {
     use std::collections::HashMap;
     use std::error::Error;
-    use std::fs::File;
-    use std::io::BufReader;
     use std::path::PathBuf;
     use serde_json::Value;
     use inference_engine::app_config::AppConfig;
@@ -70,7 +68,6 @@ mod client_tests {
         let _top_k = config.top_k;
         let _user_db_path: PathBuf = config.user_db_path.clone();
         let _persisted_index_path : PathBuf = config.persisted_index_path.clone();
-        let params_json_uri : String = config.params_json_path;
 
         let max_history = ranker_metadata.max_history;
         let num_candidates = ranker_metadata.num_candidates;
@@ -111,10 +108,8 @@ mod client_tests {
         assert!(result.is_ok(), "Failed to get ranks: {:?}", result.err());
 
         let ranks: Vec<f32> = result.unwrap();
-        println!("Received ranks: {}", ranks.len());
-
         // the batch_size * num_candidates are the scored values, all else are dummy scores
-        let ranks : &[f32] = &ranks[0..batch_size * num_candidates];
+        let _ranks : &[f32] = &ranks[0..batch_size * num_candidates];
 
         Ok(())
 
