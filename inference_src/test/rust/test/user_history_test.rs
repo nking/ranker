@@ -10,25 +10,17 @@ mod user_history_tests {
     //   cargo test
 
     mod helper {
+        use inference_engine::calc_metrics::Interaction;
+
         // Tell Rust to literally include the code from helper.rs here
         include!("helper.rs");
+        include!("helper_users.rs");
     }
 
     use polars::prelude::*;
-    use helper::{get_train_val_test_liked_uris, DataSize};
+    use helper::{get_train_val_test_liked_uris, DataSize, load_and_concat_parquet};
 
     use inference_engine::user_history::{build_user_history, UserHistory};
-
-    fn load_and_concat_parquet(paths: &[&str]) -> PolarsResult<LazyFrame> {
-        let frames: Result<Vec<LazyFrame>, _> = paths
-            .iter()
-            .map(|&path| {
-                let pl_path = PlRefPath::from(path);
-                LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())
-            })
-            .collect();
-        concat(frames?, UnionArgs::default())
-    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_user_history_load() -> Result<(), Box<dyn std::error::Error>> {

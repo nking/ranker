@@ -30,6 +30,16 @@ impl fmt::Debug for Searcher {
 
 impl Searcher {
 
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// * `movie_embeddings_uri`: uri to the parquet file containing movie embeddings
+    /// * `num_candidates`: the number of nearest neighbors to search for.
+    /// * `persisted_index_path`: file path to use to persist the index to for fast reloading.
+    ///
+    /// returns: Result<Searcher, Box<dyn Error+Send+Sync, Global>>
+    ///
     // static constructor
     pub fn new(movie_embeddings_uri: &str, num_candidates: usize, persisted_index_path: impl AsRef<Path>)
         -> Result<Self, Box<dyn std::error::Error+ Send + Sync>> {
@@ -53,7 +63,7 @@ impl Searcher {
             movie_embeddings_catalog : movie_embeddings_catalog,
             num_catalog_movies: num_movies,
             embed_len : embed_len,
-            num_candidates : num_candidates,
+            num_candidates: num_candidates,
             persisted_index_path: path_buf,
         })
     }

@@ -35,7 +35,9 @@ mod embedding_ann_tests {
 
         let persisted_index_path: std::path::PathBuf = PathBuf::from("./target/movie_embeddings_indexer");
 
-        let search = Searcher::new(&movie_embeddings_uri, num_candidates, persisted_index_path).unwrap();
+        let k = 100 * num_candidates;
+
+        let search = Searcher::new(&movie_embeddings_uri, k, persisted_index_path).unwrap();
 
         let query_embedding: Vec<f32> = vec![
             0.117549196, 0.238659769, -0.215364203, -0.0403997824, 0.315108567, -0.468034804,
@@ -53,7 +55,7 @@ mod embedding_ann_tests {
         for i in 0..m.len() {
             let candidate_ids = &m[i].keys;
             let _distances = &m[i].distances;
-            assert_eq!(num_candidates,  candidate_ids.len());
+            assert_eq!(k,  candidate_ids.len());
         }
 
 

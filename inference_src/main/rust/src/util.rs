@@ -113,12 +113,28 @@ pub fn next_64(x : usize) -> usize {
 /// ```
 ///
 /// ```
-pub fn sort_by_scores(ids : &[i32], scores : &[f32]) -> (Vec<i32>, Vec<f32>) {
-    let mut indices: Vec<usize> = (0..ids.len()).collect();
-    indices.sort_by(|&a, &b| scores[b].total_cmp(&scores[a]));
-    let sorted_ids: Vec<i32> = indices.clone().into_iter().map(|idx| ids[idx]).collect();
-    let sorted_scores: Vec<f32> = indices.into_iter().map(|idx| scores[idx]).collect();
-    (sorted_ids, sorted_scores)
+pub fn sort_in_place_by_desc_scores(movie_ids : &mut [i32], scores : &mut [f32], num_candidates: usize) {
+
+    movie_ids.chunks_exact_mut(num_candidates)
+        .zip(scores.chunks_exact_mut(num_candidates))
+        .for_each(|(movie_chunk, score_chunk)| {
+
+            let mut paired: Vec<(i32, f32)> = movie_chunk.iter()
+                .zip(score_chunk.iter())
+                .map(|(&id, &score)| (id, score))
+                .collect();
+
+            //  Sort the pairs by score in descending order
+            // Using total_cmp prevents NaN panics and optimizes sorting speed
+            paired.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
+
+            // npack the sorted values back into the original slices in place
+            for (i, (id, score)) in paired.into_iter().enumerate() {
+                movie_chunk[i] = id;
+                score_chunk[i] = score;
+            }
+        });
+
 }
 
 /// get timestamp in seconds for "now".  timestamp is the number of seconds since

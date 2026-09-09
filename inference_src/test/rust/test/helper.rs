@@ -175,6 +175,14 @@ pub fn get_config_json_uri() -> String {
     params_uri
 }
 #[allow(dead_code)]
+pub fn get_tiny_config_json_uri() -> String {
+    let params_uri = get_project_dir()
+        .map(|p| p.join("./inference_src/main/rust/config/default_tiny.json"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .expect("Project directory not found");
+    params_uri
+}
+#[allow(dead_code)]
 pub fn assert_slices_nearly_equal(a: &[f32], b: &[f32], epsilon: f32) {
     assert_eq!(a.len(), b.len(), "Slices have different lengths");
     for (i, (val_a, val_b)) in a.iter().zip(b.iter()).enumerate() {

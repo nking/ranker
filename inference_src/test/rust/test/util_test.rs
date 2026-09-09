@@ -2,7 +2,9 @@
 mod util_tests {
     use std::collections::HashSet;
     //use std::error::Error;
-    use inference_engine::util::{calc_number_jax_graph_components, ceiling_search, sort_by_scores};
+    use inference_engine::util::{calc_number_jax_graph_components, ceiling_search, sort_in_place_by_desc_scores};
+    use crate::util_tests::helper::assert_slices_nearly_equal;
+
     //use super::*;
     mod helper {
         // Tell Rust to literally include the code from helper.rs here
@@ -13,10 +15,9 @@ mod util_tests {
     pub fn test_sort() {
         let ids = vec![10, 20, 30, 40];
         let scores = vec![0.15, 0.92, 0.45, 0.88];
-        let (sorted_ids, sorted_scores) = sort_by_scores(&ids, &scores);
-
-        assert_eq!(ids.len(), sorted_ids.len());
-        assert_eq!(scores.len(), sorted_scores.len());
+        let mut sorted_ids = ids.clone();
+        let mut sorted_scores = scores.clone();
+        sort_in_place_by_desc_scores(&mut sorted_ids, &mut sorted_scores, 4);
 
         let mut set = HashSet::new();
         let mut last_score: f32 = 2.0;
@@ -39,6 +40,23 @@ mod util_tests {
             set.insert(id);
         }
         assert_eq!(set.len(), ids.len());
+    }
+
+    #[test]
+    pub fn test_sort2() {
+        let mut ids = vec![10, 20, 30, 40];
+        let mut scores = vec![0.95, 0.92, 0.45, 0.88];
+
+        let expected_ids = vec![10, 20, 40, 30];
+        let expected_scores = vec![0.95, 0.92, 0.88, 0.45];
+        sort_in_place_by_desc_scores(&mut ids, &mut scores, 2);
+
+        assert_slices_nearly_equal(&scores, &expected_scores, 1E-6);
+
+        for i in 0..ids.len() {
+            assert_eq!(ids[i], expected_ids[i]);
+        }
+        assert_eq!(expected_ids.len(), ids.len());
     }
 
     #[test]
