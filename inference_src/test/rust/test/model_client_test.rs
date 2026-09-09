@@ -47,7 +47,7 @@ mod client_tests {
         assert!(result.is_ok(), "Failed to get embedding: {:?}", result.err());
 
         let embedding = result.unwrap();
-        println!("Received embedding of length: {}", embedding.len());
+        assert_eq!(client.embed_len, embedding.len());
 
         // Assert the expected dimension length (e.g., 128)
         assert!(!embedding.is_empty(), "Embedding vector is empty!");
@@ -59,27 +59,22 @@ mod client_tests {
         let config_path = get_config_json_uri();
         let config = AppConfig::load_from_file(&config_path).unwrap();
 
-        // the default conig is for the batch ranker model, so change to the single inference model:
-        let ranker_metadat_uri = &config.ranker_metadata_uri;
+        // the default confg is for the batch ranker model, so change to the single inference model:
+        let ranker_metadat_uri = config.ranker_metadata_uri;
         let single_uri = ranker_metadat_uri.replace("batch", "single");
 
         let ranker_metadata = RankerModelMetadata::load_from_file(&single_uri).unwrap();
 
-        let client = RankerModelClient::new(config.ranker_uri, ranker_metadata).await;
+        let client = RankerModelClient::new(config.ranker_uri, ranker_metadata.clone()).await;
 
         let _top_k = config.top_k;
         let _user_db_path: PathBuf = config.user_db_path.clone();
         let _persisted_index_path : PathBuf = config.persisted_index_path.clone();
         let params_json_uri : String = config.params_json_path;
 
-        let file = File::open(params_json_uri).unwrap();
-        let reader = BufReader::new(file);
-        let dict: HashMap<String, Value> = serde_json::from_reader(reader)
-            .expect("reading json file of model params into a dictionary");
-
-        let max_history = dict.get("max_history").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let num_candidates = dict.get("num_candidates").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let _num_catalog_users = dict.get("num_catalog_users").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let max_history = ranker_metadata.max_history;
+        let num_candidates = ranker_metadata.num_candidates;
+        let _num_catalog_users = ranker_metadata.num_catalog_users;
 
         // the placeholder mode used:
         //"signature_name": "serving_batch", "batch_size": 256, "max_history": 60, "num_candidates": 60, "max_nodes": 31040, "max_edges": 30784, "max_graphs": 258, "embed_len": 16
@@ -91,7 +86,11 @@ mod client_tests {
 
         let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
 
-        let padded_super_graph : JraphGraph  = create_fake_padded_super_batch(batch_size,
+        let ranker_batch_size : usize = client.metadata.batch_size;
+
+        let padded_super_graph : JraphGraph  = create_fake_padded_super_batch(
+            batch_size,
+            ranker_batch_size,
             max_history, num_candidates, user_id_range,
             movie_id_range, n_local_devices,
             &user_embeddings_uri, &movie_embeddings_uri
@@ -111,11 +110,11 @@ mod client_tests {
 
         assert!(result.is_ok(), "Failed to get ranks: {:?}", result.err());
 
-        let ranks = result.unwrap();
+        let ranks: Vec<f32> = result.unwrap();
         println!("Received ranks: {}", ranks.len());
 
-        // Assert the expected dimension length (e.g., 128)
-        assert!(!ranks.is_empty(), "ranks vector is empty!");
+        // the batch_size * num_candidates are the scored values, all else are dummy scores
+        let ranks : &[f32] = &ranks[0..batch_size * num_candidates];
 
         Ok(())
 

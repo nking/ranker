@@ -172,7 +172,7 @@ impl Orchestrator {
 
         println!("padded graph n_node={:?}", padded_super_graph_arrays.n_node);
 
-        // Send to TFS Ranker model
+        // Send to eployed Ranker model
         let final_response = self.ranker_model.get_candidate_ranks(
             padded_super_graph_arrays,searcher.get_embed_len()).await;
 
@@ -180,6 +180,8 @@ impl Orchestrator {
             Ok(mut ranks) => {
                 // The JAX model returns statically shaped output (max_graphs).
                 // Truncate the padded scores to match the actual number of valid inputs in this chunk.
+                
+                // the padded values are all at the end so truncate can remove them:
                 ranks.truncate(candidate_ids.len());
 
                 Ok(RankedMovies {

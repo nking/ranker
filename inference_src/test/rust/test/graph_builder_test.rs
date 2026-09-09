@@ -47,7 +47,10 @@ mod graph_builder_tests {
 
         let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
 
+        let ranker_batch_size : usize = batch_size;
+        
         let padded_super_graph : JraphGraph  = create_fake_padded_super_batch(batch_size,
+            ranker_batch_size,
             max_history, num_candidates, user_id_range,
             movie_id_range, n_local_devices,
             &user_embeddings_uri, &movie_embeddings_uri

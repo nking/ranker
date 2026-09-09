@@ -122,6 +122,8 @@ mod orchestrator_tests {
 
         let mid_points: Vec<usize> = user_histories.iter()
             .map(|mapentry| mapentry.timestamps.len()/2).collect();
+        
+        
 
         let mock_single_request = UsersRequest {
             user_ids: vec![user_ids[0]],
