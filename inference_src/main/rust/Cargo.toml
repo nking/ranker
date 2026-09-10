@@ -115,6 +115,10 @@ name = "calc_metrics_tests"
 path="../../test/rust/test/calc_metrics_test.rs"
 
 [[test]]
+name = "calc_metrics_2_tests"
+path="../../test/rust/test/calc_metrics_2_test.rs"
+
+[[test]]
 name = "pairwise_pref_tests"
 path= "../../test/rust/test/polarized_genre_pref_test.rs"
 
