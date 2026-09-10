@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 // Assuming your UserRequest is accessible here
 pub mod helper {
+    use std::collections::HashSet;
+
     // Tell Rust to literally include the code from helper.rs here
     include!("helper.rs");
     include!("helper_users.rs");
@@ -122,8 +124,8 @@ mod orchestrator_tests {
 
         let mid_points: Vec<usize> = user_histories.iter()
             .map(|mapentry| mapentry.timestamps.len()/2).collect();
-        
-        
+
+
 
         let mock_single_request = UsersRequest {
             user_ids: vec![user_ids[0]],
