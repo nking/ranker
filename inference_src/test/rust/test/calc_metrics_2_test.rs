@@ -34,7 +34,6 @@ mod calc_metrics_2_tests {
         get_user_movie_tier_map};
     use std::path::PathBuf;
     use std::collections::{HashMap, HashSet};
-    use polars::chunked_array::ops::IsLastDistinct;
     use polars::error::PolarsResult;
     use polars::prelude::{ChunkCompareEq, DataFrame, LazyFrame};
     use tonic::{Request, Response};
@@ -113,8 +112,8 @@ mod calc_metrics_2_tests {
         let test_liked = vec![
             format!("{}/src/test/resources/data/ratings_test_liked.parquet", proj_dir)];
 
-        let (movie_tier_df_map, user_ids, timestamps) : (HashMap<i32, DataFrame>,Vec<i32>, Vec<i64> )
-               = get_user_datastructures(&[&test_liked[0]], &movie_tiers);
+        let (movie_tier_vec_map, user_ids, timestamps) : (Vec<HashMap<i32, HashSet<i32>>>,Vec<i32>, Vec<i64> )
+               = get_user_datastructures(&[&test_liked[0]], &movie_tiers)?;
 
         let user_db : UserDb = UserDb::new(&config.user_db_path).expect("Failed to initialize UserDb from binary path");
 
@@ -142,7 +141,7 @@ mod calc_metrics_2_tests {
             let ranked_movies = results.unwrap().into_inner();
 
             // calc metrics by tier and add to ndcg_tiers and recal_tiers
-            sum_metrics(&movie_tier_df_map, &ranked_movies,
+            sum_metrics(&movie_tier_vec_map, &ranked_movies,
                 &mut ndcg_tiers, &mut recall_tiers, &mut count_tiers);
 
         }
@@ -152,38 +151,13 @@ mod calc_metrics_2_tests {
     }
 
     pub fn sum_metrics(
-        movie_tier_df_map_ref: &HashMap<i32, DataFrame>,
+        movie_tier_vec_map_ref: &Vec<HashMap<i32, HashSet<i32>>>,
         ranked_movies_ref: &RankedMovies,
         ndcg_sum_tiers_ref: &mut [f32],
         recall_sum_tiers_ref: &mut [f32],
         count_tiers_ref: &mut [i32],
     ) -> Result<(), Box<dyn std::error::Error>> {
 
-        // ====================================================================
-        // PRE-COMPUTATION (O(N) Time)
-        // Build a map of user_id -> HashSet<movie_id> for each tier ONCE.
-        // ====================================================================
-        let mut tier_user_gt_maps: Vec<HashMap<i32, HashSet<i32>>> = vec![HashMap::new(); 3];
-
-        for tier in 0i32..3i32 {
-            let Some(df_tier) = movie_tier_df_map_ref.get(&tier) else {
-                continue;
-            };
-
-            let user_ca = df_tier.column("user_id")?.i32()?;
-            let movie_ca = df_tier.column("movie_id")?.i32()?; // Ensure this matches your DF (movie_id vs movie_ids)
-
-            for (u, m) in user_ca.into_no_null_iter().zip(movie_ca.into_no_null_iter()) {
-                tier_user_gt_maps[tier as usize]
-                    .entry(u)
-                    .or_default()
-                    .insert(m);
-            }
-        }
-
-        // ====================================================================
-        // 2. METRIC AGGREGATION
-        // ====================================================================
         let k = ranked_movies_ref.num_candidates as usize;
 
         for (&user_id, predicted_movies) in ranked_movies_ref
@@ -193,7 +167,7 @@ mod calc_metrics_2_tests {
         {
             for tier in 0..3 {
                 // O(1) lookup to get the pre-computed set of movies for this user/tier combo
-                let Some(gt_set) = tier_user_gt_maps[tier].get(&user_id) else {
+                let Some(gt_set) = movie_tier_vec_map_ref[tier].get(&user_id) else {
                     continue; // User has no target movies in this tier
                 };
 
