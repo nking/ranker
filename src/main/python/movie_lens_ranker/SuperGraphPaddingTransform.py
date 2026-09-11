@@ -34,7 +34,7 @@ class SuperGraphPaddingTransform(pgrain.MapTransform):
                 n_node=np.array([total_nodes]),
                 n_edge=np.array([total_edges]),
                 globals=None
-            ))  where he node array lengths are = 1 + n_real_history + n_candidates, and
+            ))  where the node array lengths are = 1 + n_real_history + n_candidates, and
                 the edge array lengths are = n_real_history + n_candidates.
         
         :returns: a padded super graph
@@ -56,7 +56,7 @@ class SuperGraphPaddingTransform(pgrain.MapTransform):
             where dimensions are max_nodes, max_edges, and max_graphs.
             n_node is an array where each element is a graps total_nodes = 1 + n_real_history + n_candidates.
             n_edges is similar but total_edges = n_real_history + n_candidates for each graph.
-            The dummy graphs have 0 in n_node and n_edges.
+            The dummy graphs have 0 in n_node and n_edges and are piled onot end of array.
             user_id is where node_types == 1
             target movie_id is where node_labels == 1
             candidate movies is where types==3
