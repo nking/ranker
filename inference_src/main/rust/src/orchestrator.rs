@@ -106,6 +106,13 @@ impl Orchestrator {
         })
     }
 
+    pub fn get_ranker_model_metadata(&self) -> RankerModelMetadata {
+         self.ranker_model_metadata.clone()
+    }
+    pub fn get_query_model_metadata(&self) -> QueryModelMetadata {
+        self.query_model_metadata.clone()
+    }
+
     pub async fn reload_embeddings(&self, movie_embeddings_uri: &str, num_candidates: usize) -> Result<(), Box<dyn std::error::Error>> {
 
         let uri_owned: String = movie_embeddings_uri.to_string();
@@ -170,7 +177,7 @@ impl Orchestrator {
             self.ranker_n_local_devices
         );
 
-        println!("padded graph n_node={:?}", padded_super_graph_arrays.n_node);
+        //println!("padded graph n_node={:?}", padded_super_graph_arrays.n_node);
 
         // Send to eployed Ranker model
         let final_response = self.ranker_model.get_candidate_ranks(
@@ -180,7 +187,7 @@ impl Orchestrator {
             Ok(mut ranks) => {
                 // The JAX model returns statically shaped output (max_graphs).
                 // Truncate the padded scores to match the actual number of valid inputs in this chunk.
-                
+
                 // the padded values are all at the end so truncate can remove them:
                 ranks.truncate(candidate_ids.len());
 
@@ -211,10 +218,10 @@ impl Orchestrator {
         // length: n_users * num_candidates
         let ann_movie_ids = ann_res.candidate_ids;
 
-        println!("_predict: n_users={}, num_ann_movies={}, num_candidates={}, embed_len={}, n_user_embeddings={}",
-            user_ids.len(), ann_movie_ids.len()/user_ids.len(), self.ranker_model_metadata.num_candidates,
-            self.ranker_model_metadata.embed_len,
-            user_embeddings.len()/self.ranker_model_metadata.embed_len);
+        //println!("_predict: n_users={}, num_ann_movies={}, num_candidates={}, embed_len={}, n_user_embeddings={}",
+        //    user_ids.len(), ann_movie_ids.len()/user_ids.len(), self.ranker_model_metadata.num_candidates,
+        //    self.ranker_model_metadata.embed_len,
+        //    user_embeddings.len()/self.ranker_model_metadata.embed_len);
 
         let mut ranked_movies = self.make_ranker_request(user_ids.clone(),
             user_reqs.timestamps, user_embeddings, ann_movie_ids).await?;
@@ -243,7 +250,7 @@ impl Orchestrator {
         }))
     }
 
-    async fn _approx_nearest_neighbors(&self, req: Request<UsersRequest>) -> Result<Response<ApproxNearestNeighborsResponse>, Status> {
+    pub async fn _approx_nearest_neighbors(&self, req: Request<UsersRequest>) -> Result<Response<ApproxNearestNeighborsResponse>, Status> {
 
         let users_req = req.into_inner();
 
@@ -263,7 +270,9 @@ impl Orchestrator {
         // finds num_candidates approx nearest neighbors
         let searcher = self.searcher.load();
 
-        let k = self.ranker_model_metadata.num_candidates;
+        // get the searcher k if present, else default is num_candidates
+        let k: Option<usize> = users_req.k.map(|val| val as usize);
+        let k = k.unwrap_or(self.ranker_model_metadata.num_candidates);
 
         //TODO: consider limiting this to keep the search quick:
         let max_n_hist : usize = *(n_hists.iter().max().unwrap());
@@ -357,7 +366,7 @@ impl RecommenderService for Orchestrator {
     ///
     /// ```
     async fn approx_nearest_neighbors(&self, req: Request<UsersRequest>) -> Result<Response<ApproxNearestNeighborsResponse>, Status> {
-        return self._approx_nearest_neighbors(req).await;
+        self._approx_nearest_neighbors(req).await
     }
 
     /// predicts top_k movies for a user and returs them as a pairs of movie_id and
@@ -380,7 +389,7 @@ impl RecommenderService for Orchestrator {
 
         let n_users = user_reqs.user_ids.len();
 
-        println!("batch_size={}, n_users={}", batch_size, n_users);
+        //println!("batch_size={}, n_users={}", batch_size, n_users);
 
         if n_users == batch_size {
             return self._predict(Request::new(user_reqs.clone())).await;
@@ -401,7 +410,8 @@ impl RecommenderService for Orchestrator {
                 occupations : user_reqs.occupations[i0..i1].to_vec(),
                 ages : user_reqs.ages[i0..i1].to_vec(),
                 timestamps : user_reqs.timestamps[i0..i1].to_vec(),
-                n_users : (i1 - i0) as u32
+                n_users : (i1 - i0) as u32,
+                k : None
             };
 
             let resp_i = self._predict(Request::new(req_i)).await?;

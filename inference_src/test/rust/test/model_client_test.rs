@@ -36,6 +36,7 @@ mod client_tests {
             ages: vec![25],
             timestamps: vec![1620000000],
             n_users: 1,
+            k : None,
         };
 
         // If the docker container isn't running, or the model isn't loaded,

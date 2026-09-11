@@ -1,4 +1,7 @@
-use polars::prelude::*;
+//use polars::prelude::*;
+
+use polars::df;
+use polars::prelude::{concat, LazyFrame, PlRefPath, PolarsResult, ScanArgsParquet, UnionArgs, DataFrame, SortMultipleOptions, IdxSize, col, len, JoinArgs, JoinType, IntoLazy};
 
 #[allow(dead_code)]
 pub fn load_and_concat_parquet(paths: &[&str]) -> PolarsResult<LazyFrame> {
@@ -95,10 +98,9 @@ pub fn get_unique_user_and_first_timestamp(df: LazyFrame) -> PolarsResult<(Vec<i
 /// * `movie_tier_map_ref`:   reference to hashmap with key=movie_id, value= movie_tier
 ///
 /// returns: Vec<HashMap<i32, HashSet<i32>>>
-pub fn get_user_movie_tier_map(
-    lf: LazyFrame,
+pub fn get_user_movie_tier_map(lf: LazyFrame,
     movie_tier_map_ref: &HashMap<i32, i32>,
-) -> PolarsResult<Vec<HashMap<i32, HashSet<i32>>>> { // Return a PolarsResult to use '?'
+) -> PolarsResult<Vec<HashMap<i32, std::collections::HashSet<i32>>>> {
 
     // Convert the HashMap into a DataFrame
     let movie_ids: Vec<i32> = movie_tier_map_ref.keys().copied().collect();
@@ -115,7 +117,7 @@ pub fn get_user_movie_tier_map(
         .collect()?;
 
     // Initialize the output
-    let mut tier_user_gt_maps: Vec<HashMap<i32, HashSet<i32>>> = vec![HashMap::new(); 3];
+    let mut tier_user_gt_maps: Vec<HashMap<i32, std::collections::HashSet<i32>>> = vec![HashMap::new(); 3];
 
     // Extract the columns as fast Int32Chunked arrays.  these maintain the sam row ordering:
     let user_ca = collected_df.column("user_id")?.i32()?;

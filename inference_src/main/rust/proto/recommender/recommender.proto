@@ -6,6 +6,7 @@ package recommender;
 
 // input requests identifying a list of user and time, supplemented with demographic information.
 // an individual UsersRequest shouldn't contain more than 256 requests, but it won't be strictly enforced.
+// the optional k is for the ANN search.
 message UsersRequest {
   repeated int32 user_ids = 1;
   repeated string genders = 2;
@@ -13,6 +14,7 @@ message UsersRequest {
   repeated int32 ages = 4;
   repeated int64 timestamps = 5;
   uint32 n_users = 6;
+  optional uint32 k = 7;
 }
 
 // input for the graph ranker model
@@ -53,6 +55,6 @@ service RecommenderService {
 
   // request to return all of the candidate_ids, not reordered nor truncated
   rpc RankOnlyReturnAll(RankOnlyRequest) returns (RankedMovies);
-  // request to return return nearest neigbhors of user embedding
+  // request to return return nearest neighbors of user embedding
   rpc ApproxNearestNeighbors(UsersRequest) returns (ApproxNearestNeighborsResponse);
 }

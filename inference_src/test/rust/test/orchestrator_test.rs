@@ -133,7 +133,8 @@ mod orchestrator_tests {
             occupations: vec![users_req.occupations[0]],
             ages: vec![users_req.ages[0]],
             timestamps: vec![user_histories[0].timestamps[mid_points[0]]],
-            n_users: 1
+            n_users: 1,
+            k : None
         };
 
         let tonic_req = tonic::Request::new(mock_single_request);
@@ -160,7 +161,8 @@ mod orchestrator_tests {
             occupations: vec![users_req.occupations[0], users_req.occupations[1]],
             ages: vec![users_req.ages[0], users_req.ages[1]],
             timestamps: vec![user_histories[0].timestamps[mid_points[0]], user_histories[1].timestamps[mid_points[1]]],
-            n_users: 2
+            n_users: 2,
+            k : None
         };
 
         let tonic_req = tonic::Request::new(mock_batch_request);

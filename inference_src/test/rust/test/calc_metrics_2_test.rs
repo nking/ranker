@@ -34,12 +34,12 @@ mod calc_metrics_2_tests {
         get_user_movie_tier_map};
     use std::path::PathBuf;
     use std::collections::{HashMap, HashSet};
-    use polars::error::PolarsResult;
-    use polars::prelude::{ChunkCompareEq, DataFrame, LazyFrame};
+    use std::fs::File;
+    use std::io::Write;
+    use serde_json::{Value};
     use tonic::{Request, Response};
     use inference_engine::app_config::AppConfig;
     use inference_engine::app_runner::AppRunner;
-    use inference_engine::model_client::RankerModelClient;
     use inference_engine::movie_tiers::load_from_file;
     use inference_engine::pb::recommender_service_client::RecommenderServiceClient;
     use inference_engine::pb::{RankedMovies, UsersRequest};
@@ -59,8 +59,6 @@ mod calc_metrics_2_tests {
         let single_uri = ranker_metadat_uri.replace("batch", "single");
 
         let ranker_metadata = RankerModelMetadata::load_from_file(&single_uri).unwrap();
-
-        let client = RankerModelClient::new(config.ranker_uri.clone(), ranker_metadata.clone()).await;
 
         let _top_k = config.top_k;
         let _user_db_path: PathBuf = config.user_db_path.clone();
@@ -94,7 +92,12 @@ mod calc_metrics_2_tests {
         // ===== run tests ==========
 
         if true {
-            calc_tier_stratified_metrics(config.clone(), endpoint).await;
+            let proj_dir : String = get_project_dir().unwrap().to_string_lossy().into_owned();
+            let test_ratings_paths = vec![
+                format!("{}/src/test/resources/data/ratings_test_liked.parquet", proj_dir)];
+            let output_path = format!("{}/bin/test_metrics.json", proj_dir);
+
+            calc_tier_stratified_metrics(config.clone(), endpoint, test_ratings_paths, output_path).await.expect("Error: while calculating metrics");
         }
 
 
@@ -102,18 +105,15 @@ mod calc_metrics_2_tests {
 
     }
 
-    async fn calc_tier_stratified_metrics(config: AppConfig,  endpoint: String) -> Result<(), Box<dyn std::error::Error>> {
+    async fn calc_tier_stratified_metrics(config: AppConfig, endpoint: String,
+        test_ratings_paths: Vec<String>, output_path: String) -> Result<(), Box<dyn std::error::Error>> {
 
         // get the movie_tiers file
         let movie_tiers : HashMap<i32, i32> = load_from_file(&config.movie_tiers_path)?;
 
-        // get the ground truth
-        let proj_dir : String = get_project_dir().unwrap().to_string_lossy().into_owned();
-        let test_liked = vec![
-            format!("{}/src/test/resources/data/ratings_test_liked.parquet", proj_dir)];
-
+        //movie_tier_vec_map: tier -> user_id -> movies
         let (movie_tier_vec_map, user_ids, timestamps) : (Vec<HashMap<i32, HashSet<i32>>>,Vec<i32>, Vec<i64> )
-               = get_user_datastructures(&[&test_liked[0]], &movie_tiers)?;
+               = get_user_datastructures(&[&test_ratings_paths[0]], &movie_tiers)?;
 
         let user_db : UserDb = UserDb::new(&config.user_db_path).expect("Failed to initialize UserDb from binary path");
 
@@ -123,8 +123,10 @@ mod calc_metrics_2_tests {
 
         let client = RecommenderServiceClient::connect(endpoint.clone()).await?;
 
-        let mut ndcg_tiers : Vec<f32> = vec![0.; 3];
-        let mut recall_tiers : Vec<f32> = vec![0.; 3];
+        let mut ndcg_tiers : Vec<f64> = vec![0.; 3];
+        let mut recall_tiers : Vec<f64> = vec![0.; 3];
+        let mut rand_ndcg_tiers : Vec<f64> = vec![0.; 3];
+        let mut rand_recall_tiers : Vec<f64> = vec![0.; 3];
         let mut count_tiers : Vec<i32> = vec![0; 3];
 
         for (chunk_users, chunk_timestamps) in user_ids.chunks(ranker_batch_size).zip(timestamps.chunks(ranker_batch_size)) {
@@ -140,29 +142,92 @@ mod calc_metrics_2_tests {
                 active_client.predict(tonic_req).await;
             let ranked_movies = results.unwrap().into_inner();
 
-            // calc metrics by tier and add to ndcg_tiers and recal_tiers
-            sum_metrics(&movie_tier_vec_map, &ranked_movies,
-                &mut ndcg_tiers, &mut recall_tiers, &mut count_tiers);
+            // calc metrics by tier and add to ndcg_tiers and recall_tiers
+            sum_metrics(&movie_tier_vec_map, &movie_tiers, &ranked_movies,
+                &mut ndcg_tiers, &mut recall_tiers, &mut rand_ndcg_tiers, &mut rand_recall_tiers, &mut count_tiers)?;
 
         }
 
+        // count the tier movies in the test dataset
+        let test_tier_counts : Vec<i32> = count_tier_movies_in_test(movie_tier_vec_map);
+        let movie_catalog_tier_counts : Vec<i32> = count_tier_movies_in_catalog(movie_tiers);
+
+        // write to outpath : String as json file and print pretty here
+        let tier_names = ["head", "torso", "tail"];
+        let top_k = config.top_k;
+        let mut results_map = serde_json::Map::new();
+        for tier in 0..3 {
+            let count = count_tiers[tier];
+            let mean_ndcg = if count == 0 {0.} else {ndcg_tiers[tier] / count as f64};
+            let mean_recall = if count == 0 {0.} else {recall_tiers[tier] / count as f64};
+            let mean_rand_ndcg = if count == 0 {0.} else {rand_ndcg_tiers[tier] / count as f64};
+            let mean_rand_recall = if count == 0 {0.} else {rand_recall_tiers[tier] / count as f64};
+            let tier_name = tier_names[tier];
+
+            results_map.insert(format!("ndcg_{}_{}", tier_name, top_k), Value::from(mean_ndcg));
+            results_map.insert(format!("recall_{}_{}", tier_name, top_k), Value::from(mean_recall));
+            results_map.insert(format!("random_ndcg_{}_{}", tier_name, top_k), Value::from(mean_rand_ndcg));
+            results_map.insert(format!("random_recall_{}_{}", tier_name, top_k), Value::from(mean_rand_recall));
+            results_map.insert(format!("count_users_{}_{}", tier_name, top_k), Value::from(count));
+
+            results_map.insert(format!("count_test_{}", tier_name), Value::from(test_tier_counts[tier]));
+            results_map.insert(format!("count_movie_catalog_{}", tier_name), Value::from(movie_catalog_tier_counts[tier]));
+        }
+
+        // Format as pretty-printed JSON string
+        let pretty_json = serde_json::to_string_pretty(&results_map)?;
+
+        // Print to stdout
+        println!("{}", pretty_json);
+
+        // Write to file
+        let mut file = File::create(&output_path)?;
+        file.write_all(pretty_json.as_bytes())?;
 
         Ok(())
     }
 
+    fn count_tier_movies_in_catalog(movie_tiers : HashMap<i32, i32>) -> Vec<i32> {
+        let mut counts : Vec<i32> = vec![0; 3];
+        for (_u, t) in movie_tiers {
+            counts[t as usize] += 1;
+        }
+        counts
+    }
+
+    fn count_tier_movies_in_test(movie_tier_vec_map: Vec<HashMap<i32, HashSet<i32>>>) -> Vec<i32> {
+
+        let mut counts : Vec<i32> = vec![0; 3];
+        let mut tier_set = std::collections::HashSet::new();
+        for tier in 0..3 {
+            for inner_set in movie_tier_vec_map[tier].values() {
+                tier_set.extend(inner_set.iter().copied());
+            }
+            counts[tier] = tier_set.len() as i32;
+            tier_set.clear();
+        }
+        counts
+    }
+
     pub fn sum_metrics(
         movie_tier_vec_map_ref: &Vec<HashMap<i32, HashSet<i32>>>,
+        movie_tiers_ref : &HashMap<i32, i32>,
         ranked_movies_ref: &RankedMovies,
-        ndcg_sum_tiers_ref: &mut [f32],
-        recall_sum_tiers_ref: &mut [f32],
+        ndcg_sum_tiers_ref: &mut [f64],
+        recall_sum_tiers_ref: &mut [f64],
+        rand_ndcg_sum_tiers_ref: &mut [f64],
+        rand_recall_sum_tiers_ref: &mut [f64],
         count_tiers_ref: &mut [i32],
     ) -> Result<(), Box<dyn std::error::Error>> {
 
         let k = ranked_movies_ref.num_candidates as usize;
+        let catalog_size = movie_tiers_ref.len() as f64;
 
-        for (&user_id, predicted_movies) in ranked_movies_ref
-            .user_ids
-            .iter()
+        // Pre-calculate the maximum possible DCG for K items (used for analytical random NDCG)
+        // This is sum(1 / log2(rank + 1)) for all K ranks
+        let max_k_dcg: f64 = (0..k).map(|r| 1.0 / (r as f64 + 2.0).log2()).sum();
+
+        for (&user_id, predicted_movies) in ranked_movies_ref.user_ids.iter()
             .zip(ranked_movies_ref.movie_ids.chunks_exact(k))
         {
             for tier in 0..3 {
@@ -175,30 +240,40 @@ mod calc_metrics_2_tests {
                     continue;
                 }
 
+                let gt_len = gt_set.len() as f64;
+                let max_possible_hits = std::cmp::min(gt_set.len(), predicted_movies.len());
+
                 // --- Recall ---
                 let hits = predicted_movies.iter().filter(|id| gt_set.contains(id)).count();
-                let max_possible_hits = std::cmp::min(gt_set.len(), predicted_movies.len());
-                let recall = hits as f32 / max_possible_hits as f32;
+                let recall = hits as f64 / max_possible_hits as f64;
 
                 // --- NDCG ---
-                let mut dcg: f32 = 0.0;
+                let mut dcg: f64 = 0.0;
                 for (rank_idx, movie_id) in predicted_movies.iter().enumerate() {
                     if gt_set.contains(movie_id) {
-                        // FIX: + 2.0 prevents log2(1.0) == 0.0 division by zero panic
-                        dcg += 1.0 / (rank_idx as f32 + 2.0).log2();
+                        dcg += 1.0 / (rank_idx as f64 + 2.0).log2();
                     }
                 }
-
-                let mut idcg: f32 = 0.0;
+                let mut idcg: f64 = 0.0;
                 for rank_idx in 0..max_possible_hits {
-                    idcg += 1.0 / (rank_idx as f32 + 2.0).log2();
+                    idcg += 1.0 / (rank_idx as f64 + 2.0).log2();
                 }
+                let ndcg: f64 = if idcg == 0.0 { 0.0 } else { dcg / idcg };
 
-                let ndcg: f32 = if idcg == 0.0 { 0.0 } else { dcg / idcg };
+                // baseline metrics, calculate for random ordering and selection,
+                // that is,
+                // a uniform random ranker
+                let expected_rand_recall = gt_len.max(k as f64) / catalog_size;
+
+                // Expected Random DCG = (|GT| / N) * max_k_dcg
+                let expected_rand_dcg = (gt_len / catalog_size) * max_k_dcg;
+                let expected_rand_ndcg = if idcg == 0.0 { 0.0 } else { expected_rand_dcg / idcg };
 
                 // --- Accumulate ---
                 recall_sum_tiers_ref[tier] += recall;
                 ndcg_sum_tiers_ref[tier] += ndcg;
+                rand_recall_sum_tiers_ref[tier] += expected_rand_recall;
+                rand_ndcg_sum_tiers_ref[tier] += expected_rand_ndcg;
                 count_tiers_ref[tier] += 1;
             }
         }
