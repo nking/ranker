@@ -11,7 +11,7 @@ use std::path::Path;
 use futures::future::join_all;
 use crate::util;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UserMapEntry {
     pub movie_ids: Vec<i32>,
     pub ratings: Vec<i32>,

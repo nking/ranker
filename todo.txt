@@ -1,3 +1,13 @@
+- consider making an OpenAPI/Swagger v3 specification openapi.yaml file
+  and make it discoverable at the inference endpoint as /spec.
+  then a google adk agent can fetch the spec and process it with
+  OpenAPIToolset
+  response = httpx.get("http://endpoint/spec")
+  spec_content = response.text
+  toolset = OpenAPIToolset(spec_str=spec_content, spec_str_type="yaml")
+  api_tools = toolset.get_tools()
+  - also consider example of config for ADK McpToolset
+
 - make the code for inputs to monitoring:
    input data
    input features

@@ -22,28 +22,35 @@ mod graph_builder_tests {
     //use parquet::arrow::ParquetRecordBatchStreamBuilder;
     //use tokio::runtime::Runtime;
 
-    use helper::{get_train_val_test_liked_uris, DataSize};
+    use helper::{get_train_val_test_liked_uris, DataSize, get_python_path};
     use inference_engine::embeddings_util::{read_movie_embeddings, read_user_embeddings, get_user_embeddings};
     use inference_engine::graph_builder::{build_enriched_padded_supergraph, create_fake_padded_super_batch, JraphGraph};
     use inference_engine::user_history::{build_user_history, UserHistory};
-    use crate::graph_builder_tests::helper::{get_embeddings_uris};
+    use crate::graph_builder_tests::helper::{assert_slices_nearly_equal, get_embeddings_uris};
+
+    use safetensors::SafeTensors;
+    use std::fs;
+    use std::process::Command;
 
     #[test]
     pub fn test_create_fake_batch() {
 
         // and is a test of build_padded_super_graph
 
-        let batch_size = 3;
-        let max_history = 4;
-        let num_candidates = 5;
-        let user_id_range = (1, 6040);
-        let movie_id_range = (6041, 6041+3883);
+        let batch_size : usize = 3;
+        let max_history: usize = 4;
+        let num_candidates: usize = 5;
+        let user_id_range : (usize, usize) = (1, 6040);
+        let movie_id_range : (usize, usize) = (6041, 6041+3883);
 
-        let n_local_devices = 1;
+        let n_local_devices : usize = 1;
 
         let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
 
+        let ranker_batch_size : usize = batch_size;
+        
         let padded_super_graph : JraphGraph  = create_fake_padded_super_batch(batch_size,
+            ranker_batch_size,
             max_history, num_candidates, user_id_range,
             movie_id_range, n_local_devices,
             &user_embeddings_uri, &movie_embeddings_uri
@@ -51,42 +58,80 @@ mod graph_builder_tests {
 
         print!("padded_super_graph={:?}", padded_super_graph);
 
-        let expected_n_node : Vec<i32> = vec![7,  8,  9, 40,  0];
-        let expected_n_edge : Vec<i32> = vec![6,  7,  8, 43,  0];
+        // compare to python version used in training:
+        let output_path = "../../../bin/expected_fake_graph.safetensors";
 
-        let expected_senders : Vec<i32> = vec![1,  0,  0,  0,  0,  0,  8,  9,  7,  7,  7,  7,  7, 16, 17, 18, 15,
-            15, 15, 15, 15, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-            24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-            24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24];
-        let expected_receivers : Vec<i32> = vec![0,  2,  3,  4,  5,  6,  7,  7, 10, 11, 12, 13, 14, 15, 15, 15, 19,
-            20, 21, 22, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-            24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-            24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24];
-        let expected_edge_features : Vec<i32> = vec![3, 0, 0, 0, 0, 0, 4, 5, 0, 0, 0, 0, 0, 3, 4, 3, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let expected_node_ids : Vec<i32> = vec![1, 6042, 6041, 6046, 6047, 6048, 6049,    2, 6043, 6044, 6042, 6046,
-            6047, 6048, 6049,    3, 6044, 6045, 6046, 6043, 6046, 6047, 6048, 6049,
-            0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-            0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-            0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-            0,    0,    0,    0];
-        let expected_node_labels : Vec<i32> = vec![0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let expected_node_types : Vec<i32> = vec![1, 2, 3, 3, 3, 3, 3, 1, 2, 2, 3, 3, 3, 3, 3, 1, 2, 2, 2, 3, 3, 3,
-            3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let expected_candidate_mask : Vec<bool> = vec![
-            false, false,  true,  true,  true,  true, true, false, false,
-            false, true,  true,  true,  true,  true, false, false, false,
-            false, true,  true,  true,  true,  true, false, false, false,
-            false, false, false, false, false, false, false, false, false,
-            false, false, false, false, false, false, false, false, false,
-            false, false, false, false, false, false, false, false, false,
-            false, false, false, false, false, false, false, false, false,
-            false];
+        let user_id_range = serde_json::to_string(&user_id_range)
+            .expect("Failed to serialize user_id_range");
+        let movie_id_range = serde_json::to_string(&movie_id_range)
+            .expect("Failed to serialize movie_id_range");
+        let user_embeddings_uri = user_embeddings_uri.replace("parquet", "array_record");
+        let movie_embeddings_uri = movie_embeddings_uri.replace("parquet", "array_record");
 
+        // get the conda venv:
+        let python_bin = get_python_path();
+
+        let status = Command::new(&python_bin)
+            .arg("../../../src/test/python/movie_lens_ranker/write_fake_paddedsupergraph.py")
+            .arg("--output_path").arg(output_path)
+            .arg("--user_embeddings_uri").arg(user_embeddings_uri)
+            .arg("--movie_embeddings_uri").arg(movie_embeddings_uri)
+            .arg("--max_history").arg(max_history.to_string())
+            .arg("--batch_size").arg(batch_size.to_string())
+            .arg("--num_candidates").arg(num_candidates.to_string())
+            .arg("--user_id_range").arg(user_id_range)
+            .arg("--movie_id_range").arg(movie_id_range)
+            .arg("--n_local_devices").arg(n_local_devices.to_string())
+            .status()
+            .expect("Failed to execute Python script");
+
+        assert!(status.success());
+
+        // Read output file
+        let buffer = fs::read(output_path).expect("Failed to read safetensors file");
+        let tensors = SafeTensors::deserialize(&buffer).expect("Failed to parse safetensors");
+
+        // Helper closure to pull i32 slices
+        let get_i32_vec = |name: &str| -> Vec<i32> {
+            let tensor = tensors.tensor(name).unwrap();
+            // Convert raw byte slice to i32 slice safely
+            tensor
+                .data()
+                .chunks_exact(4)
+                .map(|chunk| i32::from_ne_bytes(chunk.try_into().unwrap()))
+                .collect()
+        };
+
+        // Helper for 32-bit float vectors
+        let get_f32_vec = |name: &str| -> Vec<f32> {
+            let tensor = tensors.tensor(name).unwrap();
+            tensor
+                .data()
+                .chunks_exact(4)
+                .map(|chunk| f32::from_ne_bytes(chunk.try_into().unwrap()))
+                .collect()
+        };
+
+        let get_bool_vec = |name: &str| -> Vec<bool> {
+            let tensor = tensors.tensor(name).unwrap();
+            tensor
+                .data()
+                .iter()
+                .map(|&byte| byte != 0)
+                .collect()
+        };
+
+        let expected_n_node: Vec<i32> = get_i32_vec("n_node");
+        let expected_n_edge: Vec<i32> = get_i32_vec("n_edge");
+        let expected_senders: Vec<i32> = get_i32_vec("senders");
+        let expected_receivers: Vec<i32> = get_i32_vec("receivers");
+        let expected_edge_features: Vec<i32> = get_i32_vec("edge_features");
+        let expected_node_ids: Vec<i32> = get_i32_vec("node_ids");
+        let expected_node_labels: Vec<i32> = get_i32_vec("node_label");
+        let expected_node_types: Vec<i32> = get_i32_vec("node_type");
+
+        let expected_node_embeddings: Vec<f32> = get_f32_vec("embeddings");
+        let expected_candidate_mask : Vec<bool> = get_bool_vec("candidate_mask");
 
         assert_eq!(padded_super_graph.n_node, expected_n_node);
         assert_eq!(padded_super_graph.n_edge, expected_n_edge);
@@ -98,55 +143,22 @@ mod graph_builder_tests {
         assert_eq!(padded_super_graph.node_types, expected_node_types);
         assert_eq!(padded_super_graph.candidate_mask, expected_candidate_mask);
 
-        /*
-        EXPECTED from python:
-        padded_super_graph_1=
-G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  true,  true,  true, false, false,
-       false,  true,  true,  true,  true,  true, false, false, false,
-       false,  true,  true,  true,  true,  true, false, false, false,
-       false, false, false, false, false, false, false, false, false,
-       false, false, false, false, false, false, false, false, false,
-       false, false, false, false, false, false, false, false, false,
-       false, false, false, false, false, false, false, false, false,
-       false]), 'ids': array([1, 2, 1, 6, 7, 8, 9, 2, 3, 4, 2, 6, 7, 8, 9, 3, 4, 5, 6, 3, 6, 7,
-       8, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-       'label': array([0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
-       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-       'type': array([0, 1, 2, 2, 2, 2, 2, 0, 1, 1, 2, 2, 2, 2, 2, 0, 1, 1, 1, 2, 2, 2,
-       2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      dtype=int32)}, edges={
-      'rating': array([3, 0, 0, 0, 0, 0, 4, 5, 0, 0, 0, 0, 0, 3, 4, 3, 0, 0, 0, 0, 0, 0,
-       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])},
-       receivers=array([ 0,  2,  3,  4,  5,  6,  7,  7, 10, 11, 12, 13, 14, 15, 15, 15, 19,
-       20, 21, 22, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-       24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-       24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24]),
-       senders=array([ 1,  0,  0,  0,  0,  0,  8,  9,  7,  7,  7,  7,  7, 16, 17, 18, 15,
-       15, 15, 15, 15, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-       24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
-       24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24]),
-       globals=None,
-       n_node=array([ 7,  8,  9, 40,  0]),
-       n_edge=array([ 6,  7,  8, 43,  0]))
-
-         */
+        assert_slices_nearly_equal(&padded_super_graph.node_embeddings, &expected_node_embeddings, 1E-6);
 
     }
 
-    fn read_user_timestamps(ratings_uri: &str, read_rows: &[i32]) -> (Vec<i32>, Vec<i64>) {
+    fn read_user_ratings(ratings_uri: &str, read_rows: &[i32]) -> (Vec<i32>, Vec<i32>, Vec<i32>, Vec<i64>) {
         let file = File::open(ratings_uri).expect("Failed to open the parquet file");
 
-        // 1. Build the reader without projection.
+        // Build the reader without projection.
         // It will read all columns into the batch, and we will pick the ones we want.
         let builder = ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
         let reader: ParquetRecordBatchReader = builder.build().unwrap();
 
-        let mut user_ids = Vec::new();
-        let mut timestamps = Vec::new();
+        let mut user_ids : Vec<i32> = Vec::new();
+        let mut movie_ids : Vec<i32> = Vec::new();
+        let mut ratings : Vec<i32> = Vec::new();
+        let mut timestamps : Vec<i64> = Vec::new();
 
         let mut current_row_index: usize = 0;
         let num_rows = read_rows.len();
@@ -156,6 +168,8 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
         for maybe_batch in reader {
             let batch = maybe_batch.unwrap();
             let batch_size = batch.num_rows();
+
+            //println!("Column 0 data type: {:?}\n", batch.column(0).data_type());
 
             // Check if our target rows fall into this batch
             for &target_i32 in read_rows {
@@ -167,6 +181,12 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
                     // Extract Column 0 (User ID - Int32)
                     let col0 = batch.column(0).as_any().downcast_ref::<Int32Array>().unwrap();
                     user_ids.push(col0.value(local_idx));
+
+                    let col1 = batch.column(1).as_any().downcast_ref::<Int32Array>().unwrap();
+                    movie_ids.push(col1.value(local_idx));
+
+                    let col2 = batch.column(2).as_any().downcast_ref::<Int32Array>().unwrap();
+                    ratings.push(col2.value(local_idx));
 
                     // Extract Column 3 (Timestamp - Int64)
                     // Note: It is index 3 because we didn't project/remove columns 1 and 2!
@@ -190,7 +210,7 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
         println!("User IDs: {:?}", user_ids);
         println!("Timestamps: {:?}", timestamps);
 
-        (user_ids, timestamps)
+        (user_ids, movie_ids, ratings, timestamps)
     }
 
     #[tokio::test]
@@ -198,10 +218,10 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
 
         // to compare results to python test_ranker.py method test_create_inference_batch()
 
-        let max_history = 4;
-        let _batch_size = 2;
-        let _num_candidates = 5;
-        let n_local_devices = 1;
+        let max_history : usize = 4;
+        let batch_size : usize = 2;
+        let num_candidates : usize = 5;
+        let jax_n_local_devices : usize = 1;
 
         let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
 
@@ -214,27 +234,25 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
         let (user_embeddings_catalog, num_users, _embed_len) = read_user_embeddings(
             &user_embeddings_uri);
 
-        let ratings_map = get_train_val_test_liked_uris(DataSize::Tiny, false);
+        let ratings_map = get_train_val_test_liked_uris(DataSize::Tiny3, false);
 
-        let r = ratings_map.get("train_liked").unwrap();
+        let ratings_uri = ratings_map.get("train_liked").unwrap();
         let rows : Vec<i32> = vec![3, 4];
 
-        let (user_ids, timestamps) = read_user_timestamps(&r, &rows);
+        let (user_ids, movie_ids, ratings, timestamps) = read_user_ratings(&ratings_uri, &rows);
 
-        assert_eq!(&6040, &user_ids[0]);
-        assert_eq!(&6040, &user_ids[1]);
+        assert!(&6040 >= &user_ids[0] && &1 <= &user_ids[0]);
+        assert!(&6040 >= &user_ids[1] && &1 <= &user_ids[1]);
 
         // storing the items as references
-        let ratings_uris: Vec<&str> = vec![&r];
+        let ratings_uris: Vec<&str> = vec![&ratings_uri];
 
         let user_history : UserHistory = build_user_history(&ratings_uris, 2048).await;
 
-        /*
-        candidate_ids = np.array([
-            [6610, 6252, 9083, 6564, 6584],
-            [9477, 6941, 6948, 8475, 6356]
-        ])
-         */
+        let user_ids = vec![user_ids[0], user_ids[1]];
+        let movie_ids = vec![movie_ids[0], movie_ids[1]];
+        let ratings = vec![ratings[0], ratings[1]];
+        let timestamps = vec![timestamps[0], timestamps[1]];
         let candidate_ids : Vec<i32> = vec![
             6610, 6252, 9083, 6564, 6584,
             9477, 6941, 6948, 8475, 6356];
@@ -249,330 +267,109 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
         
         // Generate 32 (2 * 16) random numbers
         let user_embeddings : Vec<f32> = get_user_embeddings(&user_ids, &user_embeddings_catalog, embed_len);
-        //let user_embeddings: Vec<f32> = (0..(rows * cols))
-        //    .map(|_| rng.gen_range(-1.0..1.0))
-        //    .collect();
 
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
         let padded_super_graph : JraphGraph = build_enriched_padded_supergraph(
             user_ids.len(),
-            &user_ids, &timestamps,
-            &candidate_ids, &labels, &user_history, max_history,
+            &user_ids,
+            &timestamps,
+            &candidate_ids,
+            &labels,
+            &user_history,
+            max_history,
             num_users, num_movies, embed_len, &movie_embeddings_catalog, &user_embeddings,
-            n_local_devices);
+            jax_n_local_devices);
 
-        print!("graph={:?}", padded_super_graph);
-
-        let expected_n_node : Vec<i32> = vec![9,  9, 46,  0];
-        let expected_n_edge : Vec<i32> = vec![ 8,  8, 48,  0];
-
-        let expected_senders : Vec<i32> = vec![
-            1,  2,  3,  0,  0,  0,  0,  0, 10, 11, 12,  9,  9,  9,  9,  9, 18,
-            18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
-            18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
-            18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18
-        ];
-        let expected_receivers : Vec<i32> = vec![
-            0,  0,  0,  4,  5,  6,  7,  8,  9,  9,  9, 13, 14, 15, 16, 17, 18,
-            18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
-            18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
-            18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18
-        ];
-        let expected_edge_features : Vec<i32> = vec![
-            4, 5, 4, 0, 0, 0, 0, 0, 4, 5, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-        ];
-        let expected_node_ids : Vec<i32> = vec![
-            6040, 6888, 6630, 8356, 6610, 6252, 9083, 6564, 6584, 6040, 6888,
-            6630, 8356, 9477, 6941, 6948, 8475, 6356,    0,    0,    0,    0,
-            0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-            0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-            0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-            0,    0,    0,    0,    0,    0,    0,    0,    0
-        ];
-        let expected_node_labels : Vec<i32> = vec![
-            0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-        ];
-        let expected_node_types : Vec<i32> = vec![
-            1, 2, 2, 2, 3, 3, 3, 3, 3, 1, 2, 2, 2, 3, 3, 3, 3, 3, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-        ];
-        let expected_candidate_mask : Vec<bool> = vec![
-            false, false, false, false,  true,  true,  true,  true,  true,
-            false, false, false, false,  true,  true,  true,  true,  true,
-            false, false, false, false, false, false, false, false, false,
-            false, false, false, false, false, false, false, false, false,
-            false, false, false, false, false, false, false, false, false,
-            false, false, false, false, false, false, false, false, false,
-            false, false, false, false, false, false, false, false, false,
-            false
-        ];
-
-        //TODO: update using python test having same hyperparams if intend to use here
-        let _expected_node_embeddings : Vec<f32> = vec![
-            -1.46038502e-01,7.56151378e-01,3.79245803e-02,-1.47179127e-01,
-            4.40878153e-01,-3.01756620e-01,-2.63107866e-02,-5.77992916e-01,
-            3.30849081e-01,-1.73936829e-01,7.93257058e-01,-7.03651309e-01,
-            -1.42418772e-01,8.29771996e-01,2.03079283e-01,-3.41042936e-01,
-            1.73108891e-01,-7.18733072e-02,2.33108416e-01,-6.99642003e-02,
-            3.32984515e-02,7.92102590e-02,2.02493533e-01,-1.43248469e-01,
-            2.29076091e-02,-2.77142115e-02,-1.96536168e-01,-4.00530219e-01,
-            4.47087586e-02,-1.85510114e-01,1.00056127e-01,2.06497014e-02,
-            1.32814556e-01,-1.08997799e-01,1.89000219e-01,-8.42601806e-02,
-            6.73852488e-02,-6.77346718e-04,1.54019624e-01,-1.10381722e-01,
-            -4.63625975e-02,2.28686314e-02,-9.80303809e-02,-3.54296863e-01,
-            5.26507050e-02,-1.40301436e-01,5.88991195e-02,-1.20525761e-02,
-            -1.05341084e-01,-7.17672855e-02,-1.23591073e-01,1.52291059e-01,
-            -1.23522468e-01,-1.24844588e-01,-1.11025929e-01,1.04972437e-01,
-            1.08995438e-02,-4.33304757e-02,9.19703692e-02,1.03797428e-01,
-            -1.26486663e-02,4.83654514e-02,1.71981424e-01,-3.26586515e-03,
-            1.02663852e-01,-9.36122760e-02,2.60259777e-01,-1.29518658e-03,
-            6.72858804e-02,1.93283319e-01,2.31048211e-01,-1.20236702e-01,
-            -4.48052138e-02,6.82742056e-03,-5.96044511e-02,-4.50441271e-01,
-            -1.07736520e-01,-4.36749995e-01,1.56519428e-01,-2.69113258e-02,
-            1.54110799e-02,-1.20462514e-01,2.87029833e-01,7.32203946e-02,
-            1.57108195e-02,3.04615110e-01,2.29225621e-01,-1.58306152e-01,
-            -1.02498859e-01,-7.22190831e-03,-3.94371152e-03,-4.77329254e-01,
-            -1.12120502e-01,-4.83774304e-01,2.21045002e-01,-5.75880930e-02,
-            5.04381284e-02,-9.68403593e-02,2.98817575e-01,6.32991344e-02,
-            1.50984637e-02,2.51195788e-01,2.46019080e-01,-1.67900503e-01,
-            -5.82736135e-02,-1.69130135e-03,-2.45452821e-02,-4.73597050e-01,
-            -7.50030577e-02,-4.48152721e-01,2.11561367e-01,-4.38562557e-02,
-            3.42844683e-03,-2.86762826e-02,2.68852651e-01,-2.29605753e-02,
-            6.50716275e-02,8.50500241e-02,9.20110792e-02,-1.29637614e-01,
-            8.03620964e-02,1.06549705e-03,-1.10750616e-01,-3.76045078e-01,
-            -1.14628486e-01,-2.26101696e-01,1.34065881e-01,3.16299535e-02,
-            2.03939781e-01,-1.39438242e-01,3.44033167e-02,-6.53604344e-02,
-            1.96051560e-02,-3.07267457e-02,1.55228049e-01,3.30730435e-03,
-            3.67179886e-03,2.51172930e-02,-2.30796456e-01,-7.24362656e-02,
-            1.01054192e-01,7.46169090e-02,-5.00843376e-02,1.16978861e-01,
-            -1.46038502e-01,7.56151378e-01,3.79245803e-02,-1.47179127e-01,
-            4.40878153e-01,-3.01756620e-01,-2.63107866e-02,-5.77992916e-01,
-            3.30849081e-01,-1.73936829e-01,7.93257058e-01,-7.03651309e-01,
-            -1.42418772e-01,8.29771996e-01,2.03079283e-01,-3.41042936e-01,
-            1.73108891e-01,-7.18733072e-02,2.33108416e-01,-6.99642003e-02,
-            3.32984515e-02,7.92102590e-02,2.02493533e-01,-1.43248469e-01,
-            2.29076091e-02,-2.77142115e-02,-1.96536168e-01,-4.00530219e-01,
-            4.47087586e-02,-1.85510114e-01,1.00056127e-01,2.06497014e-02,
-            1.32814556e-01,-1.08997799e-01,1.89000219e-01,-8.42601806e-02,
-            6.73852488e-02,-6.77346718e-04,1.54019624e-01,-1.10381722e-01,
-            -4.63625975e-02,2.28686314e-02,-9.80303809e-02,-3.54296863e-01,
-            5.26507050e-02,-1.40301436e-01,5.88991195e-02,-1.20525761e-02,
-            -1.05341084e-01,-7.17672855e-02,-1.23591073e-01,1.52291059e-01,
-            -1.23522468e-01,-1.24844588e-01,-1.11025929e-01,1.04972437e-01,
-            1.08995438e-02,-4.33304757e-02,9.19703692e-02,1.03797428e-01,
-            -1.26486663e-02,4.83654514e-02,1.71981424e-01,-3.26586515e-03,
-            1.83621749e-01,-1.69409245e-01,5.67261390e-02,2.08855011e-02,
-            -6.42071739e-02,-1.60926227e-02,1.85496703e-01,-2.78595388e-02,
-            -1.22173049e-01,2.11594626e-04,-1.06184162e-01,-1.08213991e-01,
-            1.83968842e-01,7.01649189e-02,3.42001356e-02,8.64567049e-03,
-            -4.68672961e-02,-3.49991731e-02,2.07669303e-01,3.96427922e-02,
-            2.01586657e-03,1.18323296e-01,5.99969774e-02,-1.15825310e-01,
-            7.41612762e-02,-3.68061773e-02,-9.88812149e-02,-3.35968792e-01,
-            -8.01123455e-02,-2.14412600e-01,2.17010364e-01,3.93684842e-02,
-            1.91490650e-02,-7.01335520e-02,1.46278992e-01,9.64515433e-02,
-            -4.11247723e-02,6.29692804e-04,1.02469325e-01,-7.22950250e-02,
-            3.18651311e-02,1.49460919e-02,4.26975191e-02,-2.08491415e-01,
-            -4.51856442e-02,-1.74349770e-01,1.27138734e-01,1.75663363e-02,
-            9.42771137e-02,-1.09208710e-01,2.81344861e-01,-2.69633476e-02,
-            9.29759592e-02,1.61947504e-01,2.13427246e-01,-1.33027911e-01,
-            -2.11307853e-02,1.55663779e-02,-6.30059093e-02,-4.62700546e-01,
-            -1.15654565e-01,-4.35858190e-01,1.59670979e-01,-6.78294450e-02,
-            8.58985707e-02,-9.23429653e-02,2.74987012e-01,-9.21882764e-02,
-            1.42626420e-01,9.24898610e-02,1.46071300e-01,-1.70672745e-01,
-            1.36538967e-02,3.02275866e-02,-9.58830863e-02,-5.12516022e-01,
-            -2.36623809e-02,-3.55357260e-01,1.24851942e-01,-1.07239168e-02,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00,
-            0.00000000e+00,0.00000000e+00,0.00000000e+00,0.00000000e+00];
+        print!("graph={:?}\n", padded_super_graph);
 
 
+        // =================================================================
+        // get the expected graph arrays from the python code: =============
+        let output_path = "../../../bin/expected_graph.safetensors";
+
+        let candidate_ids_str = serde_json::to_string(&candidate_ids)
+            .expect("Failed to serialize candidate_ids");
+
+        let in_batch: Vec<(i32, i32, i32, i64)> = user_ids.into_iter()
+            .zip(movie_ids)
+            .zip(ratings)
+            .zip(timestamps)
+            .map(|(((a, b), c), d)| (a, b, c, d))
+            .collect();
+
+        let in_batch_str = serde_json::to_string(&in_batch)
+            .expect("Failed to serialize in_batch");
+
+        // get the conda venv:
+        let python_bin = get_python_path();
+
+        let ratings_uri = ratings_uri.replace("parquet", "array_record");
+        let user_embeddings_uri = user_embeddings_uri.replace("parquet", "array_record");
+        let movie_embeddings_uri = movie_embeddings_uri.replace("parquet", "array_record");
+
+        let status = Command::new(&python_bin)
+            .arg("../../../src/test/python/movie_lens_ranker/write_paddedsupergraph.py")
+            .arg("--output_path").arg(output_path)
+            .arg("--in_batch").arg(in_batch_str)
+            .arg("--ratings_uri").arg(ratings_uri)
+            .arg("--user_embeddings_uri").arg(user_embeddings_uri)
+            .arg("--movie_embeddings_uri").arg(movie_embeddings_uri)
+            .arg("--max_history").arg(max_history.to_string())
+            .arg("--batch_size").arg(batch_size.to_string())
+            .arg("--num_candidates").arg(num_candidates.to_string())
+            .arg("--jax_n_local_devices").arg(jax_n_local_devices.to_string())
+            .arg("--candidate_ids").arg(candidate_ids_str)
+            .status()
+            .expect("Failed to execute Python script");
+
+        assert!(status.success());
+
+        // Read output file
+        let buffer = fs::read(output_path).expect("Failed to read safetensors file");
+        let tensors = SafeTensors::deserialize(&buffer).expect("Failed to parse safetensors");
+
+        // Helper closure to pull i32 slices
+        let get_i32_vec = |name: &str| -> Vec<i32> {
+            let tensor = tensors.tensor(name).unwrap();
+            // Convert raw byte slice to i32 slice safely
+            tensor
+                .data()
+                .chunks_exact(4)
+                .map(|chunk| i32::from_ne_bytes(chunk.try_into().unwrap()))
+                .collect()
+        };
+
+        // Helper for 32-bit float vectors
+        let get_f32_vec = |name: &str| -> Vec<f32> {
+            let tensor = tensors.tensor(name).unwrap();
+            tensor
+                .data()
+                .chunks_exact(4)
+                .map(|chunk| f32::from_ne_bytes(chunk.try_into().unwrap()))
+                .collect()
+        };
+
+        let get_bool_vec = |name: &str| -> Vec<bool> {
+            let tensor = tensors.tensor(name).unwrap();
+            tensor
+                .data()
+                .iter()
+                .map(|&byte| byte != 0)
+                .collect()
+        };
+
+        let expected_n_node: Vec<i32> = get_i32_vec("n_node");
+        let expected_n_edge: Vec<i32> = get_i32_vec("n_edge");
+        let expected_senders: Vec<i32> = get_i32_vec("senders");
+        let expected_receivers: Vec<i32> = get_i32_vec("receivers");
+        let expected_edge_features: Vec<i32> = get_i32_vec("edge_features");
+        let expected_node_ids: Vec<i32> = get_i32_vec("node_ids");
+        let expected_node_labels: Vec<i32> = get_i32_vec("node_label");
+        let expected_node_types: Vec<i32> = get_i32_vec("node_type");
+
+        let expected_node_embeddings: Vec<f32> = get_f32_vec("embeddings");
+        let expected_candidate_mask : Vec<bool> = get_bool_vec("candidate_mask");
 
         assert_eq!(padded_super_graph.n_node, expected_n_node);
         assert_eq!(padded_super_graph.n_edge, expected_n_edge);
@@ -584,7 +381,7 @@ G       raphsTuple(nodes={'candidate_mask': array([false, false,  true,  true,  
         assert_eq!(padded_super_graph.node_types, expected_node_types);
         assert_eq!(padded_super_graph.candidate_mask, expected_candidate_mask);
 
-        //assert_slices_nearly_equal(&padded_super_graph.node_embeddings, &expected_node_embeddings, 1E-6);
+        assert_slices_nearly_equal(&padded_super_graph.node_embeddings, &expected_node_embeddings, 1E-6);
 
     }
 

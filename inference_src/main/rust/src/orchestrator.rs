@@ -1,4 +1,4 @@
-use std::cmp::min;
+﻿use std::cmp::min;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use crate::pb::recommender_service_server::RecommenderService;
 use crate::query_model_metadata::QueryModelMetadata;
 use crate::ranker_model_metadata::RankerModelMetadata;
 use crate::user_db::UserDb;
-use crate::util::sort_by_scores;
+use crate::util::sort_in_place_by_desc_scores;
 
 // the number of local_devices attached to the ranker TFS.  e.g. = 2 for the kaggle T4x2 GPUs
 // max_history, num_candidates are hyper-parameters of the ranker_model
@@ -32,7 +32,7 @@ pub struct Orchestrator {
     #[allow(dead_code)]
     ranker_n_local_devices : usize,
     persisted_index_path: PathBuf,
-    top_k : usize,
+    pub top_k : usize,
 }
 
 impl Orchestrator {
@@ -72,8 +72,8 @@ impl Orchestrator {
         user_db_path : impl AsRef<Path>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
 
-        let query_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri).unwrap();
-        let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri).unwrap();
+        let query_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri)?;
+        let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri)?;
 
         if query_metadata.embed_len != ranker_metadata.embed_len {
             return Err(format!(
@@ -81,8 +81,11 @@ impl Orchestrator {
                 query_metadata.embed_len, ranker_metadata.embed_len
             ).into()); // .into() converts the String into Box<dyn std::error::Error + Send + Sync>
         }
+
+        // we want ANN to return 10x to 100x num_candidates so that scoring will reorder and produce num_candidates top results
+        let k = ranker_metadata.num_candidates;
         
-        let initial_searcher = Searcher::new(movie_embeddings_uri, ranker_metadata.num_candidates, &persisted_index_path)?;
+        let initial_searcher = Searcher::new(movie_embeddings_uri, k, &persisted_index_path)?;
         let query_client = QueryModelClient::new(query_uri, query_metadata.embed_len).await;
         let ranker_client = RankerModelClient::new(ranker_uri, ranker_metadata.clone()).await;
 
@@ -101,6 +104,13 @@ impl Orchestrator {
             top_k: top_k,
             user_db: user_db,
         })
+    }
+
+    pub fn get_ranker_model_metadata(&self) -> RankerModelMetadata {
+         self.ranker_model_metadata.clone()
+    }
+    pub fn get_query_model_metadata(&self) -> QueryModelMetadata {
+        self.query_model_metadata.clone()
     }
 
     pub async fn reload_embeddings(&self, movie_embeddings_uri: &str, num_candidates: usize) -> Result<(), Box<dyn std::error::Error>> {
@@ -122,6 +132,13 @@ impl Orchestrator {
         self.searcher.store(Arc::new(new_searcher));
 
         Ok(())
+    }
+
+    pub async fn get_users_request(&self, user_ids: &[i32], timestamps: &[i64]) -> Result<Request<UsersRequest>, Status> {
+        let user_req_opt : Option<Request<UsersRequest>> = self.user_db.get_request(&user_ids, &timestamps);
+        user_req_opt.ok_or_else(|| {
+            Status::not_found("The requested user record could not be found")
+        })
     }
 
     async fn make_ranker_request(&self, user_ids : Vec<i32>, timestamps: Vec<i64>,
@@ -160,9 +177,9 @@ impl Orchestrator {
             self.ranker_n_local_devices
         );
 
-        println!("padded graph n_node={:?}", padded_super_graph_arrays.n_node);
+        //println!("padded graph n_node={:?}", padded_super_graph_arrays.n_node);
 
-        // Send to TFS Ranker model
+        // Send to eployed Ranker model
         let final_response = self.ranker_model.get_candidate_ranks(
             padded_super_graph_arrays,searcher.get_embed_len()).await;
 
@@ -170,6 +187,8 @@ impl Orchestrator {
             Ok(mut ranks) => {
                 // The JAX model returns statically shaped output (max_graphs).
                 // Truncate the padded scores to match the actual number of valid inputs in this chunk.
+
+                // the padded values are all at the end so truncate can remove them:
                 ranks.truncate(candidate_ids.len());
 
                 Ok(RankedMovies {
@@ -197,27 +216,41 @@ impl Orchestrator {
         // length: n_users * embed_len
         let user_embeddings = ann_res.user_embeddings;
         // length: n_users * num_candidates
-        let candidate_ids = ann_res.candidate_ids;
+        let ann_movie_ids = ann_res.candidate_ids;
 
-        println!("_predict: n_users={}, num_candidates={}, embed_len={}, n_user_embeddings={}",
-            user_ids.len(), candidate_ids.len()/user_ids.len(), self.ranker_model_metadata.embed_len,
-            user_embeddings.len()/self.ranker_model_metadata.embed_len);
+        //println!("_predict: n_users={}, num_ann_movies={}, num_candidates={}, embed_len={}, n_user_embeddings={}",
+        //    user_ids.len(), ann_movie_ids.len()/user_ids.len(), self.ranker_model_metadata.num_candidates,
+        //    self.ranker_model_metadata.embed_len,
+        //    user_embeddings.len()/self.ranker_model_metadata.embed_len);
 
-        let ranked_movies = self.make_ranker_request(user_ids.clone(),
-            user_reqs.timestamps, user_embeddings, candidate_ids).await?;
+        let mut ranked_movies = self.make_ranker_request(user_ids.clone(),
+            user_reqs.timestamps, user_embeddings, ann_movie_ids).await?;
 
-        let (sorted_ids, sorted_scores) = sort_by_scores(
-            &ranked_movies.movie_ids, &ranked_movies.scores);
+        let num_candidates = self.ranker_model_metadata.num_candidates;
+
+        sort_in_place_by_desc_scores(
+            & mut ranked_movies.movie_ids, &mut ranked_movies.scores, num_candidates);
+
+        // extract each response to top_k
+        let n_final = user_ids.len() * self.top_k;
+        let mut top_movie_ids : Vec<i32> = Vec::with_capacity(n_final);
+        let mut top_scores: Vec<f32> = Vec::with_capacity(n_final);
+        ranked_movies.movie_ids.chunks_exact(num_candidates)
+            .zip(ranked_movies.scores.chunks_exact(num_candidates))
+            .for_each(|(movie_chunk, score_chunk)| {
+                top_movie_ids.extend(movie_chunk.iter().take(self.top_k));
+                top_scores.extend(score_chunk.iter().take(self.top_k));
+            });
 
         Ok(Response::new( RankedMovies{
             user_ids: user_ids,
-            movie_ids: sorted_ids[0..self.top_k].to_vec(),
-            scores: sorted_scores[0..self.top_k].to_vec(),
-            num_candidates: ranked_movies.num_candidates,
+            movie_ids: top_movie_ids,
+            scores: top_scores,
+            num_candidates: self.top_k as u32,
         }))
     }
 
-    async fn _approx_nearest_neighbors(&self, req: Request<UsersRequest>) -> Result<Response<ApproxNearestNeighborsResponse>, Status> {
+    pub async fn _approx_nearest_neighbors(&self, req: Request<UsersRequest>) -> Result<Response<ApproxNearestNeighborsResponse>, Status> {
 
         let users_req = req.into_inner();
 
@@ -237,10 +270,13 @@ impl Orchestrator {
         // finds num_candidates approx nearest neighbors
         let searcher = self.searcher.load();
 
+        // get the searcher k if present, else default is num_candidates
+        let k: Option<usize> = users_req.k.map(|val| val as usize);
+        let k = k.unwrap_or(self.ranker_model_metadata.num_candidates);
+
         //TODO: consider limiting this to keep the search quick:
         let max_n_hist : usize = *(n_hists.iter().max().unwrap());
 
-        let num_candidates = self.ranker_model_metadata.num_candidates as usize;
         let num_catalog_users = self.ranker_model_metadata.num_catalog_users as i32;
 
         // history is length n_users * max_n_hist
@@ -248,11 +284,10 @@ impl Orchestrator {
             &users_req.user_ids, &users_req.timestamps, max_n_hist);
 
         // Pre-allocate the exact size needed for the final flattened candidates
-        let mut final_candidates: Vec<i32> = Vec::with_capacity(users_req.user_ids.len() * num_candidates);
-
+        let mut final_candidates: Vec<i32> = Vec::with_capacity(users_req.user_ids.len() * k);
 
         // choose more than num_candidates to choose only unseen from them, then rank for top num_candidates
-        let _n_srch : usize = min(self.ranker_model_metadata.num_candidates + max_n_hist, searcher.get_num_catalog_movies());
+        let _n_srch : usize = min(k + max_n_hist, searcher.get_num_catalog_movies());
         let n_srch = Some(_n_srch);
 
         let nearest : Vec<Matches>
@@ -260,7 +295,7 @@ impl Orchestrator {
             .map_err(|e| Status::internal(format!("Vector search failed: {}", e)))?;
 
         for i in 0..nearest.len() {
-            // candidate_ids length is n_users * n_srch
+            // final_candidates length is n_users * n_srch
             // candidate_ids are in "reference frame" of 0 to num_catalog_movies  - 1, so translate to
             // reference frame num_catalog_users + 1 to num_catalog_users + 1 + num_catalog_movies
             let raw_candidate_ids: Vec<i32> = nearest[i].keys
@@ -276,19 +311,17 @@ impl Orchestrator {
 
             let watched_set: HashSet<i32> = history[hist_start..hist_end].iter().copied().collect();
 
-            let cand_start = i * _n_srch;
-            let cand_end = cand_start + _n_srch;
-            let user_raw_candidates = &raw_candidate_ids[cand_start..cand_end];
-
             // Filter out watched movies
-            let mut unwatched: Vec<i32> = user_raw_candidates.iter()
+            let mut unwatched: Vec<i32> = raw_candidate_ids.iter()
                 .copied()
                 .filter(|id| !watched_set.contains(id))
                 .collect();
 
+            // unwatched will be < k or >= k
+
             // Backfill if we filtered out too many
-            if unwatched.len() < num_candidates {
-                let n_backfill = num_candidates - unwatched.len();
+            if unwatched.len() < k {
+                let n_backfill = k - unwatched.len();
 
                 // NOTE: Backfilling with history means injecting watched movies.
                 // If you have a padding ID (like 0) or popular fallback catalog IDs, use those instead.
@@ -297,8 +330,8 @@ impl Orchestrator {
                 );
             }
 
-            // Ensure we have exactly num_candidates items for this user
-            unwatched.truncate(num_candidates);
+            // Ensure we have exactly k items for this user
+            unwatched.truncate(k);
 
             // Append this user's fixed-length candidates into the final flat vector
             final_candidates.extend_from_slice(&unwatched);
@@ -315,8 +348,11 @@ impl Orchestrator {
 
 #[tonic::async_trait]
 impl RecommenderService for Orchestrator {
-    /// given USerRequest, gets the num_candidates approximate nearest neighbors for user,
-    /// scores then and returns them sorted.
+
+    /// given UserRequest, gets the k approximate nearest neighbors for user,
+    /// where
+    /// k is min(self.ranker_model_metadata.num_candidates + max_n_hist, searcher.get_num_catalog_movies())
+    /// to attempt to get enough unwateched movies for downstream scoring.
     ///
     /// # Arguments
     ///
@@ -330,7 +366,7 @@ impl RecommenderService for Orchestrator {
     ///
     /// ```
     async fn approx_nearest_neighbors(&self, req: Request<UsersRequest>) -> Result<Response<ApproxNearestNeighborsResponse>, Status> {
-        return self._approx_nearest_neighbors(req).await;
+        self._approx_nearest_neighbors(req).await
     }
 
     /// predicts top_k movies for a user and returs them as a pairs of movie_id and
@@ -353,7 +389,7 @@ impl RecommenderService for Orchestrator {
 
         let n_users = user_reqs.user_ids.len();
 
-        println!("batch_size={}, n_users={}", batch_size, n_users);
+        //println!("batch_size={}, n_users={}", batch_size, n_users);
 
         if n_users == batch_size {
             return self._predict(Request::new(user_reqs.clone())).await;
@@ -374,7 +410,8 @@ impl RecommenderService for Orchestrator {
                 occupations : user_reqs.occupations[i0..i1].to_vec(),
                 ages : user_reqs.ages[i0..i1].to_vec(),
                 timestamps : user_reqs.timestamps[i0..i1].to_vec(),
-                n_users : (i1 - i0) as u32
+                n_users : (i1 - i0) as u32,
+                k : None
             };
 
             let resp_i = self._predict(Request::new(req_i)).await?;
@@ -388,7 +425,7 @@ impl RecommenderService for Orchestrator {
             user_ids: user_reqs.user_ids,
             movie_ids: final_candidate_ids,
             scores: final_scores,
-            num_candidates: self.ranker_model_metadata.num_candidates as u32
+            num_candidates: self.top_k as u32
         }))
     }
 

@@ -1,0 +1,61 @@
+the train_val_curves.pdf shows  training, val curves
+
+- the ndcg_tail_20 training is unstable.  
+   - in the in-batch softmax, the denomiator of negatives
+     is small in number (batch_size=256) and random causing 
+     large erratic spikes in the loss.
+   - the learning is over the population for the movie_tier
+     and so, for example, the large number of positive torso
+     items on average reduces that variability,
+     but for the small number of tail items, the variablity
+     doesn't get reduced enough.
+
+at the time of these snapshots the batch_size is 256 which is much
+smaller than the 2048 used in the TwoTowerDNN bi-encoder
+in the recommendr_systems github project.
+
+The hpo_output logs from training this ranker model on the Kaggle
+T4x2 GPUs, a few excerpts on RAM and processing:
+
+I0904 19:44:07.011045 140329462600832 train.py:619] batch 100, loop_idx=100, local step 25600, global_step 25600, (Epoch 0): Train Loss 2.2287
+I0904 19:44:07.014068 140329462600832 train.py:621] GPU 0, used: 94 %, 905 MiB, total: 15360 MiB | GPU 1, used: 88 %, 871 MiB, total: 15360 MiB
+I0904 19:44:07.015069 140329462600832 train.py:622] Host Stats | CPU:  91.7% | Load(1m): 3.65 | RAM:  22.0% (5.9GB/31.3GB) | Swap:   0.0% (0.0GB/0.0GB)
+I0904 19:44:35.356628 140329462600832 train.py:619] batch 200, loop_idx=200, local step 51200, global_step 51200, (Epoch 0): Train Loss 2.1870
+I0904 19:44:35.359883 140329462600832 train.py:621] GPU 0, used: 94 %, 903 MiB, total: 15360 MiB | GPU 1, used: 91 %, 871 MiB, total: 15360 MiB
+I0904 19:44:35.360769 140329462600832 train.py:622] Host Stats | CPU:  91.0% | Load(1m): 4.22 | RAM:  22.0% (5.9GB/31.3GB) | Swap:   0.0% (0.0GB/0.0GB)
+I0904 19:45:03.672314 140329462600832 train.py:619] batch 300, loop_idx=300, local step 76800, global_step 76800, (Epoch 0): Train Loss 2.0513
+I0904 19:45:03.675209 140329462600832 train.py:621] GPU 0, used: 90 %, 905 MiB, total: 15360 MiB | GPU 1, used: 84 %, 871 MiB, total: 15360 MiB
+
+These suggest that I can increase the batch_Size to 1024, and possibly even 2048.
+
+==> increasing the batch_size to 1024 to try again.
+
+Alternatives to increasing the batch_size:
+- if wanted to forgo the fine grained ranking that comes from list-wise training from in-batch softmax,
+  I can switch to point-wise loss from a sigmoid loss.
+  Sigmoid loss does not evaluate the positive against a 
+  pool of negatives so no large variability from denominator.
+  - the resulting "scores" would be absolute probabilities.
+    - this would enable batch queries to get meaningful comparisons
+      for some factor of num_candidates (resulting in that factor 
+      of top_k results).
+    - what is lost is some amount of precision is presenting a
+      an ordered list of recommendations
+- the pointwise train_steps and eval_steps are coded as pointwise_training.py
+   while waiting for the list-wise training with larger batch_size to finish.
+
+
+Sigmoid Function (Logistic Function)
+   sigma(z) = 1 / (1 + exp(-z))
+     Where:
+        z is the raw model logit score
+
+Sigmoid Loss (Binary Cross-Entropy for a single sample)
+    L(y, p) = - [ y * log(p) + (1 - y) * log(1 - p) ]
+      Where:
+         y is the true binary label (0 or 1)
+         p is the predicted probability, where p = sigma(z)
+
+Combined Expanded Form (Substituting the Sigmoid into the Loss)
+    L(y, z) = - [ y * log(1 / (1 + exp(-z))) + (1 - y) * log(1 - (1 / (1 + exp(-z)))) ]
+

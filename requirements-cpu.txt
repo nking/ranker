@@ -105,6 +105,7 @@ rax==0.4.0
 requests==2.34.2
 requests-oauthlib==2.0.0
 rich==15.0.0
+safetensors==0.8.0
 scipy==1.17.1
 setuptools==82.0.1
 simplejson==4.1.1

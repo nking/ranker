@@ -304,6 +304,7 @@ pub fn build_padded_super_graph(
 /// ```
 pub fn create_fake_padded_super_batch(
     batch_size: usize,
+    ranker_batch_size: usize,
     max_history: usize,
     num_candidates: usize,
     user_id_range: (usize, usize),
@@ -356,7 +357,7 @@ pub fn create_fake_padded_super_batch(
     }
 
     let padded_super_graph = build_padded_super_graph(
-            batch_size,
+            ranker_batch_size,
             &user_ids,
             &history_movie_ids,
             &history_ratings,

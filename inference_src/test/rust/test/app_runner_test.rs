@@ -58,7 +58,8 @@ mod app_runner_tests {
             occupations: vec![10],
             ages: vec![25],
             timestamps: vec![1620000000],
-            n_users: 1
+            n_users: 1,
+            k : None
         });
 
         // Assert success

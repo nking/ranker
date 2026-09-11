@@ -1,0 +1,243 @@
+I0618 17:59:04.833338 128999365084992 migration.py:155] Context impl PostgresqlImpl.
+I0618 17:59:04.833600 128999365084992 migration.py:158] Will assume transactional DDL.
+I0618 17:59:04.836686 128999365084992 migration.py:155] Context impl PostgresqlImpl.
+I0618 17:59:04.836771 128999365084992 migration.py:158] Will assume transactional DDL.
+I0618 17:59:04.839855 128999365084992 selector_events.py:54] Using selector: EpollSelector
+empty checkpoint-bucket/* successful
+JAX_NUM_PROCESSES=1
+I0618 17:59:04.842103 128999365084992 docker_lib.py:103] Building Docker image
+I0618 17:59:04.842377 128999365084992 config.py:21] Trying paths: ['/home/nichole/.docker/config.json', '/home/nichole/.dockercfg']
+I0618 17:59:04.842463 128999365084992 config.py:28] No config file found
+I0618 17:59:04.842564 128999365084992 config.py:21] Trying paths: ['/home/nichole/.docker/config.json', '/home/nichole/.dockercfg']
+I0618 17:59:04.842623 128999365084992 config.py:28] No config file found
+I0618 17:59:04.849648 128999365084992 connectionpool.py:544] http://localhost:None "GET /version HTTP/1.1" 200 891
+I0618 17:59:04.856012 128999365084992 connectionpool.py:544] http://localhost:None "GET /v1.54/version HTTP/1.1" 200 891
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile_offline
+#1 transferring dockerfile: 248B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/ranker-app:local
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 148B done
+#3 DONE 0.0s
+
+#4 [internal] load build context
+#4 transferring context: 6.90kB done
+#4 DONE 0.0s
+
+#5 [1/2] FROM docker.io/library/ranker-app:local@sha256:3163239f27f4a3fa237553bf8026e24ce4900445568e7276b53b9ea3890fb507
+#5 resolve docker.io/library/ranker-app:local@sha256:3163239f27f4a3fa237553bf8026e24ce4900445568e7276b53b9ea3890fb507 0.0s done
+#5 DONE 0.1s
+
+#6 [2/2] COPY ./src /app/src
+#6 DONE 0.1s
+
+#7 exporting to image
+#7 exporting layers
+#7 exporting layers 0.2s done
+#7 exporting manifest sha256:cb588b1116d051aad14c84e9b242ecec10b06ebad1b8810832d475a59306c85b done
+#7 exporting config sha256:9cbe830b04c5ec414ac2890d1ab93b2c3be6ecfecf36c1f54987df39f050d929 done
+#7 exporting attestation manifest sha256:dbf7bf1e7273e1c13f5d53e974a9dd84c8be414a9e9cceca7d4070a457003f74 0.0s done
+#7 exporting manifest list sha256:da6134dd6d62bf68e9dfe28f219fe2fe15e8dde9866e86bc44f33078629ed0b2 0.0s done
+#7 naming to docker.io/library/ranker:latest done
+#7 unpacking to docker.io/library/ranker:latest 0.0s done
+#7 DONE 0.3s
+I0618 17:59:05.493243 128999365084992 docker_lib.py:117] Building docker image: Done
+I0618 17:59:05.494414 128999365084992 selector_events.py:54] Using selector: EpollSelector
+I0618 17:59:05.494841 128999365084992 tmp_launcher.py:286] pipeline done.
+I0618 17:59:05.495074 128999365084992 tmp_launcher.py:287] total time elapsed = 0.000743891001548036
+I0618 17:59:05.508109 128999141406400 config.py:21] Trying paths: ['/home/nichole/.docker/config.json', '/home/nichole/.dockercfg']
+I0618 17:59:05.508197 128999141406400 config.py:28] No config file found
+I0618 17:59:05.508256 128999141406400 config.py:21] Trying paths: ['/home/nichole/.docker/config.json', '/home/nichole/.dockercfg']
+I0618 17:59:05.508296 128999141406400 config.py:28] No config file found
+I0618 17:59:05.515393 128999141406400 connectionpool.py:544] http://localhost:None "GET /version HTTP/1.1" 200 891
+I0618 17:59:05.521947 128999141406400 connectionpool.py:544] http://localhost:None "GET /v1.54/version HTTP/1.1" 200 891
+I0618 17:59:05.522275 128999141406400 docker_lib.py:77] Local docker: {'Platform': {'Name': 'Docker Engine - Community'}, 'Version': '29.5.3', 'ApiVersion': '1.54', 'MinAPIVersion': '1.40', 'Os': 'linux', 'Arch': 'amd64', 'Components': [{'Name': 'Engine', 'Version': '29.5.3', 'Details': {'ApiVersion': '1.54', 'Arch': 'amd64', 'BuildTime': '2026-06-03T18:00:12.000000000+00:00', 'Experimental': 'false', 'GitCommit': '285b471', 'GoVersion': 'go1.26.4', 'KernelVersion': '6.17.0-35-generic', 'MinAPIVersion': '1.40', 'Module': 'github.com/moby/moby/v2', 'ModuleVersion': 'v2.0.0+unknown', 'Os': 'linux'}}, {'Name': 'containerd', 'Version': 'v2.2.4', 'Details': {'GitCommit': '193637f7ee8ae5f5aa5248f49e7baa3e6164966e'}}, {'Name': 'runc', 'Version': '1.3.5', 'Details': {'GitCommit': 'v1.3.5-0-g488fc13e'}}, {'Name': 'docker-init', 'Version': '0.19.0', 'Details': {'GitCommit': 'de40ad0'}}], 'GitCommit': '285b471', 'GoVersion': 'go1.26.4', 'KernelVersion': '6.17.0-35-generic', 'BuildTime': '2026-06-03T18:00:12.000000000+00:00'}
+I0618 17:59:05.522484 128999141406400 docker_lib.py:103] Building Docker image
+I0618 17:59:05.522636 128999141406400 config.py:21] Trying paths: ['/home/nichole/.docker/config.json', '/home/nichole/.dockercfg']
+I0618 17:59:05.522696 128999141406400 config.py:28] No config file found
+I0618 17:59:05.522761 128999141406400 config.py:21] Trying paths: ['/home/nichole/.docker/config.json', '/home/nichole/.dockercfg']
+I0618 17:59:05.522809 128999141406400 config.py:28] No config file found
+I0618 17:59:05.529431 128999141406400 connectionpool.py:544] http://localhost:None "GET /version HTTP/1.1" 200 891
+I0618 17:59:05.535857 128999141406400 connectionpool.py:544] http://localhost:None "GET /v1.54/version HTTP/1.1" 200 891
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 521B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.11
+#2 ERROR: failed to do request: Head "https://registry-1.docker.io/v2/library/python/manifests/3.11": dial tcp: lookup registry-1.docker.io on 127.0.0.53:53: read udp 127.0.0.1:43084->127.0.0.53:53: i/o timeout
+------
+ > [internal] load metadata for docker.io/library/python:3.11:
+------
+Dockerfile:2
+--------------------
+   1 |     
+   2 | >>> FROM python:3.11
+   3 |     
+   4 |     RUN if ! id 1000; then useradd -m -u 1000 clouduser; fi
+--------------------
+ERROR: failed to build: failed to solve: python:3.11: failed to resolve source metadata for docker.io/library/python:3.11: failed to do request: Head "https://registry-1.docker.io/v2/library/python/manifests/3.11": dial tcp: lookup registry-1.docker.io on 127.0.0.53:53: read udp 127.0.0.1:43084->127.0.0.53:53: i/o timeout
+E0618 17:59:15.701839 128999223195328 core.py:956] Stopping experiment unit (identity '') after it failed with: Command '['docker', 'buildx', 'build', '-t', 'tmpk3971ztx:latest', '-t', 'tmpk3971ztx:latest', '-f', '/tmp/tmpqcqtt2e3/Dockerfile', '/tmp/tmpqcqtt2e3']' returned non-zero exit status 1.
+E0618 17:59:15.702027 128999365084992 base_events.py:1785] Future exception was never retrieved
+future: <Future finished exception=CalledProcessError(1, ['docker', 'buildx', 'build', '-t', 'tmpk3971ztx:latest', '-t', 'tmpk3971ztx:latest', '-f', '/tmp/tmpqcqtt2e3/Dockerfile', '/tmp/tmpqcqtt2e3'])>
+Traceback (most recent call last):
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/concurrent/futures/_base.py", line 456, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm/core.py", line 954, in launch
+    await experiment_unit.add(job, args, identity=identity)
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm/core.py", line 676, in __call__
+    await coroutine
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/contrib/parameter_controller.py", line 412, in job_generator
+    await remote_controller
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/contrib/parameter_controller.py", line 317, in _launch_remote_controller
+    [executable] = await asyncio.get_running_loop().run_in_executor(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm/core.py", line 829, in package
+    return cls._async_packager.package(packageables)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm/async_packager.py", line 134, in package
+    executables = self._package_batch(packageables)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm_local/packaging/router.py", line 78, in package
+    return [
+           ^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm_local/packaging/router.py", line 79, in <listcomp>
+    _packaging_router(built_targets, packageable)
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm_local/packaging/router.py", line 38, in _packaging_router
+    return local_packaging.package_for_local_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm_local/packaging/local.py", line 165, in package_for_local_executor
+    return _package_python_container(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm_local/packaging/local.py", line 95, in _package_python_container
+    image_id = build_image.build(
+               ^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/cloud/build_image.py", line 105, in build
+    return build_by_dockerfile(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/cloud/build_image.py", line 140, in build_by_dockerfile
+    return docker_lib.build_docker_image(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/cloud/docker_lib.py", line 108, in build_docker_image
+    _build_image_with_docker_command(
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/cloud/docker_lib.py", line 174, in _build_image_with_docker_command
+    subprocess.run(
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['docker', 'buildx', 'build', '-t', 'tmpk3971ztx:latest', '-t', 'tmpk3971ztx:latest', '-f', '/tmp/tmpqcqtt2e3/Dockerfile', '/tmp/tmpqcqtt2e3']' returned non-zero exit status 1.
+Dockerfile:
+
+FROM python:3.11
+
+RUN if ! id 1000; then useradd -m -u 1000 clouduser; fi
+
+RUN apt-get update && apt-get install -y git
+RUN python -m pip install --upgrade pip
+COPY tmpk3971ztx/requirements.txt requirements.txt
+RUN python -m pip install xmanager
+RUN python -m pip install -r requirements.txt
+COPY tmpk3971ztx/ tmpk3971ztx
+WORKDIR tmpk3971ztx
+
+COPY entrypoint.sh ./entrypoint.sh
+RUN chown -R 1000:root ./entrypoint.sh && chmod -R 775 ./entrypoint.sh
+
+ENTRYPOINT ["./entrypoint.sh"]
+
+Size of Docker input: 1.1 MB
+Building Docker image, please wait...
+Traceback (most recent call last):
+  File "/home/nichole/miniconda3/envs/xmanager_py311/bin/xmanager", line 6, in <module>
+    sys.exit(entrypoint())
+             ^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/cli/cli.py", line 68, in entrypoint
+    app.run(main)
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/absl/app.py", line 367, in run
+    _run_main(main, args)
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/absl/app.py", line 312, in _run_main
+    sys.exit(main(argv))
+             ^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/cli/cli.py", line 43, in main
+    app.run(m.main, argv=argv)
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/absl/app.py", line 367, in run
+    _run_main(main, args)
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/absl/app.py", line 312, in _run_main
+    sys.exit(main(argv))
+             ^^^^^^^^^^
+  File "/home/nichole/projects/github/ranker/orchestration/xmanager/tmp_launcher.py", line 73, in main
+    with xm_local.create_experiment(experiment_title='xmngr_pipeline') as experiment:
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm_local/experiment.py", line 332, in __exit__
+    self._wait_for_tasks()
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm/core.py", line 772, in _wait_for_tasks
+    raise exception
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm/core.py", line 763, in _wait_for_tasks
+    self._running_tasks.get_nowait().result()
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm/core.py", line 763, in _wait_for_tasks
+    self._running_tasks.get_nowait().result()
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/concurrent/futures/_base.py", line 456, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm/core.py", line 954, in launch
+    await experiment_unit.add(job, args, identity=identity)
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm/core.py", line 676, in __call__
+    await coroutine
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/contrib/parameter_controller.py", line 412, in job_generator
+    await remote_controller
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/contrib/parameter_controller.py", line 317, in _launch_remote_controller
+    [executable] = await asyncio.get_running_loop().run_in_executor(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm/core.py", line 829, in package
+    return cls._async_packager.package(packageables)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm/async_packager.py", line 134, in package
+    executables = self._package_batch(packageables)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm_local/packaging/router.py", line 78, in package
+    return [
+           ^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm_local/packaging/router.py", line 79, in <listcomp>
+    _packaging_router(built_targets, packageable)
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm_local/packaging/router.py", line 38, in _packaging_router
+    return local_packaging.package_for_local_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm_local/packaging/local.py", line 165, in package_for_local_executor
+    return _package_python_container(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/xm_local/packaging/local.py", line 95, in _package_python_container
+    image_id = build_image.build(
+               ^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/cloud/build_image.py", line 105, in build
+    return build_by_dockerfile(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/cloud/build_image.py", line 140, in build_by_dockerfile
+    return docker_lib.build_docker_image(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/cloud/docker_lib.py", line 108, in build_docker_image
+    _build_image_with_docker_command(
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/site-packages/xmanager/cloud/docker_lib.py", line 174, in _build_image_with_docker_command
+    subprocess.run(
+  File "/home/nichole/miniconda3/envs/xmanager_py311/lib/python3.11/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['docker', 'buildx', 'build', '-t', 'tmpk3971ztx:latest', '-t', 'tmpk3971ztx:latest', '-f', '/tmp/tmpqcqtt2e3/Dockerfile', '/tmp/tmpqcqtt2e3']' returned non-zero exit status 1.

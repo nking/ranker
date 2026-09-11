@@ -38,6 +38,7 @@ impl UserDb {
           repeated int32 ages = 4;
           repeated int64 timestamps = 5;
           uint32 n_users = 6;
+          option unit32 k = 7;
          }
         */
         if user_ids.is_empty() {
@@ -104,6 +105,7 @@ impl UserDb {
             ages,
             timestamps: valid_timestamps,
             n_users : n_users as u32,
+            k : None
         }))
 
 

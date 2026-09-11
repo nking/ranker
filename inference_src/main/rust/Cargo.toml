@@ -55,6 +55,7 @@ tonic-prost-build = "0.14.6"
 # Test-only dependencies go here
 polars = { version = "0.54.4", features = ["lazy", "strings", "parquet", "polars-lazy", "is_in"] }
 serial_test = "4.0.1"
+safetensors = "0.8.0"
 
 # Force Cargo to look outside its project root for the test file
 [[test]]
@@ -114,6 +115,10 @@ name = "calc_metrics_tests"
 path="../../test/rust/test/calc_metrics_test.rs"
 
 [[test]]
+name = "calc_metrics_2_tests"
+path="../../test/rust/test/calc_metrics_2_test.rs"
+
+[[test]]
 name = "pairwise_pref_tests"
 path= "../../test/rust/test/polarized_genre_pref_test.rs"
 
@@ -124,3 +129,11 @@ path= "../../test/rust/test/tail_user_specificity_test.rs"
 [[test]]
 name = "bayesian_tests"
 path= "../../test/rust/test/bayesian_test.rs"
+
+[[test]]
+name = "movie_tiers_tests"
+path= "../../test/rust/test/movie_tiers_test.rs"
+
+[[test]]
+name = "num_candidates_tests"
+path= "../../test/rust/test/num_candidates_test.rs"

@@ -32,6 +32,7 @@ pub enum DataSize {
     Full,
     Small,
     Tiny,
+    Tiny3
 }
 
 #[allow(dead_code)]
@@ -49,6 +50,7 @@ pub fn get_train_val_test_liked_uris(
             match data_size {
                 DataSize::Small => p.push("small"),
                 DataSize::Tiny => p.push("tiny"),
+                DataSize::Tiny3 => p.push("tiny3"),
                 DataSize::Full => {} // No subfolder needed
             }
         }
@@ -64,7 +66,7 @@ pub fn get_train_val_test_liked_uris(
 
     let mut out = HashMap::with_capacity(keys.len());
     for key in keys {
-        let file_name = format!("ratings_{}-00000-of-00001.parquet", key);
+        let file_name = format!("ratings_{}.parquet", key);
         let full_path = format!("{}/{}", base_uri, file_name);
         out.insert(key.to_string(), full_path);
     }
@@ -173,6 +175,14 @@ pub fn get_config_json_uri() -> String {
     params_uri
 }
 #[allow(dead_code)]
+pub fn get_tiny_config_json_uri() -> String {
+    let params_uri = get_project_dir()
+        .map(|p| p.join("./inference_src/main/rust/config/default_tiny.json"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .expect("Project directory not found");
+    params_uri
+}
+#[allow(dead_code)]
 pub fn assert_slices_nearly_equal(a: &[f32], b: &[f32], epsilon: f32) {
     assert_eq!(a.len(), b.len(), "Slices have different lengths");
     for (i, (val_a, val_b)) in a.iter().zip(b.iter()).enumerate() {
@@ -185,3 +195,27 @@ pub fn assert_slices_nearly_equal(a: &[f32], b: &[f32], epsilon: f32) {
     }
 }
 
+#[allow(dead_code)]
+pub fn get_python_path() -> PathBuf {
+    // Get the user's home directory from environment
+    let home_dir = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .expect("Could not determine user home directory");
+
+    // Construct <home_dir>/miniconda3/envs/ranker_py312/bin/python3
+    let python_path = PathBuf::from(home_dir)
+        .join("miniconda3")
+        .join("envs")
+        .join("ranker_py312")
+        .join("bin")
+        .join("python3");
+
+    if !python_path.exists() {
+        panic!(
+            "Python binary not found at {:?}. Please ensure the ranker_py312 environment is created or edit this method for your venv.",
+            python_path
+        );
+    }
+
+    python_path
+}

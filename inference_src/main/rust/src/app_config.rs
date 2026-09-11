@@ -59,6 +59,9 @@ pub struct AppConfig {
     #[arg(long, env = "MOVIES_PATH")]
     pub movies_path : String,
 
+    #[arg(long, env = "MOVIE_TIERS_PATH")]
+    pub movie_tiers_path : String,
+
     // path to the query model hyperparameters json file
     #[arg(long, env = "QUERY_METADATA_URI")]
     pub query_metadata_uri : String,

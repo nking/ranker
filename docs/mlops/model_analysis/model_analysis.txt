@@ -1,19 +1,39 @@
+see files:
+   hparams.json  for best fitting model hyper-params
+   train_val_curves.pdf for the train, val curves.
+   train_metrics.jso for the train, val metrics
+   test_metrics.json for the test metrics
 
-best HPO objective NDCG@20: 0.45
+HPO objective was validation dataset composite NDCG@20.  
+   best: 0.27
 
-{'top_k': 20, 'learning_rate': 0.00123, 'weight_decay': 0.0015, 'out_dim': 32,
-'hidden_dim': 64, 'num_layers': 2, 'num_heads': 4, 'edge_embed_dim': 16,
-'dropout_rate': 0.1,
-'max_history': 40, 'num_candidates': 50, 'num_epochs': 20, 'batch_size': 256,}
+The training, validation curve logits are stable and
+reasonable in magnitude.  Stable learning is seen
+in all of the metrics.  15 epochs looks like enough
+training avoiding overfitting (memorization
+of the dataset).
 
-test metrics:
-test_mrr_20': 0.3204557201210058,
-'test_ndcg_20': 0.4483590564637814,
-'test_recall_20': 0.8930940448113207,
-'test_loss': 3.0445730697433904
+test dataset metrics:
+"test_composite_ndcg_20": 0.26536538277534727, 
+"test_ndcg_20": 0.39800726796718355,
+"test_ndcg_head_20": 0.5563947393539104,
+"test_ndcg_tail_20": 0.07414617448886658,
+"test_ndcg_torso_20": 0.20261356646710255,
+"test_mrr_20": 0.28624633430166446,
+"test_precision_1": 0.15606299867021275,
+"test_precision_20": 0.039541434734425646,
+"test_precision_5": 0.08592503723946024,
+"test_recall_20": 0.7908286236702128,
+"test_recall_head_20": 0.9543766696402367,
+"test_recall_tail_20": 0.25315330026948707,
+"test_recall_torso_20": 0.6004341726607465}
+"test_loss": 3.3560463063260344,
 
 see file opt_gpu_notes.txt for the gradual improvements in reducing runtime.
 the file is a work in progress.
+
+
+editing ...
 
 Then final test metrics performed by sampling randomly num_candidates for each
 user in the test dataset of all ratings.  n_draws are done for each user.
@@ -40,15 +60,21 @@ movies from one genre and had significant number of ratings in both
 Note that in training a batch size of 256, and choosing k=20 out of them and
 the batch of N items having only 1 positive (==relevant item) and the rest
 being negative, we can estimate NDCG@20 for randomly choosing any of the N:
-  random:
+  random, batch_size = 256:
     prob of the single positive landing at any rank: (1/N)
 
     E[NDCG@20] = (1/N) * sum_{i=1,k}( 1/log2(i+1) )
                = 0.0275
+
+  random, num_candidates = 70:
+    E[NDCG@20] = (1/N) * sum_{i=1,k}( 1/log2(i+1) )
+               = 0.101
+
   best:
     always has the single relevant at position 1:
     
     E[NDCG@20] = 1.0
+
 
 For inference, we have top_k items and all are relevant and have different ranks.  
 We want to calculate what NDCG@top_k would be for random ordering of the list.

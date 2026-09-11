@@ -22,6 +22,7 @@ mod tail_user_specificity_tests {
     use inference_engine::embeddings_util::read_user_embeddings;
 
     use serial_test::serial;
+    use inference_engine::movie_tiers::load_from_file;
 
     //use super::*;
     mod helper {
@@ -65,6 +66,11 @@ mod tail_user_specificity_tests {
         let movies_map : HashMap<i32, Movie> = load_and_count_movies(&config);
 
         let catalog_stats : CatalogStats = build_bayesian_catalog(&movies_map);
+
+        let movie_tiers : HashMap<i32, i32> = load_from_file(&config.movie_tiers_path).unwrap();
+
+
+        //let movie_tiers = load_movie_tiers(&config.movie_tiers_path);
 
         let ratings_uris = &config.ratings_uris;
         let tmp: Vec<&str> = ratings_uris.iter().map(|s| s.as_str()).collect();
