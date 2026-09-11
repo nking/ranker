@@ -109,8 +109,10 @@ mod calc_metrics_2_tests {
     async fn calc_tier_stratified_metrics(config: AppConfig, endpoint: String,
         test_ratings_paths: Vec<String>, output_path: String) -> Result<(), Box<dyn std::error::Error>> {
 
-        // get the movie_tiers file
+        // get the movie_tiers file.  key=movie_id, value=movie_tier
         let movie_tiers : HashMap<i32, i32> = load_from_file(&config.movie_tiers_path)?;
+
+        let num_catalog_movies = movie_tiers.len();
 
         //movie_tier_vec_map: tier -> user_id -> movies
         let (movie_tier_vec_map, user_ids, timestamps) : (Vec<HashMap<i32, HashSet<i32>>>,Vec<i32>, Vec<i64> )
@@ -131,6 +133,8 @@ mod calc_metrics_2_tests {
         let mut count_metric_tiers: Vec<i32> = vec![0; 3];
         let mut count_predicted_tiers : Vec<f64> = vec![0.; 3];
 
+        let mut recommended_set : HashSet<i32> = HashSet::new();
+
         for (chunk_users, chunk_timestamps) in user_ids.chunks(ranker_batch_size).zip(timestamps.chunks(ranker_batch_size)) {
             // chunks are &[i32] slices
 
@@ -148,7 +152,9 @@ mod calc_metrics_2_tests {
             sum_metrics(&movie_tier_vec_map, &movie_tiers, &ranked_movies,
                 &mut ndcg_tiers, &mut recall_tiers, &mut rand_ndcg_tiers,
                 &mut rand_recall_tiers, &mut count_metric_tiers,
-                &mut count_predicted_tiers)?;
+                &mut count_predicted_tiers,
+                &mut recommended_set
+            )?;
 
         }
 
@@ -180,6 +186,9 @@ mod calc_metrics_2_tests {
 
             results_map.insert(format!("frac_pred_tiers_{}_{}", tier_name, top_k), Value::from(mean_predicted_tiers));
         }
+
+        let cat_cov = (recommended_set.len() as f32)/(num_catalog_movies as f32);
+        results_map.insert(format!("catalog coverage"), Value::from(cat_cov));
 
         // Format as pretty-printed JSON string
         let pretty_json = serde_json::to_string_pretty(&results_map)?;
@@ -226,6 +235,7 @@ mod calc_metrics_2_tests {
         rand_recall_sum_tiers_ref: &mut [f64],
         count_metric_tiers_ref: &mut [i32],
         count_predicted_tiers_ref: &mut [f64],
+        recommended_set_ref: &mut HashSet<i32>,
     ) -> Result<(), Box<dyn std::error::Error>> {
 
         let k = ranked_movies_ref.num_candidates as usize;
@@ -294,6 +304,10 @@ mod calc_metrics_2_tests {
                 // Expected Random DCG = (|GT| / N) * max_k_dcg
                 let expected_rand_dcg = (gt_len / catalog_size) * max_k_dcg;
                 let expected_rand_ndcg = if idcg == 0.0 { 0.0 } else { expected_rand_dcg / idcg };
+
+                for &movie_id in predicted_movies {
+                    recommended_set_ref.insert(movie_id);
+                }
 
                 // --- Accumulate ---
                 recall_sum_tiers_ref[tier] += recall;
