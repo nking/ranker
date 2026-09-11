@@ -96,7 +96,7 @@ def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
 
 def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:int=32):
     """
-    get the Vizier study config of hyperparameter ranges. for HPO.
+    get the Vizier study config of hyperparameter ranges. for HPO default and ranges.
     :param top_k:  the top_k rankings for the model
     :param use_batching_alg: if True, uses study_config.algorithm = 'GP_UCB_PE'
     else study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
@@ -123,8 +123,9 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:in
     )
 
     root.add_discrete_param("max_history", feasible_values=[i for i in range(2*top_k, 100, 10)])
-    root.add_discrete_param("num_candidates", feasible_values=[i for i in range(2*top_k, 100, 10)])
-    
+    #root.add_discrete_param("num_candidates", feasible_values=[i for i in range(10*top_k, 5*top_k, 10*top_k)])
+    root.add_discrete_param("num_candidates", feasible_values=[200])
+
     #if want a linear relationship between lr and wd, setup a dependency:
     # wd_ratio = trial.suggest_float("wd_ratio", 0.01, 1.0, log=True)
     # config['weight_decay'] = config['learning_rate'] * wd_ratio
