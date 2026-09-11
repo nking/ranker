@@ -123,8 +123,7 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:in
     )
 
     root.add_discrete_param("max_history", feasible_values=[i for i in range(2*top_k, 100, 10)])
-    #root.add_discrete_param("num_candidates", feasible_values=[i for i in range(10*top_k, 5*top_k, 10*top_k)])
-    root.add_discrete_param("num_candidates", feasible_values=[200])
+    root.add_discrete_param("num_candidates", feasible_values=[i for i in range(2*top_k, 100, 10)])
 
     #if want a linear relationship between lr and wd, setup a dependency:
     # wd_ratio = trial.suggest_float("wd_ratio", 0.01, 1.0, log=True)

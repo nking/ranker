@@ -100,6 +100,8 @@ class GraphRanker(nnx.Module):
         )
         #batch_indices length is num_total_nodes
 
+        #the graph of senders and receivers uses a star bipartite morphology centered around the user node.
+
         #flow: Literal["source_to_target", "target_to_source"] = "source_to_target",
         #Inward: senders array holds the history movie edges and have implied receiver of user (where type==1)
         #Outward: receivers array holds the candidate movie edges and have implied send of user (where type==1)

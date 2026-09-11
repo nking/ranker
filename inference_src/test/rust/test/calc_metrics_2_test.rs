@@ -98,6 +98,7 @@ mod calc_metrics_2_tests {
             let output_path = format!("{}/bin/test_metrics.json", proj_dir);
 
             calc_tier_stratified_metrics(config.clone(), endpoint, test_ratings_paths, output_path).await.expect("Error: while calculating metrics");
+
         }
 
 
@@ -127,7 +128,8 @@ mod calc_metrics_2_tests {
         let mut recall_tiers : Vec<f64> = vec![0.; 3];
         let mut rand_ndcg_tiers : Vec<f64> = vec![0.; 3];
         let mut rand_recall_tiers : Vec<f64> = vec![0.; 3];
-        let mut count_tiers : Vec<i32> = vec![0; 3];
+        let mut count_metric_tiers: Vec<i32> = vec![0; 3];
+        let mut count_predicted_tiers : Vec<f64> = vec![0.; 3];
 
         for (chunk_users, chunk_timestamps) in user_ids.chunks(ranker_batch_size).zip(timestamps.chunks(ranker_batch_size)) {
             // chunks are &[i32] slices
@@ -144,7 +146,9 @@ mod calc_metrics_2_tests {
 
             // calc metrics by tier and add to ndcg_tiers and recall_tiers
             sum_metrics(&movie_tier_vec_map, &movie_tiers, &ranked_movies,
-                &mut ndcg_tiers, &mut recall_tiers, &mut rand_ndcg_tiers, &mut rand_recall_tiers, &mut count_tiers)?;
+                &mut ndcg_tiers, &mut recall_tiers, &mut rand_ndcg_tiers,
+                &mut rand_recall_tiers, &mut count_metric_tiers,
+                &mut count_predicted_tiers)?;
 
         }
 
@@ -157,11 +161,12 @@ mod calc_metrics_2_tests {
         let top_k = config.top_k;
         let mut results_map = serde_json::Map::new();
         for tier in 0..3 {
-            let count = count_tiers[tier];
+            let count = count_metric_tiers[tier];
             let mean_ndcg = if count == 0 {0.} else {ndcg_tiers[tier] / count as f64};
             let mean_recall = if count == 0 {0.} else {recall_tiers[tier] / count as f64};
             let mean_rand_ndcg = if count == 0 {0.} else {rand_ndcg_tiers[tier] / count as f64};
             let mean_rand_recall = if count == 0 {0.} else {rand_recall_tiers[tier] / count as f64};
+            let mean_predicted_tiers = if count == 0 {0.} else {count_predicted_tiers[tier] / count as f64};
             let tier_name = tier_names[tier];
 
             results_map.insert(format!("ndcg_{}_{}", tier_name, top_k), Value::from(mean_ndcg));
@@ -172,6 +177,8 @@ mod calc_metrics_2_tests {
 
             results_map.insert(format!("count_test_{}", tier_name), Value::from(test_tier_counts[tier]));
             results_map.insert(format!("count_movie_catalog_{}", tier_name), Value::from(movie_catalog_tier_counts[tier]));
+
+            results_map.insert(format!("frac_pred_tiers_{}_{}", tier_name, top_k), Value::from(mean_predicted_tiers));
         }
 
         // Format as pretty-printed JSON string
@@ -217,11 +224,23 @@ mod calc_metrics_2_tests {
         recall_sum_tiers_ref: &mut [f64],
         rand_ndcg_sum_tiers_ref: &mut [f64],
         rand_recall_sum_tiers_ref: &mut [f64],
-        count_tiers_ref: &mut [i32],
+        count_metric_tiers_ref: &mut [i32],
+        count_predicted_tiers_ref: &mut [f64],
     ) -> Result<(), Box<dyn std::error::Error>> {
 
         let k = ranked_movies_ref.num_candidates as usize;
         let catalog_size = movie_tiers_ref.len() as f64;
+
+        // make 1 hashset for each movie_tier.
+        let movie_tier_sets: Vec<HashSet<i32>> = (0..3)
+            .map(|target_tier| {
+                movie_tiers_ref
+                    .iter()
+                    .filter(|&(_, &tier_val)| tier_val == target_tier)
+                    .map(|(&movie_id, _)| movie_id)
+                    .collect()
+            })
+            .collect();
 
         // Pre-calculate the maximum possible DCG for K items (used for analytical random NDCG)
         // This is sum(1 / log2(rank + 1)) for all K ranks
@@ -260,6 +279,13 @@ mod calc_metrics_2_tests {
                 }
                 let ndcg: f64 = if idcg == 0.0 { 0.0 } else { dcg / idcg };
 
+                // the number of the tiers predicted
+                let intersection_count = predicted_movies
+                    .iter()
+                    .filter(|&movie_id|  movie_tier_sets[tier].contains(movie_id))
+                    .count();
+                count_predicted_tiers_ref[tier] += intersection_count as f64 / predicted_movies.len() as f64;
+
                 // baseline metrics, calculate for random ordering and selection,
                 // that is,
                 // a uniform random ranker
@@ -274,7 +300,7 @@ mod calc_metrics_2_tests {
                 ndcg_sum_tiers_ref[tier] += ndcg;
                 rand_recall_sum_tiers_ref[tier] += expected_rand_recall;
                 rand_ndcg_sum_tiers_ref[tier] += expected_rand_ndcg;
-                count_tiers_ref[tier] += 1;
+                count_metric_tiers_ref[tier] += 1;
             }
         }
 
