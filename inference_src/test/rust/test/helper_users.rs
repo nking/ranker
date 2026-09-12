@@ -143,3 +143,24 @@ pub fn get_user_movie_tier_map(lf: LazyFrame,
     Ok(tier_user_gt_maps)
 }
 
+pub fn create_user_movie_map(df_ratings: LazyFrame) -> PolarsResult<HashMap<i32, std::collections::HashSet<i32>>> {
+
+    let df = df_ratings.collect()?;
+
+    let user_series = df.column("user_id")?;
+    let movie_series = df.column("movie_id")?;
+
+    let user_chunked = user_series.i32()?;
+    let movie_chunked = movie_series.i32()?;
+
+    let mut h: HashMap<i32, std::collections::HashSet<i32>> = HashMap::new();
+
+    for (user_opt, movie_opt) in user_chunked.iter().zip(movie_chunked.iter()) {
+        if let (Some(user_id), Some(movie_id)) = (user_opt, movie_opt) {
+            h.entry(user_id).or_default().insert(movie_id);
+        }
+    }
+
+    Ok(h)
+}
+
