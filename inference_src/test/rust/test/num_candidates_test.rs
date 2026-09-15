@@ -103,6 +103,7 @@ mod num_candidates_tests {
     use std::collections::{HashMap, HashSet};
     use polars::df;
     use polars::prelude::{col, JoinArgs, JoinType, lit};
+    use rustc_hash::FxHashMap;
     // Bring everything from the outer scope (TestHarness, helper functions, etc.) into the test module
     use super::*;
 
@@ -124,7 +125,7 @@ mod num_candidates_tests {
         // Setup runs here
         let harness = TestHarness::new().await;
 
-        let movie_tiers : HashMap<i32, i32> = load_from_file(&harness.movie_tiers_path)?;
+        let movie_tiers : FxHashMap<i32, i32> = load_from_file(&harness.movie_tiers_path)?;
 
         let ranker_batch_size = harness.orchestrator.get_ranker_model_metadata().batch_size;
 
@@ -231,7 +232,7 @@ mod num_candidates_tests {
     }
 
     fn get_intersection_of_user_ids_tier_2(train_path: &String, val_path: &String,
-        test_path: &String, movie_tier_map_ref : &HashMap<i32, i32>) -> Result<HashSet<i32>, Box<dyn std::error::Error>> {
+        test_path: &String, movie_tier_map_ref : &FxHashMap<i32, i32>) -> Result<HashSet<i32>, Box<dyn std::error::Error>> {
 
         let df_train = load_and_concat_parquet(&[train_path])?;
         let df_val = load_and_concat_parquet(&[val_path])?;
@@ -280,7 +281,7 @@ mod num_candidates_tests {
 
     pub fn get_user_datastructures(
         ratings_uris: &[&str],
-        movie_tiers: &HashMap<i32, i32>
+        movie_tiers: &FxHashMap<i32, i32>
     ) -> Result<(Vec<HashMap<i32, HashSet<i32>>>, Vec<i32>, Vec<i64>), Box<dyn std::error::Error>> {
 
         let df_gt = load_and_concat_parquet(ratings_uris)?;

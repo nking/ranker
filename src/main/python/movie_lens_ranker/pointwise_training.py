@@ -3,7 +3,7 @@ in interest of replacing train_step and eval_step with point-wise losses
 instead of list-wise.
 
 the reason for considering pointwise loss is to improve the stability of
-the ndcg_tail_20 training.
+the ndcg_tail_20 training and to provide absolute probabilities instead of scores.
 """
 import jax
 import rax

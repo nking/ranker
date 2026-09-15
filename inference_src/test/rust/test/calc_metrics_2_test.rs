@@ -47,7 +47,10 @@ mod calc_metrics_2_tests {
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
     use inference_engine::user_db::UserDb;
     use inference_engine::user_history::{build_map_async, UserMapEntry};
-    use crate::calc_metrics_2_tests::helper::{get_config_json_uri, get_train_val_test_liked_uris, DataSize};
+    use crate::calc_metrics_2_tests::helper::{get_config_json_uri, get_train_val_test_liked_uris, DataSize, calc_normalized_emd_3, mean_and_std};
+
+    use rand::seq::SliceRandom;
+    use rand::thread_rng;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_calc_test_metrics() {
@@ -97,18 +100,239 @@ mod calc_metrics_2_tests {
         let test_ratings_paths = vec![
             format!("{}/src/test/resources/data/ratings_test_liked.parquet", proj_dir)];
 
+        // ===== movie_tier stats =======
         let output_path = format!("{}/bin/test_movie_tier_metrics.json", proj_dir);
 
-        let _res = calc_movie_tier_stratified_metrics(config.clone(), endpoint.clone(),
+        let movie_catalog_tier_fractions : Vec<f64> = calc_movie_tier_stratified_metrics(config.clone(), endpoint.clone(),
             test_ratings_paths.clone(), output_path).await.expect("Error: while calculating movie metrics");
 
         let output_path = format!("{}/bin/test_user_tier_metrics.json", proj_dir);
 
         let _res = calc_user_tier_stratified_metrics(config.clone(),
-            test_ratings_paths, endpoint, output_path).await.expect("Error: while calculating user metrics");
+            test_ratings_paths.clone(), endpoint.clone(), output_path).await.expect("Error: while calculating user metrics");
+
+        let output_path = format!("{}/bin/test_user_movie_tier_intersection_metrics.json", proj_dir);
+
+        let _res = calc_user_movie_tier_intersection_stratified_metrics(config.clone(),
+            test_ratings_paths, endpoint, &movie_catalog_tier_fractions, output_path).await.expect("Error: while calculating user metrics");
 
         // server is shutdown by the guard when this method is out of scope
 
+    }
+
+    async fn calc_user_movie_tier_intersection_stratified_metrics(config: AppConfig,  test_ratings_paths: Vec<String>,
+        endpoint: String, movie_catalog_tier_fractions: &Vec<f64>, output_path: String) -> Result<(), Box<dyn std::error::Error>> {
+
+        // for each user_tier=2 (users with fewest number of ratings)
+        //   for history: count movie_tiers => get fractions
+        //   for recommended: count movie_tiers => get fractions
+        //   calc normalized EMD
+        //   calc random EMD
+
+        // key=movie_id, val=movie_tier
+        let movie_tiers : FxHashMap<i32, i32> = load_from_file(&config.movie_tiers_path)?;
+
+        // user_tiers: key=user_id, val=user_tier
+        // user_movie_tier_history_frac_map: key=user_id, val=fraction of movie_tiers
+        let (user_tiers, user_movie_tier_hist_frac_map, user_ids, timestamps) :
+            (FxHashMap<i32, i32>, FxHashMap<i32, Vec<f64>>, Vec<i32>, Vec<i64>)
+            = get_user_datastructures_3(&[&test_ratings_paths[0]], &movie_tiers,
+            //Some(2)
+            None
+        ).await?;
+
+        let user_db : UserDb = UserDb::new(&config.user_db_path).expect("Failed to initialize UserDb from binary path");
+
+        let ranker_metadata = RankerModelMetadata::load_from_file(&config.ranker_metadata_uri).unwrap();
+
+        let ranker_batch_size = ranker_metadata.batch_size;
+
+        let client = RecommenderServiceClient::connect(endpoint.clone()).await?;
+
+        // for each user in user_movie_tier_hist_frac_map, create user_movie_tier_recomend_frac_map
+        let mut user_movie_tier_recommend_frac_map : FxHashMap<i32, Vec<f64>> = FxHashMap::default();
+
+        let num_candidates: usize = ranker_metadata.num_candidates;
+
+        for (chunk_users, chunk_timestamps) in user_ids.chunks(ranker_batch_size).zip(timestamps.chunks(ranker_batch_size)) {
+            let option_tonic_request: Option<Request<UsersRequest>> = user_db.get_request(chunk_users, chunk_timestamps);
+            let tonic_req = option_tonic_request.ok_or("request not found for chunk")?;
+            //let users_req = tonic_req.into_inner();
+
+            let mut active_client = client.clone();
+
+            let results: Result<Response<RankedMovies>, tonic::Status> =
+                active_client.predict(tonic_req).await;
+            let ranked_movies = results?.into_inner();
+
+            for (&user_id, predicted_movies) in ranked_movies.user_ids.iter()
+                .zip(ranked_movies.movie_ids.chunks_exact(num_candidates)){
+
+                // Stack-allocated array for counting tiers 0, 1, and 2
+                let mut counts = [0_usize; 3];
+
+                // there should always be num_candidates recommendations
+
+                for &movie_id in predicted_movies {
+                    if let Some(&tier) = movie_tiers.get(&movie_id) {
+                        if (0..3).contains(&tier) {
+                            counts[tier as usize] += 1;
+                        }
+                    }
+                }
+
+                // Convert counts to fractions
+                let fractions: Vec<f64> = counts
+                    .iter()
+                    .map(|&c| c as f64 / num_candidates as f64)
+                    .collect();
+
+                user_movie_tier_recommend_frac_map.insert(user_id, fractions);
+
+            }
+        }
+
+        // now we have the historic user_movie_tier_hist_frac_map
+        //     and the recommended  user_movie_tier_recommend_frac_map
+        // and because they are ordinal, that is, order matters, we will use Earth-Mover's Distance,
+        // a.k.a. Wasserstein distances.
+
+        // calculate normalized EMDs for user_tier=2 because it's harder to model.
+        // compare to what the EMD would be if the recommended distribution just followed the catalog proportionally
+
+        let mut real_emds: FxHashMap<i32, Vec<f64>> = FxHashMap::from_iter([
+            (0, Vec::new()),
+            (1, Vec::new()),
+            (2, Vec::new()),
+        ]);
+
+        let mut catalog_emds: FxHashMap<i32, Vec<f64>> = FxHashMap::from_iter([
+            (0, Vec::new()),
+            (1, Vec::new()),
+            (2, Vec::new()),
+        ]);
+
+        // Vectors to hold distributions so we can zip and shuffle them later
+        let mut all_hist_distrs = Vec::new();
+        let mut all_rec_distrs = Vec::new();
+
+        let mut tier_1_hist_distrs = Vec::new();
+        let mut tier_1_rec_distrs = Vec::new();
+
+        let mut tier_2_hist_distrs = Vec::new();
+        let mut tier_2_rec_distrs = Vec::new();
+
+        for (&user_id, &tier) in user_tiers.iter() {
+            if let (Some(hist), Some(rec)) = (
+                user_movie_tier_hist_frac_map.get(&user_id),
+                user_movie_tier_recommend_frac_map.get(&user_id),
+            ) {
+                let emd = calc_normalized_emd_3(hist, rec);
+                real_emds.entry(tier).or_default().push(emd);
+
+                catalog_emds.entry(tier).or_default().push(
+                    calc_normalized_emd_3(hist, movie_catalog_tier_fractions)
+                );
+
+                all_hist_distrs.push(hist.clone());
+                all_rec_distrs.push(rec.clone());
+
+                if tier == 2 {
+                    tier_2_hist_distrs.push(hist.clone());
+                    tier_2_rec_distrs.push(rec.clone());
+                } else if tier == 1{
+                    tier_1_hist_distrs.push(hist.clone());
+                    tier_1_rec_distrs.push(rec.clone());
+                }
+            }
+        }
+
+        let mut results_map = serde_json::Map::new();
+
+
+        let mut real_mean = Vec::with_capacity(3);
+        let mut stdv = Vec::with_capacity(3);
+        for tier in 0..3 {
+            if let Some(emds) = real_emds.get(&tier) {
+                let (mean, stdev) = mean_and_std(emds);
+                real_mean.push(mean);
+                stdv.push(stdev);
+                //println!("Real Mean EMD (tier={}):   {:.4} (std: {:.4})", tier, mean, stdev);
+                results_map.insert(format!("emd_real_mean_for_usertier_{}", tier), Value::from(round_to_4_decimal_places(mean)));
+                results_map.insert(format!("emd_real_stdev_for_usertier_{}", tier), Value::from(round_to_4_decimal_places(stdev)));
+            }
+        }
+
+        let mut cat_mean = Vec::with_capacity(3);
+        let mut cat_stdv = Vec::with_capacity(3);
+        for tier in 0..3 {
+            if let Some(emds) = catalog_emds.get(&tier) {
+                let (mean, stdev) = mean_and_std(emds);
+                cat_mean.push(mean);
+                cat_stdv.push(stdev);
+                //println!("EMD  (tier={}) to catalog distr:   {:.4} (std: {:.4})", tier, mean, stdev);
+                results_map.insert(format!("emd_to_catalog_mean_for_usertier_{}", tier), Value::from(round_to_4_decimal_places(mean)));
+                results_map.insert(format!("emd_to_catalog_stdev_for_usertier_{}", tier), Value::from(round_to_4_decimal_places(stdev)));
+            }
+        }
+
+        //movie_tier_fractions
+        // Calculate comparison
+        let mut rng = thread_rng();
+        // Shuffle the historical distributions so they no longer match the users
+        all_hist_distrs.shuffle(&mut rng);
+        let mut all_random_emds = Vec::with_capacity(all_rec_distrs.len());
+        // Pair the shuffled histories against the original recommendations
+        for (shuffled_hist, rec) in all_hist_distrs.iter().zip(all_rec_distrs.iter()) {
+            let emd = calc_normalized_emd_3(shuffled_hist, rec);
+            all_random_emds.push(emd);
+        }
+        let (all_rand_mean, all_rand_std) = mean_and_std(&all_random_emds);
+        results_map.insert("emd_random_shuffle_all_mean".to_string(), Value::from(round_to_4_decimal_places(all_rand_mean)));
+        results_map.insert("emd_random_shuffle_all_stdev".to_string(), Value::from(round_to_4_decimal_places(all_rand_std)));
+
+
+        tier_2_hist_distrs.shuffle(&mut rng);
+        let mut tier_2_random_emds = Vec::with_capacity(tier_2_rec_distrs.len());
+        // Pair the shuffled histories against the original recommendations
+        for (shuffled_hist, rec) in tier_2_hist_distrs.iter().zip(tier_2_rec_distrs.iter()) {
+            let emd = calc_normalized_emd_3(shuffled_hist, rec);
+            tier_2_random_emds.push(emd);
+        }
+        let (tier_2_rand_mean, tier_2_rand_std) = mean_and_std(&tier_2_random_emds);
+        results_map.insert("emd_random_shuffle_usertier_2_mean".to_string(), Value::from(round_to_4_decimal_places(tier_2_rand_mean)));
+        results_map.insert("emd_random_shuffle_usertier_2_stdev".to_string(), Value::from(round_to_4_decimal_places(tier_2_rand_std)));
+
+
+        tier_1_hist_distrs.shuffle(&mut rng);
+        let mut tier_1_random_emds = Vec::with_capacity(tier_1_rec_distrs.len());
+        // Pair the shuffled histories against the original recommendations
+        for (shuffled_hist, rec) in tier_1_hist_distrs.iter().zip(tier_1_rec_distrs.iter()) {
+            let emd = calc_normalized_emd_3(shuffled_hist, rec);
+            tier_1_random_emds.push(emd);
+        }
+        let (tier_1_rand_mean, tier_1_rand_std) = mean_and_std(&tier_1_random_emds);
+        results_map.insert("emd_random_shuffle_usertier_1_mean".to_string(), Value::from(round_to_4_decimal_places(tier_1_rand_mean)));
+        results_map.insert("emd_random_shuffle_usertier_1_stdev".to_string(), Value::from(round_to_4_decimal_places(tier_1_rand_std)));
+
+
+        // Output the results
+        //println!("Real Mean EMD:   {:.4} (std: {:.4})", real_mean, real_std);
+        //println!("Random Mean EMD from shuffle all user history to recommendation data: {:.4} (std: {:.4})", all_rand_mean, all_rand_std);
+        //println!("Random Mean EMD from shuffle user_tier=2 history to recommendation data: {:.4} (std: {:.4})", tier_2_rand_mean, tier_2_rand_std);
+
+        let pretty_json = serde_json::to_string_pretty(&results_map)?;
+        println!("{}", pretty_json);
+        let mut file = File::create(&output_path)?;
+        file.write_all(pretty_json.as_bytes())?;
+
+        println!("=== Tier 2 Users EMD Alignment ===");
+
+        Ok(())
+    }
+
+    fn round_to_4_decimal_places(x : f64) -> f64 {
+        (x * 10000.0).round() / 10000.0
     }
 
     async fn calc_user_tier_stratified_metrics(config: AppConfig,  test_ratings_paths: Vec<String>,
@@ -149,7 +373,7 @@ mod calc_metrics_2_tests {
 
             let results: Result<Response<RankedMovies>, tonic::Status> =
                 active_client.predict(tonic_req).await;
-            let ranked_movies = results.unwrap().into_inner();
+            let ranked_movies = results?.into_inner();
 
             sum_user_tier_metrics(
                 &test_user_movie_map,
@@ -251,10 +475,10 @@ mod calc_metrics_2_tests {
     }
 
     async fn calc_movie_tier_stratified_metrics(config: AppConfig, endpoint: String,
-        test_ratings_paths: Vec<String>, output_path: String) -> Result<(), Box<dyn std::error::Error>> {
+        test_ratings_paths: Vec<String>, output_path: String) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
 
         // get the movie_tiers file.  key=movie_id, value=movie_tier
-        let movie_tiers : HashMap<i32, i32> = load_from_file(&config.movie_tiers_path)?;
+        let movie_tiers : FxHashMap<i32, i32> = load_from_file(&config.movie_tiers_path)?;
 
         let num_catalog_movies = movie_tiers.len();
 
@@ -290,7 +514,7 @@ mod calc_metrics_2_tests {
 
             let results: Result<Response<RankedMovies>, tonic::Status> =
                 active_client.predict(tonic_req).await;
-            let ranked_movies = results.unwrap().into_inner();
+            let ranked_movies = results?.into_inner();
 
             // calc metrics by tier and add to ndcg_tiers and recall_tiers
             sum_movie_tier_metrics(&movie_tier_vec_map, &movie_tiers, &ranked_movies,
@@ -332,7 +556,7 @@ mod calc_metrics_2_tests {
         }
 
         let cat_cov = (recommended_set.len() as f32)/(num_catalog_movies as f32);
-        results_map.insert(format!("catalog coverage"), Value::from(cat_cov));
+        results_map.insert("catalog coverage".to_string(), Value::from(cat_cov));
 
         // Format as pretty-printed JSON string
         let pretty_json = serde_json::to_string_pretty(&results_map)?;
@@ -348,10 +572,19 @@ mod calc_metrics_2_tests {
         let mut file = File::create(&output_path)?;
         file.write_all(pretty_json.as_bytes())?;
 
-        Ok(())
+        let total: i32 = movie_catalog_tier_counts.iter().sum();
+        let movie_catalog_tier_frac: Vec<f64> = if total == 0 {
+            vec![0.0; movie_catalog_tier_counts.len()]
+        } else {
+            movie_catalog_tier_counts.iter()
+                .map(|&c| c as f64 / total as f64)
+                .collect()
+        };
+
+        Ok(movie_catalog_tier_frac)
     }
 
-    fn count_tier_movies_in_catalog(movie_tiers : HashMap<i32, i32>) -> Vec<i32> {
+    fn count_tier_movies_in_catalog(movie_tiers : FxHashMap<i32, i32>) -> Vec<i32> {
         let mut counts : Vec<i32> = vec![0; 3];
         for (_u, t) in movie_tiers {
             counts[t as usize] += 1;
@@ -375,7 +608,7 @@ mod calc_metrics_2_tests {
 
     pub fn sum_movie_tier_metrics(
         movie_tier_vec_map_ref: &Vec<HashMap<i32, HashSet<i32>>>,
-        movie_tiers_ref : &HashMap<i32, i32>,
+        movie_tiers_ref : &FxHashMap<i32, i32>,
         ranked_movies_ref: &RankedMovies,
         ndcg_sum_tiers_ref: &mut [f64],
         recall_sum_tiers_ref: &mut [f64],
@@ -551,7 +784,7 @@ mod calc_metrics_2_tests {
 
     pub fn get_user_datastructures(
         ratings_uris: &[&str],
-        movie_tiers: &HashMap<i32, i32>
+        movie_tiers: &FxHashMap<i32, i32>
     ) -> Result<(Vec<HashMap<i32, HashSet<i32>>>, Vec<i32>, Vec<i64>), Box<dyn std::error::Error>> {
 
         let df_gt = load_and_concat_parquet(ratings_uris)?;
@@ -569,11 +802,133 @@ mod calc_metrics_2_tests {
 
         let (user_ids, timestamps) = get_unique_user_and_first_timestamp(df_gt.clone())?;
 
-        // key=user_id, value=hashset of movie_id
+        // key=user_id, value=hashset(movie_id)
         let test_user_movie_map = create_user_movie_map(df_gt)?;
 
         Ok((test_user_movie_map, user_ids, timestamps))
     }
 
+    async fn get_user_datastructures_3(ratings_uris: &[&str], movie_tier_map: &FxHashMap<i32, i32>,
+        filter_for_user_tier: Option<i32>)
+        -> Result<(FxHashMap<i32, i32>, FxHashMap<i32, Vec<f64>>, Vec<i32>, Vec<i64>), Box<dyn std::error::Error>> {
+
+        let df_gt = load_and_concat_parquet(ratings_uris)?;
+
+        let (mut user_ids, mut timestamps) : (Vec<i32>, Vec<i64>) = get_unique_user_and_first_timestamp(df_gt.clone())?;
+
+        let (user_tiers, mut user_movie_tier_history_frac_map) : (FxHashMap<i32, i32>, FxHashMap<i32, Vec<f64>>)
+            = _get_datasets_3(movie_tier_map).await?;
+
+
+        if let Some(target_tier) = filter_for_user_tier {
+            // movie up the tier=2 elements and truncate vector
+            let mut write_idx = 0;
+            for read_idx in 0..user_ids.len() {
+                let user_id = user_ids[read_idx];
+                if user_tiers.get(&user_id) == Some(&target_tier) {
+                    user_ids[write_idx] = user_id;
+                    timestamps[write_idx] = timestamps[read_idx];
+                    write_idx += 1;
+                }
+            }
+            user_ids.truncate(write_idx);
+            timestamps.truncate(write_idx);
+
+            // modify in-place
+            user_movie_tier_history_frac_map.retain(|user_id, _| {
+                user_tiers.get(user_id) == Some(&target_tier)
+            });
+        }
+
+        Ok((user_tiers, user_movie_tier_history_frac_map, user_ids, timestamps))
+    }
+
+    async fn _get_datasets_3(movie_tiers: &FxHashMap<i32, i32>)
+        -> Result<(FxHashMap<i32, i32>, FxHashMap<i32, Vec<f64>>), Box<dyn std::error::Error>> {
+
+        let ratings_map = get_train_val_test_liked_uris(DataSize::Full, false);
+        let ratings_history_uris: Vec<String> = vec![
+            ratings_map.get("train_liked").unwrap().clone(),
+            ratings_map.get("train_3").unwrap().clone(),
+            ratings_map.get("train_disliked").unwrap().clone(),
+            ratings_map.get("val_liked").unwrap().clone(),
+            ratings_map.get("val_3").unwrap().clone(),
+            ratings_map.get("val_disliked").unwrap().clone(),
+        ];
+        let ratings_history_uris: Vec<&str> = ratings_history_uris
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+
+        // make user history, then for the length of each users' histories, make a histogram
+        // and extract the top 20% as head, next 60% as torso and bottom 20% as tail
+        // these are then the user_tiers
+        let (user_hash, _max_history_len) : (FxHashMap<i32, UserMapEntry>, usize)
+            = build_map_async(&ratings_history_uris).await;
+
+        let mut user_rating_lengths: Vec<(i32, usize)> = user_hash
+            .iter()
+            .map(|(&user_id, entry)| (user_id, entry.movie_ids.len()))
+            .collect();
+
+        // Sort ascending by activity length
+        user_rating_lengths.sort_unstable_by_key(|&(_, len)| len);
+
+        let n = user_rating_lengths.len();
+        let tail_cutoff = (n as f64 * 0.20).round() as usize;
+        let head_cutoff = (n as f64 * 0.80).round() as usize;
+
+        //  Assign tiers (0 = head, 1 = torso, 2 = tail)
+        let mut user_tiers: FxHashMap<i32, i32> = FxHashMap::default();
+        user_tiers.reserve(n);
+
+        for (i, &(user_id, _)) in user_rating_lengths.iter().enumerate() {
+            let tier = if i < tail_cutoff {
+                2 // Bottom 20% (tail)
+            } else if i >= head_cutoff {
+                0 // Top 20% (head)
+            } else {
+                1 // Middle 60% (torso)
+            };
+            user_tiers.insert(user_id, tier);
+        }
+
+        // given user_hash: FxHashMap<i32, UserMapEntry> with key=user_id, and val = UserMapEntry which has movie_ids
+        // given movie_tiers: &FxHashMap<i32, i32>)
+        // create FxHashMap<i32, Vec<i32>> with key=user_id, val=fraction of movie_tier for each user
+        // by  counting the movie_tiers for each user's UserMapEntry and divide by total to get fractions of each as a Vector
+        let mut user_movie_tier_fractions: FxHashMap<i32, Vec<f64>> = FxHashMap::default();
+        user_movie_tier_fractions.reserve(user_hash.len());
+
+        for (&user_id, entry) in &user_hash {
+            let total_movies = entry.movie_ids.len();
+
+            if total_movies == 0 {
+                user_movie_tier_fractions.insert(user_id, vec![0.0; 3]);
+                continue;
+            }
+
+            // Stack-allocated array for counting tiers 0, 1, and 2
+            let mut counts = [0_usize; 3];
+
+            for &movie_id in &entry.movie_ids {
+                if let Some(&tier) = movie_tiers.get(&movie_id) {
+                    if (0..3).contains(&tier) {
+                        counts[tier as usize] += 1;
+                    }
+                }
+            }
+
+            // Convert counts to fractions
+            let fractions: Vec<f64> = counts
+                .iter()
+                .map(|&c| c as f64 / total_movies as f64)
+                .collect();
+
+            user_movie_tier_fractions.insert(user_id, fractions);
+        }
+
+        Ok((user_tiers, user_movie_tier_fractions))
+    }
 
 }

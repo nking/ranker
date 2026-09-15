@@ -2,6 +2,7 @@
 
 use polars::df;
 use polars::prelude::{concat, LazyFrame, PlRefPath, PolarsResult, ScanArgsParquet, UnionArgs, DataFrame, SortMultipleOptions, IdxSize, col, len, JoinArgs, JoinType, IntoLazy};
+use rustc_hash::FxHashMap;
 
 #[allow(dead_code)]
 pub fn load_and_concat_parquet(paths: &[&str]) -> PolarsResult<LazyFrame> {
@@ -99,7 +100,7 @@ pub fn get_unique_user_and_first_timestamp(df: LazyFrame) -> PolarsResult<(Vec<i
 ///
 /// returns: Vec<HashMap<i32, HashSet<i32>>>
 pub fn get_user_movie_tier_map(lf: LazyFrame,
-    movie_tier_map_ref: &HashMap<i32, i32>,
+    movie_tier_map_ref: &FxHashMap<i32, i32>,
 ) -> PolarsResult<Vec<HashMap<i32, std::collections::HashSet<i32>>>> {
 
     // Convert the HashMap into a DataFrame
@@ -164,3 +165,31 @@ pub fn create_user_movie_map(df_ratings: LazyFrame) -> PolarsResult<HashMap<i32,
     Ok(h)
 }
 
+pub fn calc_normalized_emd_3(hist: &[f64], rec: &[f64]) -> f64 {
+
+    if hist.len() != 3 || rec.len() != 3 {
+        panic!("hist and rec need to be length 3, received {}, {}", hist.len(), rec.len());
+    }
+
+    // CDF for bin 0
+    let hist_cdf_0 = hist[0];
+    let rec_cdf_0 = rec[0];
+
+    // CDF for bin 1 (bin 0 + bin 1)
+    let hist_cdf_1 = hist[0] + hist[1];
+    let rec_cdf_1 = rec[0] + rec[1];
+
+    // Sum of absolute differences between CDFs, divided by theoretical max (2.0)
+    let emd = (hist_cdf_0 - rec_cdf_0).abs() + (hist_cdf_1 - rec_cdf_1).abs();
+    emd / 2.0
+}
+
+/// Helper to calculate mean and standard deviation
+pub fn mean_and_std(data: &[f64]) -> (f64, f64) {
+    if data.len() <= 1 {
+        return (data.first().copied().unwrap_or(0.0), 0.0);
+    }
+    let mean = data.iter().sum::<f64>() / data.len() as f64;
+    let variance = data.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (data.len() - 1) as f64;
+    (mean, variance.sqrt())
+}

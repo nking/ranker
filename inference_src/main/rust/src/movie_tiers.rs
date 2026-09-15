@@ -1,8 +1,8 @@
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::error::Error;
+use rustc_hash::FxHashMap;
 use crate::util::check_path;
 
 #[derive(Deserialize)]
@@ -11,13 +11,13 @@ struct MovieTierRecord {
     tier: i32,
 }
 
-pub fn load_from_file(file_path: &str) -> Result<HashMap<i32, i32>, Box<dyn Error>> {
+pub fn load_from_file(file_path: &str) -> Result<FxHashMap<i32, i32>, Box<dyn Error>> {
 
     let _r = check_path(&file_path, "movie tiers JSON");
 
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
-    let mut tiers_map = HashMap::new();
+    let mut tiers_map : FxHashMap<i32, i32> = FxHashMap::default();
 
     for line in reader.lines() {
         let line = line?;
