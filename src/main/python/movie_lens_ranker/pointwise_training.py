@@ -5,6 +5,8 @@ instead of list-wise.
 the reason for considering pointwise loss is to improve the stability of
 the ndcg_tail_20 training and to provide absolute probabilities instead of scores.
 """
+from typing import Union, List
+
 import jax
 import rax
 from flax import nnx
@@ -20,9 +22,12 @@ from movie_lens_ranker.train import score_and_shape_results
 def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
                optimizer: nnx.Optimizer,
                movie_tiers:np.ndarray, movie_offset:int = 6040+1,
-               tier_weights_config: jnp.ndarray = jnp.array([0.25, 0.55, 0.2]),
+               tier_weights_config: Union[List, Array] = [0.33, 0.33, 0.33],
                focal_loss_gamma: float = 2.0,
                ) -> Array:
+
+    if isinstance(tier_weights_config, list):
+        tier_weights_config = jnp.array(tier_weights_config)
 
     normalized_weights = tier_weights_config / jnp.sum(tier_weights_config)
 
@@ -90,7 +95,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
 @nnx.jit(static_argnames=('top_k',))
 def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
               movie_tiers:np.ndarray, movie_offset:int,
-              tier_weights_config: jnp.ndarray = jnp.array([0.25, 0.55, 0.2]),
+              tier_weights_config: jnp.ndarray = jnp.array([0.33, 0.33, 0.33]),
               top_k:int=20) -> dict[str, Array]:
     """
     train step over a batch, where padded_graph contains super graph of the batch
@@ -116,9 +121,9 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
 
     #FIXED values decided in the TwoTowerDNN bi-encoder:
     normalized_weights = tier_weights_config / jnp.sum(tier_weights_config)
-    w_head:float= normalized_weights[0] # 0.25
-    w_torso:float= normalized_weights[1] # 0.55
-    w_tail:float= normalized_weights[2]  # 0.2
+    w_head:float= normalized_weights[0] # 0.33
+    w_torso:float= normalized_weights[1] # 0.33
+    w_tail:float= normalized_weights[2]  # 0.33
 
     #shapes: (total number of graphs including dummy grpahs, model.num_candidates).
     # main_mask is True for real data and False for dummy graph data

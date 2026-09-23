@@ -11,6 +11,8 @@ import sys
 import logging
 
 import jax
+from jax import Array
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 import uuid
@@ -82,7 +84,16 @@ def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
     int_keys = {"top_k", "num_layers", "num_heads","hidden_dim","max_history",
         "num_candidates","out_dim","edge_embed_dim"}
     for k, v in params.items():
-        if k in int_keys:
+        if k == "tier_weights":
+            if isinstance(v, ParameterValue):
+                v = v.value
+            if isinstance(v, str):
+                config[k] = json.loads(v)  #list of floats
+            elif isinstance(v, Array):
+                config[k] = [round(w, 4) for w in v.tolist()]
+            else:
+                config[k] = v
+        elif k in int_keys:
             if isinstance(v, ParameterValue):
                 config[k] = int(v.value)
             else:
@@ -94,7 +105,7 @@ def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
                 config[k] = float(v)
     return config
 
-def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:int=32):
+def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:int=32):
     """
     get the Vizier study config of hyperparameter ranges. for HPO default and ranges.
     :param top_k:  the top_k rankings for the model
@@ -134,11 +145,11 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:in
         scale_type=vz.ScaleType.LOG)
 
     root.add_float_param("temperature", min_value=0.05, max_value=0.15, default_value=0.1,
-        scale_type=vz.ScaleType.LINEAR)
+        scale_type=vz.ScaleType.LOG)
 
     feasible_out_dim = [embed_in_dim, int(embed_in_dim * 1.5), embed_in_dim * 2] # e.g., [32, 48, 64]
 
-    # out_dim avoids bottlenecking the incoming embeddings.
+    # out_dim avoids bottle-necking the incoming embeddings.
     # For embed_in_dim=32, yields [32, 48, 64] (multiples of 16 for JAX vector alignment)
     out_dim_param = root.add_discrete_param(
         "out_dim",
@@ -156,7 +167,17 @@ def _get_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:in
     root.add_discrete_param("dropout_rate", feasible_values=[round(i * 0.05, 2) for i in range(2, 9)])
 
     #feasible_gammas = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0]
-    root.add_discrete_param('focal_loss_gamma', feasible_values=[0.5, 2.0, 4.0], default_value=2.0)
+    root.add_discrete_param('focal_loss_gamma', feasible_values=[0.0, 0.5, 2.0, 4.0], default_value=2.0)
+
+    ## we set this to match what is used for composite_ndcg in the TwoTowerDNN training,
+    ## but if wanted to separate w_head,_torso,_tail for the IPW tiered weightings,
+    ## then need to change eval_step's assignments of w_head, w_torso, and w_tail
+    root.add_categorical_param("tier_weights",
+        feasible_values=["[0.33, 0.33, 0.33]"
+                         #,"[0.65, 0.2, 0.15]"
+                         #,"[0.2, 0.65, 0.15]"
+                         ]
+        )
 
     problem.metric_information.append(
         vz.MetricInformation(name=f'composite_ndcg_{top_k}',
@@ -196,8 +217,8 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
     vz_clients.environment_variables.server_endpoint = endpoint
     resource_name = f"owners/{project_id}/studies/{study_name}"
     
-    study_config = _get_study_config(top_k=top_k, use_batching_alg=use_batching_alg,
-        embed_in_dim=embed_in_dim)
+    study_config = _get_vizier_study_config(top_k=top_k, use_batching_alg=use_batching_alg,
+                                            embed_in_dim=embed_in_dim)
     
     if jax.process_index() == 0:
         # Now connects to the explicitly created server.
@@ -222,18 +243,24 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
                 raise e
     raise RuntimeError(f"Worker {jax.process_index()} timed out waiting for study to be created by worker 0.")
 
-def sync_hyperparams(params_dict) -> Dict[str, Union[int, float]]:
+def sync_hyperparams(params_dict) -> Dict[str, Union[int, float, str]]:
     # Convert dict to a fixed-order array on Process 0
     # Others initialize with zeros
     sync_keys = ["top_k", "num_layers", "num_heads", "hidden_dim",
         "max_history","num_candidates", "learning_rate", "weight_decay", "out_dim",
-        "mlp_hidden_dim", "edge_embed_dim","dropout_rate", "temperature", "focal_loss_gamma"]
+        "mlp_hidden_dim", "edge_embed_dim","dropout_rate", "temperature", "focal_loss_gamma", "tier_weights"]
     num_keys = len(sync_keys)
     if jax.process_index() == 0:
         #extract ParameterValue to primitives:
         params_dict = extract_correct_vizier_param_types_dict(params_dict)
-        local_arr = jnp.array([float(params_dict[k]) for k in sync_keys],
-            dtype=jnp.float32)
+        flat_vals = []
+        for k in sync_keys:
+            val = params_dict[k]
+            if k == "tier_weights":
+                flat_vals.extend([float(x) for x in val])
+            else:
+                flat_vals.append(float(val))
+        local_arr = jnp.array(flat_vals, dtype=jnp.float32)
     else:
         local_arr = jnp.zeros((num_keys,), dtype=jnp.float32)
     
@@ -242,10 +269,18 @@ def sync_hyperparams(params_dict) -> Dict[str, Union[int, float]]:
     final_params = jnp.sum(gathered, axis=0)
     
     # map back to dictionary
-    final_params_dict = {k: v for k, v in zip(sync_keys, final_params)}
+    final_params_dict = {}
+    param_i = 0
+    for _i, k in enumerate(sync_keys):
+        if k == "tier_weights":
+            final_params_dict[k] = final_params[param_i: param_i+3]
+            param_i += 3
+        else:
+            final_params_dict[k] = final_params[param_i]
+            param_i += 1
+
     # cast to int where needed:
-    final_params_dict = extract_correct_vizier_param_types_dict(
-        final_params_dict)
+    final_params_dict = extract_correct_vizier_param_types_dict(final_params_dict)
     return final_params_dict
     
 def run_tune(config):
@@ -362,8 +397,7 @@ def run_tune(config):
         # if worker_Rank !=0, then mlflow_run_id is ""
         best_val_composite_ndcg_k, mlflow_run_id = run_train_phase(config2,
             movie_tiers=movie_tiers, movie_offset=movie_offset,
-            trial=trial_suggestion,
-            save_checkpoints=False)
+            trial=trial_suggestion, save_checkpoints=False)
         
         if worker_rank == 0:
             trial_suggestion.update_metadata(vz.Metadata({'mlflow_run_id': mlflow_run_id}))
@@ -378,6 +412,10 @@ def run_train(config):
     if "phase" not in config:
         logging.info("ERROR: expecting phase='train-best' or 'train-given'")
         return
+
+    if config["phase"] == "train-given":
+        if "use_ipw" in config and config["use_ipw"] and "tier_weights" not in config:
+            raise LookupError(f"missing tier_weights")
     
     req_keys = {'user_embeddings_uri', 'movie_embeddings_uri', 'movies_uri',
         'recommendations_uri', 'recommendations_ts_uri',

@@ -62,6 +62,7 @@ model_params_trainable_keys = {
     'temperature',
     'num_epochs',
     'batch_size',
+    "tier_weights"
 }
 def get_recognized_keys():
     return {
@@ -70,7 +71,7 @@ def get_recognized_keys():
         *mlflow_config_keys,
         *model_params_trainable_keys,
         *hpo_config_keys,
-        *{'connections_check', 'debug', 'git_commit_hash'}
+        *{'connections_check', 'debug', 'git_commit_hash', 'use_focal_loss', 'use_ipw'}
     }
 
 def app_runner_is_missing_minimum_required_keys(config: Dict[str, Any]) -> bool:
@@ -323,9 +324,14 @@ def define_flags():
              "additionally, if JAX_PLATFORM_NAME=gpu there will be a check for expected number of GPUs found")
     flags.DEFINE_string("git_commit_hash", default=None, help="git commit hash for this running code.")
 
+    flags.DEFINE_bool("  ", default=False, help="use focal loss in weighting of in-batch softmax loss")
+    flags.DEFINE_bool("use_ipw", default=False, help="use IPW in weighting of in-batch softmax loss")
+
+    flags.DEFINE_string('tier_weights', None, 'stringified list of the 3 tier weights which sum to 1')
+
 def stringify_mlflow_params(config:dict):
     return {k: json.dumps(v) for k, v in config.items() if
-        k.find('?') == -1}
+        k.find('?') == -1 or isinstance(v, list)}
 
 def destringify_mlflow_params(params:dict):
     config = {}

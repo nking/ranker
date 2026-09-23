@@ -3,6 +3,8 @@ tune, train, test functions for a multi-host, multi-process Jax AI Stack model
 and dataloader using SPMD paradigm.
 """
 import collections
+import json
+
 import itertools
 import time
 from functools import partial
@@ -145,11 +147,13 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
     # We return cand_ids_2d so eval_step can easily find the target movie!
     return scores_2d, labels_2d, final_mask, cand_ids_2d
 
-@nnx.jit
+@nnx.jit(static_argnames=["use_focal_loss", "use_ipw", "focal_loss_gamma", "movie_offset"])
 def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
                optimizer: nnx.Optimizer,
                movie_tiers:np.ndarray, movie_offset:int = 6040+1,
-               tier_weights_config: jnp.ndarray = jnp.array([0.25, 0.55, 0.2]),
+               tier_weights_config: Array = jnp.array([0.33, 0.33, 0.33]),
+               use_focal_loss: bool = False,
+               use_ipw: bool = False,
                focal_loss_gamma: float = 2.0,
                ) -> Array:
     """
@@ -179,23 +183,33 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         scores_2d, labels_2d, main_mask, cand_ids_2d = score_and_shape_results(model, padded_graph)
         safe_scores = jnp.where(main_mask, scores_2d, -1e9)
 
-        # FOCAL WEIGHTING ---
-        # Calculate target probability p_t.
-        # scales gradient by hard/easy predictions)
-        probs = jax.nn.softmax(safe_scores, axis=-1)
-        target_probs = jnp.sum(probs * labels_2d, axis=-1, keepdims=True)
-        focal_weights = jnp.power(1.0 - target_probs, focal_loss_gamma)
+        batch_size = labels_2d.shape[0]
+        combined_weights = jnp.ones((batch_size, 1))
 
-        # IPW TIER WEIGHTING
-        # Look up tier weight based on target item ID.
-        # scales gradient by catalog frequency tier
-        batch_target_ids = jnp.sum(cand_ids_2d * labels_2d, axis=1) - movie_offset
-        safe_target_ids = jnp.clip(batch_target_ids, 0, normalized_weights.shape[0] - 1)
-        batch_target_tiers = movie_tiers[safe_target_ids]
-        ipw_weights = normalized_weights[batch_target_tiers][:, None]
+        if use_focal_loss:
+            # FOCAL WEIGHTING ---
+            # Calculate target probability p_t.
+            # scales gradient by hard/easy predictions)
+            probs = jax.nn.softmax(safe_scores, axis=-1)
+            target_probs = jnp.sum(probs * labels_2d, axis=-1, keepdims=True)
+            focal_weights = jnp.power(1.0 - target_probs, focal_loss_gamma)
+            combined_weights = combined_weights * focal_weights
 
-        # COMBINED LOSS
-        combined_weights = focal_weights * ipw_weights
+        if use_ipw:
+            # IPW TIER WEIGHTING
+            # Look up tier weight based on target item ID.
+            # scales gradient by catalog frequency tier
+            batch_target_ids = jnp.sum(cand_ids_2d * labels_2d, axis=1) - movie_offset
+            safe_target_ids = jnp.clip(batch_target_ids, 0, movie_tiers.shape[0] - 1)
+            batch_target_tiers = movie_tiers[safe_target_ids]
+            ipw_weights = normalized_weights[batch_target_tiers][:, None]
+            #shape (batch_size, 1)
+            combined_weights = combined_weights * ipw_weights
+
+        if use_focal_loss or use_ipw:
+            # COMBINED LOSS
+            weight_mean = jnp.mean(combined_weights) + 1e-9
+            combined_weights = combined_weights / weight_mean
 
         loss = rax.softmax_loss(
             scores=safe_scores,
@@ -226,11 +240,11 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
 
     return loss
 
-@nnx.jit(static_argnames=('top_k',))
+@nnx.jit(static_argnames=["top_k", "movie_offset"])
 def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
-    movie_tiers:np.ndarray, movie_offset:int,
-    tier_weights_config: jnp.ndarray = jnp.array([0.25, 0.55, 0.2]),
-    top_k:int=20) -> dict[str, Array]:
+    movie_tiers:np.ndarray, movie_offset:int, top_k:int=20,
+    tier_weights_config: Array = np.array([0.33, 0.33, 0.33]),
+    ) -> dict[str, Array]:
     """
     train step over a batch, where padded_graph contains super graph of the batch
     :param model:
@@ -253,11 +267,10 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         "logit_max"
     """
 
-    #FIXED values decided in the TwoTowerDNN bi-encoder:
     normalized_weights = tier_weights_config / jnp.sum(tier_weights_config)
-    w_head:float= normalized_weights[0] # 0.25
-    w_torso:float= normalized_weights[1] # 0.55
-    w_tail:float= normalized_weights[2]  # 0.2
+    w_head:float= normalized_weights[0] # 0.33
+    w_torso:float= normalized_weights[1] # 0.33
+    w_tail:float= normalized_weights[2]  # 0.33
 
     #shapes: (total number of graphs including dummy grpahs, model.num_candidates).
     # main_mask is True for real data and False for dummy graph data
@@ -348,7 +361,8 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     return metrics_dict
 
 def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterator,
-    movie_tiers:np.ndarray, movie_offset:int, top_k: int) -> Tuple[Dict, Any]:
+    movie_tiers:np.ndarray, movie_offset:int, top_k: int,
+                      tier_weights_config:Union[List, Array]) -> Tuple[Dict, Any]:
     """
     calc metrics for val dataset. Note, if this method consumes too much memory, use the
     _epoch_validation_chunked instead.   Note that the method uses SPMD paradigm.
@@ -378,14 +392,15 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
 
     device_iterator = enumerate(_async_device_prefetcher(val_dataloader_iter, buffer_size=2))
 
-    tier_weights_config : jnp.ndarray = jnp.array([0.25, 0.55, 0.2])
+    if isinstance(tier_weights_config, list):
+        tier_weights_config = jnp.array(tier_weights_config)
 
     for loop_idx, padded_super_graph in device_iterator:
 
         #each n_node in array is (1 + n_real_history + n_candidates)
         n_samples_tot += sum(padded_super_graph.n_node)
 
-        val_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, tier_weights_config, top_k)
+        val_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, top_k, tier_weights_config)
         
         # val_metrics['ndcg_20'] is now an array of shape (Num_Batches,)
         local_avg_val_metrics = jax.tree.map(jnp.mean, val_metrics)
@@ -499,6 +514,9 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     logging.info(f'_train_fn config_dict={config_dict}')
     
     start_time = time.perf_counter()
+
+    use_focal_loss = "use_focal_loss" in config_dict and config_dict["use_focal_loss"]
+    use_ipw = "use_ipw" in config_dict and config_dict["use_ipw"]
     
     rank = jax.process_index()
     n_local_devices = jax.local_device_count()
@@ -584,7 +602,12 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
     data_mesh = jax.sharding.Mesh(jax.devices(), axis_names=('data',))
     data_sharding = jax.sharding.NamedSharding(data_mesh, P("data"))
 
-    tier_weights_config : jnp.ndarray = jnp.array([0.25, 0.55, 0.2])
+    tier_weights = config_dict['tier_weights']
+    if isinstance(tier_weights, str):
+        tier_weights = json.loads(tier_weights) #e.g. [0.33, 0.33, 0.33]
+    if isinstance(tier_weights, list):
+        tier_weights = jnp.array(tier_weights)
+
     focal_loss_gamma = config_dict['focal_loss_gamma']
     
     jax_graph_comp_dict = calc_number_jax_graph_components(config_dict['batch_size'],
@@ -613,7 +636,8 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         last_epoch = epoch
 
         loss = train_step(model, padded_super_graph, optimizer, movie_tiers=movie_tiers, movie_offset=movie_offset,
-            tier_weights_config=tier_weights_config, focal_loss_gamma=focal_loss_gamma)
+            tier_weights_config=tier_weights,
+            use_focal_loss=use_focal_loss, use_ipw=use_ipw, focal_loss_gamma=focal_loss_gamma)
         
         epoch_avg_train_loss.append(loss)
         
@@ -630,12 +654,12 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             epoch_avg_train_loss.clear()
             
             model.eval()
-            train_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, tier_weights_config, top_k)
+            train_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, top_k, tier_weights)
             
             # val_dataloader is also sharded, so don't isolate this to only shard 0.
             # Also, this is synced across all shards, so all shards have same conditional logic for global_avg_val_metrics below here
             global_avg_val_metrics, n_val_samples = _epoch_validation(model, iter(val_dataloader),
-                movie_tiers, movie_offset, top_k)
+                movie_tiers, movie_offset, top_k, tier_weights)
             model.train()
 
             global_avg_val_composite_ndcg : float = global_avg_val_metrics[f'composite_ndcg_{top_k}']
@@ -918,6 +942,9 @@ def run_train_phase(config: dict, movie_tiers:np.ndarray, movie_offset:int, tria
     validate_ratings(config['ratings_val_3_uri'])
     validate_ratings(config['ratings_val_disliked_uri'])
 
+    if isinstance(config['tier_weights'], str):
+        config['tier_weights'] = json.loads(config['tier_weights'])
+
     worker_rank = jax.process_index()
 
     logging.info(f'worker_{worker_rank}: train_fn')
@@ -1161,6 +1188,11 @@ def run_test_phase(config: dict):
     config['num_movies'] = num_movies
     config['embed_len'] = restore_dict['embed_len']
 
+    tier_weights = restore_dict['config']['tier_weights']
+    if isinstance(tier_weights, str):
+        tier_weights = json.loads(tier_weights)
+    config['tier_weights'] = tier_weights
+
     movie_tiers, movie_offset, num_catalog_movies = read_movie_tiers_uri(config['movie_tiers_uri'])
 
     model = restore_dict['model']
@@ -1244,7 +1276,7 @@ def run_test_phase(config: dict):
                 "test_dataloader sampler must be an instance of BatchSampler")
 
         global_test_metrics, n_val_samples = _epoch_validation(model, iter(test_dataloader),
-            movie_tiers, movie_offset, config['top_k'])
+            movie_tiers, movie_offset, config['top_k'], tier_weights)
     
         out_dict = {f"test_{key}" : value for key, value in global_test_metrics.items()}
         #to be consistent w/ train, change the loss label:
@@ -1354,6 +1386,10 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
     restored_model.eval()
     model.eval()
 
+    tier_weights_config = restore_dict['config']['tier_weights']
+    if isinstance(tier_weights_config, str):
+        tier_weights_config = json.loads(tier_weights_config)
+
     import copy
     loader_current = copy.deepcopy(val_data_loader)
     loader_restored = copy.deepcopy(val_data_loader)
@@ -1361,12 +1397,13 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
     movie_tiers, movie_offset, num_catalog_movies = read_movie_tiers_uri(restore_dict['config']['movie_tiers_uri'])
     # iter(x) makes a new iterator state
     global_avg_val_metrics_current, n_val_samples_current = _epoch_validation(model, iter(loader_current),
-        movie_tiers, movie_offset, top_k)
+        movie_tiers, movie_offset, top_k, tier_weights_config)
     
     multihost_utils.sync_global_devices( "sync_barrier_for_model_validation")
-    
+
+
     global_avg_val_metrics_restored, n_val_samples_restored = _epoch_validation(restored_model, iter(loader_restored),
-        movie_tiers, movie_offset, top_k)
+        movie_tiers, movie_offset, top_k, tier_weights_config)
     
     multihost_utils.sync_global_devices( "sync_barrier_for_restored_model_validation")
     

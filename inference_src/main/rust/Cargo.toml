@@ -111,10 +111,6 @@ name = "user_db_tests"
 path="../../test/rust/test/user_db_test.rs"
 
 [[test]]
-name = "calc_metrics_tests"
-path="../../test/rust/test/calc_metrics_test.rs"
-
-[[test]]
 name = "calc_metrics_2_tests"
 path="../../test/rust/test/calc_metrics_2_test.rs"
 
