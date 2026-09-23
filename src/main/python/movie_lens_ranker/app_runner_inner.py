@@ -139,13 +139,16 @@ def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in
     #if want a linear relationship between lr and wd, setup a dependency:
     # wd_ratio = trial.suggest_float("wd_ratio", 0.01, 1.0, log=True)
     # config['weight_decay'] = config['learning_rate'] * wd_ratio
-    root.add_float_param("learning_rate", min_value=1e-4, max_value=1e-2, default_value=1e-3,
-        scale_type=vz.ScaleType.LOG)
-    root.add_float_param("weight_decay", min_value=1e-4, max_value=1e-2, default_value=1e-3,
-        scale_type=vz.ScaleType.LOG)
+    #root.add_float_param("learning_rate", min_value=1e-4, max_value=1e-2, default_value=1e-3,
+    #    scale_type=vz.ScaleType.LOG)
+    #root.add_float_param("weight_decay", min_value=1e-4, max_value=1e-2, default_value=1e-3,
+    #    scale_type=vz.ScaleType.LOG)
+    root.add_discrete_param("learning_rate", feasible_values=[1e-4, 5e-4, 1e-3])
+    root.add_discrete_param("weight_decay", feasible_values=[1e-5, 1e-4, 1e-3])
 
-    root.add_float_param("temperature", min_value=0.05, max_value=0.15, default_value=0.1,
-        scale_type=vz.ScaleType.LOG)
+    #root.add_float_param("temperature", min_value=0.05, max_value=0.15, default_value=0.1,
+    #    scale_type=vz.ScaleType.LOG)
+    root.add_discrete_param("temperature", feasible_values=[0.07, 0.1, 0.2, 0.5])
 
     feasible_out_dim = [embed_in_dim, int(embed_in_dim * 1.5), embed_in_dim * 2] # e.g., [32, 48, 64]
 
