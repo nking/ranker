@@ -1,0 +1,62 @@
+- split the traffice bettwen a basline model new models.
+- track impressions and engagement rates
+  - further stratify these by movie_tier and user_tier
+
+Measurements:
+   choose ones that transform into relevance for business goals.
+   e.g. movie watch time, CTR
+   - impressions (the top_k=20 shown to user)
+     - count fractions by movie_tier
+   - CTR
+     - how often is a head, torso or tail clicked compared to the others?
+       - if the tail items are never clicked, they weren't very relevant
+         to the user.
+   - coverage of unique movies across all users
+     - count this in treatment vs control during the test window.
+   - log the funnel from k=100 to k=20
+     - retrieval by movie_tier as normalized fraction
+       for control compared to treatment should show
+       shift from head to toros and tail for the treatment group
+     - ranker by movie_tier as normalized fraction
+       - e.g. if no movie_tier=2 (niche) make it to top_k=20
+         then the objective of diversity and personalization
+         for niche movie watchers will have failed.
+
+If one objective is to increase catalog discovery
+then increase in tail impressions and catalog coverage
+may be a worth while trade-off for small decrease in CTR,
+but not if CTR for tail items is 0.
+
+YouTube A/B Testing:
+- presentation of video titles and thumbnails
+- homepage topic recommendations and effect on
+  session duration, and click engagement
+- ranking algorithm's affect on CTR, video completion rate,
+  overall watch time
+- monitoring of unsubscribes, closing of app, diversity of consumption
+
+Amazon Prime Video A/B Testing:
+  blends streaming metrics with e-commerce behavior
+- balance between free and pay-for videos affect on overall digital revenue.
+- measures interaction with top_k recommended movies using
+  precision@k for control vs treatment groups.
+- A/B testing is paritiioned by device type:
+  - how are CTR affected by size of visual cards, speed of scrolling
+- cold-start:
+  compare method: "popular suggestion" vs "early personalization"
+  to see which gets first watch session faster
+- the conversion rate:
+  - click + watch minimum amount of time
+- average order value:
+  - does a recommender algorithm increase the total amount spect per session
+- coverage
+  percentage of catalog recommended to users is monitored
+  to make sure more than most popular are seen.
+
+Netflix A/B testing:
+- personalized artwork and thumbnails 
+- homepage and UI layout
+- ranking algorithms effect on total streaming hours
+
+
+
