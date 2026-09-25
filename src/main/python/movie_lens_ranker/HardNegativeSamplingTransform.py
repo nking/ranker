@@ -116,7 +116,7 @@ class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
             max_hist=self.history_lookup_disliked.max_history)
         
         movie_recommendations = self.recommendations.get_unseen_movies(
-            user_id=batch['user_id'], timestamp=batch['timestamp'], top_k=n_negs)
+            user_id=batch['user_id'], timestamp=batch['timestamp'], latest_unseen_k=n_negs)
         
         # Type 1: "hard negatives" = recommended intersection with user's disliked.
         # highest scoring are at beginning of array. empty values of pad_value are at end of array.

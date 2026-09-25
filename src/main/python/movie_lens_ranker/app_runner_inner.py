@@ -108,7 +108,7 @@ def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
 def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:int=32):
     """
     get the Vizier study config of hyperparameter ranges. for HPO default and ranges.
-    :param top_k:  the top_k rankings for the model
+    :param top_k:  the number of movie_ids that inference will return for a user
     :param use_batching_alg: if True, uses study_config.algorithm = 'GP_UCB_PE'
     else study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
     :param embed_in_dim: the embedding lengths from the bi-encoder QueryModel or CandidateModel.  This is expected
@@ -207,7 +207,7 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
         embed_in_dim:int=32) -> vz_clients.Study:
     """
     get or create a vizier study
-    :param top_k:
+    :param top_k: the number of movie_ids that inference will return for a user
     :param embed_in_dim: length of embeddings from the QueryModel or CandidateModel from the bi-encoder.
     :param project_id:
     :param study_name:

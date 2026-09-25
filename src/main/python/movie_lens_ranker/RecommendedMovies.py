@@ -59,17 +59,17 @@ class RecommendedMovies (object):
                 reader.close()
         return user_ids, items, len_arr
     
-    def get_unseen_movies(self, user_id: np.ndarray, timestamp: np.ndarray, top_k:int=200) -> np.ndarray:
+    def get_unseen_movies(self, user_id: np.ndarray, timestamp: np.ndarray, latest_unseen_k:int=200) -> np.ndarray:
         """
         given array of user_ids, return top_k recommended movies for user that they haven't seen before time=timestamp.
         the unseen movies have been moved to front of array and retain their respective original order which is by decreasing similarity score.
         Note that if top_k is > the file's
         :param user_id: input array of shape (None,), e.g. np.array([2,4])
         :param timestamp: timestamp representing current time.  any recommendations with timestamps > timestamp are yet unseen.
-        :param top_k: number of top unseen recommendations to return
+        :param latest_unseen_k: number of top unseen recommendations to return
         :return: top k of movie recommendations unseen by user_id.  shape returned is (len(user_id_, top_k)
         """
-        if top_k > self.row_length:
+        if latest_unseen_k > self.row_length:
             raise ValueError(f"top_k must be smaller than the number of recommendations per user = {self.row_length}")
         
         user_idx = self.user_ids[user_id]
@@ -80,4 +80,4 @@ class RecommendedMovies (object):
         sel_movies = np.take_along_axis(self.movies[user_idx], sort_indices, axis=1)
         
         #the unseen movies have been moved to front of array and retain their respective original order which is by decreasing similarity score.
-        return sel_movies[:, :top_k]
+        return sel_movies[:, :latest_unseen_k]

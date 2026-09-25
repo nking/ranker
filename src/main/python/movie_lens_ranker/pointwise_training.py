@@ -106,7 +106,7 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         was determined from train dataset).
     :param movie_offset: offset from 0 of movie_ids
     :param tier_weights_config : holds the weights of the tiers head, torso, and tail, respectively.  They will be normalized to sum to 1 if not already.
-    :param top_k:
+    :param top_k: the number of movie_ids that inference will return for a user
     :return: dictionary with keys:
         "loss",
         "mrr_{top_k}",

@@ -32,7 +32,7 @@ pub struct Orchestrator {
     #[allow(dead_code)]
     ranker_n_local_devices : usize,
     persisted_index_path: PathBuf,
-    pub top_k : usize,
+    pub top_k : usize, // the number of movie_ids that inference will return for a user
 }
 
 impl Orchestrator {
@@ -411,7 +411,7 @@ impl RecommenderService for Orchestrator {
                 ages : user_reqs.ages[i0..i1].to_vec(),
                 timestamps : user_reqs.timestamps[i0..i1].to_vec(),
                 n_users : (i1 - i0) as u32,
-                k : None
+                k : None // defaults to num_candidates of ranker model.  could set it to query model k_retrieval
             };
 
             let resp_i = self._predict(Request::new(req_i)).await?;

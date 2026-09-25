@@ -10,9 +10,13 @@ use std::io::BufReader;
 #[command(about = "gRPC Recommender Service Orchestrator", long_about = None)]
 pub struct QueryModelMetadata {
 
-    /// lngth of the output embedding, parsed from keywork "layer_sizes"
+    /// length of the output embedding, parsed from keywork "layer_sizes"
     #[arg(long, env = "EMBED_LEN")]
     pub embed_len : usize,
+
+    #[arg(long, env = "RETRIEVAL_K",  default_value_t = 100)]
+    #[serde(alias = "k")]
+    pub k_retrieval: usize,
 
     #[arg(long, env = "NUM_CATALOG_USERS",  default_value_t = 6040)]
     #[serde(alias = "n_users")] // Automatically pulls from "n_users" if "num_catalog_users" isn't found
