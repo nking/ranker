@@ -5,7 +5,6 @@ from collections import defaultdict
 from typing import Tuple, Dict, List, Union, Any
 
 import fsspec
-import jax
 import jax.numpy as jnp
 import psutil
 from array_record.python import array_record_module
@@ -148,7 +147,8 @@ def define_flags():
     """
     if 'movies_uri' in FLAGS:
         return
-    
+    flags.DEFINE_string('movie_tiers_uri', default=None,
+                        help="uri for array_record containing rows of movie_id, tier")
     flags.DEFINE_string('movies_uri', None, 'uri for array_record containing movie ids')
     
     flags.DEFINE_string("recommendations_uri", default=None,
@@ -157,9 +157,6 @@ def define_flags():
     flags.DEFINE_string("recommendations_ts_uri", default=None,
         help="uri for array_record containing the timestamps for recommendations_uri, each row being [user_id, [timestamps]]"
     )
-    flags.DEFINE_string('movie_tiers_uri', default=None,
-        help="uri for array_record containing rows of movie_id, tier")
-    
     flags.DEFINE_string("ratings_train_liked_uri", default=None,
         help="uri for array_record containing the ratings train dataset having ratings > 3, each row being [user_id, movie_id, rating, timestamp]. for this project the dataset should contain only positives"
     )
@@ -324,7 +321,7 @@ def define_flags():
              "additionally, if JAX_PLATFORM_NAME=gpu there will be a check for expected number of GPUs found")
     flags.DEFINE_string("git_commit_hash", default=None, help="git commit hash for this running code.")
 
-    flags.DEFINE_bool("  ", default=False, help="use focal loss in weighting of in-batch softmax loss")
+    flags.DEFINE_bool("use_focal_loss", default=False, help="use focal loss in weighting of in-batch softmax loss")
     flags.DEFINE_bool("use_ipw", default=False, help="use IPW in weighting of in-batch softmax loss")
 
     flags.DEFINE_string('tier_weights', None, 'stringified list of the 3 tier weights which sum to 1')
@@ -821,7 +818,7 @@ def get_git_commit_hash() -> str :
     else:
         return _get_git_commit_hash_if_match()
 
-def _get_git_commit_hash_if_match():
+def _get_git_commit_hash_if_match() -> Union[str, None]:
     try:
         # Check if the directory is a git repository
         # 'git rev-parse --is-inside-work-tree' returns 'true' if inside a git repo
