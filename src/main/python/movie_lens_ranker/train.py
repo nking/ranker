@@ -398,7 +398,7 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
     for loop_idx, padded_super_graph in device_iterator:
 
         #each n_node in array is (1 + n_real_history + n_candidates)
-        n_samples_tot += sum(padded_super_graph.n_node)
+        n_samples_tot += jnp.sum(padded_super_graph.n_node)
 
         val_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, top_k, tier_weights_config)
         
@@ -418,7 +418,7 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
     
     out = {key : float(np.average(global_avg_metrics_batches[key], axis=0)) for key in global_avg_metrics_batches}
     
-    return out, n_samples_tot
+    return out, int(n_samples_tot)
 
 def pad_graph_tuple_batch(graph_tuple_batch: jraph.GraphsTuple, jax_graph_comp_dict:Dict[str, int]) -> jraph.GraphsTuple:
     """

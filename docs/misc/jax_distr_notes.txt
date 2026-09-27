@@ -3,12 +3,14 @@ in jax distr:
   several local devices (accelerators such as TPU or GPU chips)
 - a Process is a jax program running on a host.
   in the SPMD grain model (using grain.sharding.ShardByJaxProcess()),
-  each process id gets 1/(num_processes) of the data
+  each process id gets 1/(num_processes) of the data where num_processes
+  is the number of hosts.  ShardByJaxProcess does not further shard
+  by local devices, so that has to be handled afterwards.
 - Local Devices: These are the specific accelerators (e.g., GPU 0 and GPU 1)
-  that a single JAX process can directly control without needing 
+  that a single JAX process (host) can directly control without needing 
   to communicate over the network.  
 - Global Devices: The collection of all devices available across the 
-  entire distributed cluster (all processes and all hosts).  
+  entire distributed cluster (all local devices and all hosts).  
 - backend:
   the specific hardware for which jax compiles code to run on.
   JAX backends: CPU, GPU, TPU
