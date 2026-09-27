@@ -5,8 +5,6 @@ model with JaxAI stack dataloader under SPMD paradigm with multi-host, multi-pro
 abilities.
 """
 import os
-
-import math
 import sys
 import logging
 
