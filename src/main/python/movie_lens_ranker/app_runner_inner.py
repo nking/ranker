@@ -250,12 +250,41 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
                 raise e
     raise RuntimeError(f"Worker {jax.process_index()} timed out waiting for study to be created by worker 0.")
 
-def sync_hyperparams(params_dict) -> Dict[str, Union[int, float, str]]:
+def sync_hyperparams(params_dict: Dict, max_bytes: int = 2048) -> Dict:
+    sync_keys = ["top_k", "num_layers", "num_heads", "hidden_dim",
+                 "max_history","num_candidates", "learning_rate", "weight_decay", "out_dim",
+                 "mlp_hidden_dim", "edge_embed_dim","dropout_rate", "temperature", "focal_loss_gamma", "tier_weights"]
+    if jax.process_index() == 0:
+        params_dict = extract_correct_vizier_param_types_dict(params_dict)
+        #params_dict = {k:v for k,v in params_dict.items() if k in sync_keys}
+        json_bytes = json.dumps(params_dict).encode('utf-8')
+
+        if len(json_bytes) > max_bytes:
+            raise ValueError(f"Serialized hparams ({len(json_bytes)} bytes) exceeds max_bytes ({max_bytes}).")
+
+        padded_bytes = json_bytes.ljust(max_bytes, b'\x00')
+
+        # 1D array of shape (max_bytes,)
+        local_arr = jnp.frombuffer(padded_bytes, dtype=jnp.uint8)
+    else:
+        # Other workers create an empty 1D array of the exact same shape
+        local_arr = jnp.zeros((max_bytes,), dtype=jnp.uint8)
+
+    # Gather across all hosts. Output shape: (num_workers, max_bytes)
+    gathered = jax.experimental.multihost_utils.process_allgather(local_arr)
+
+    # gathered[0] is exactly Worker 0's (max_bytes,) data.
+    # .tolist() now cleanly returns a flat list of ints, which bytes() accepts.
+    raw_bytes = bytes(gathered[0].tolist()).rstrip(b'\x00')
+
+    return json.loads(raw_bytes.decode('utf-8'))
+
+def sync_hyperparams0(params_dict) -> Dict[str, Union[int, float, str]]:
     # Convert dict to a fixed-order array on Process 0
     # Others initialize with zeros
     sync_keys = ["top_k", "num_layers", "num_heads", "hidden_dim",
-        "max_history","num_candidates", "learning_rate", "weight_decay", "out_dim",
-        "mlp_hidden_dim", "edge_embed_dim","dropout_rate", "temperature", "focal_loss_gamma", "tier_weights"]
+                 "max_history","num_candidates", "learning_rate", "weight_decay", "out_dim",
+                 "mlp_hidden_dim", "edge_embed_dim","dropout_rate", "temperature", "focal_loss_gamma", "tier_weights"]
     num_keys = len(sync_keys)
     if jax.process_index() == 0:
         #extract ParameterValue to primitives:
@@ -382,17 +411,12 @@ def run_tune(config):
             logging.info(f'suggested hparams: {hparams}')
 
         # broadcast hparams so all workers share identical configurations
-        hparams = jax.experimental.multihost_utils.broadcast_one_to_all(hparams)
+        hparams = sync_hyperparams(hparams)
 
         # Use single braces in f-string to generate unique barrier keys per trial
         logging.info(f"worker_{worker_rank}: wait at barrier for trial_id={trial_id}")
         jax.experimental.multihost_utils.sync_global_devices(f"sync_barrier_for_trial_{trial_id}")
         logging.info(f"worker_{worker_rank}: passed barrier for trial_id={trial_id}")
-
-        #hparams = sync_hyperparams(hparams)
-        hparams = extract_correct_vizier_param_types_dict(hparams)
-        
-        logging.info(f"worker_{worker_rank}: synchronized params for trial_id={trial_id}")
 
         config2 = config.copy()
         config2.update(hparams)
@@ -483,9 +507,8 @@ def run_train(config):
         if worker_rank == 0:
             best_params = get_best_parameters_for_training(config)
 
-        #best_params = sync_hyperparams(best_params)
+        best_params = sync_hyperparams(best_params)
 
-        best_params = jax.experimental.multihost_utils.broadcast_one_to_all(best_params)
         logging.info(f"worker_{worker_rank}: wait at barrier for best_params")
         jax.experimental.multihost_utils.sync_global_devices(f"sync_barrier_for_worker_{worker_rank}")
         logging.info(f"worker_{worker_rank}: passed barrier for best_params")
