@@ -1,10 +1,8 @@
 import os.path
 import unittest
-import time
 
 import numpy as np
 from array_record.python import array_record_module
-from movie_lens_ranker.RecommendedMovies import RecommendedMovies
 
 from helper import *
 from movie_lens_ranker.data_loading import *
