@@ -10,6 +10,7 @@ import logging
 
 import jax
 from jax import Array
+from numpy import ndarray
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -83,6 +84,11 @@ def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
         "num_candidates","out_dim","edge_embed_dim"}
     for k, v in params.items():
         if k == "tier_weights":
+            if isinstance(v, ndarray):
+                v = v.tolist()
+            if isinstance(v, list):
+                if isinstance(v[0], ndarray):
+                    v = [vi.item() for vi in v]
             if isinstance(v, ParameterValue):
                 v = v.value
             if isinstance(v, str):
@@ -374,12 +380,17 @@ def run_tune(config):
             trial_suggestion = suggested_trials[i]
             hparams = {k: v for k, v in trial_suggestion.parameters.items()}
             logging.info(f'suggested hparams: {hparams}')
-        
+
+        # broadcast hparams so all workers share identical configurations
+        hparams = jax.experimental.multihost_utils.broadcast_one_to_all(hparams)
+
+        # Use single braces in f-string to generate unique barrier keys per trial
         logging.info(f"worker_{worker_rank}: wait at barrier for trial_id={trial_id}")
-        jax.experimental.multihost_utils.sync_global_devices(f"sync_barrier_for_trial_{{trial_id}}")
+        jax.experimental.multihost_utils.sync_global_devices(f"sync_barrier_for_trial_{trial_id}")
         logging.info(f"worker_{worker_rank}: passed barrier for trial_id={trial_id}")
 
-        hparams = sync_hyperparams(hparams)
+        #hparams = sync_hyperparams(hparams)
+        hparams = extract_correct_vizier_param_types_dict(hparams)
         
         logging.info(f"worker_{worker_rank}: synchronized params for trial_id={trial_id}")
 
@@ -471,7 +482,15 @@ def run_train(config):
         best_params = {}
         if worker_rank == 0:
             best_params = get_best_parameters_for_training(config)
-        best_params = sync_hyperparams(best_params)
+
+        #best_params = sync_hyperparams(best_params)
+
+        best_params = jax.experimental.multihost_utils.broadcast_one_to_all(best_params)
+        logging.info(f"worker_{worker_rank}: wait at barrier for best_params")
+        jax.experimental.multihost_utils.sync_global_devices(f"sync_barrier_for_worker_{worker_rank}")
+        logging.info(f"worker_{worker_rank}: passed barrier for best_params")
+        best_params = extract_correct_vizier_param_types_dict(best_params)
+
         config.update(**best_params)
 
     movie_tiers, movie_offset, num_catalog_movies =  read_movie_tiers_uri(config['movie_tiers_uri'])

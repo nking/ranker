@@ -272,7 +272,7 @@ def define_flags():
         help="linux env variable name"
     )
     # ====== TRAINABLE MODEL PARAMS, for tune phase, they're supplied by internal code ======
-    flags.DEFINE_integer("top_k", default=20,
+    flags.DEFINE_integer(name="top_k", default=20,
         help="used when calculating metrics NDCG@k, recall@k, MRR@k"
     )
     flags.DEFINE_float("learning_rate", default=5e-4,
@@ -327,8 +327,16 @@ def define_flags():
     flags.DEFINE_string('tier_weights', None, 'stringified list of the 3 tier weights which sum to 1')
 
 def stringify_mlflow_params(config:dict):
-    return {k: json.dumps(v) for k, v in config.items() if
-        k.find('?') == -1 or isinstance(v, list)}
+    d = {}
+    for k, v in config.items():
+        if k.find('?') != -1:
+            continue
+        if isinstance(v, np.ndarray):
+            v = v.tolist()
+        if not isinstance(v, str):
+            v = json.dumps(v)
+        d[k] = v
+    return d
 
 def destringify_mlflow_params(params:dict):
     config = {}
@@ -336,7 +344,7 @@ def destringify_mlflow_params(params:dict):
         try:
             config[k] = json.loads(v)
         except (json.JSONDecodeError, TypeError):
-            # Fallback for plain strings that aren't valid JSON (like "adam")
+            # Fallback
             config[k] = v
     return config
 
