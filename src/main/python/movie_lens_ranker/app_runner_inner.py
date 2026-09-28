@@ -510,7 +510,7 @@ def run_train(config):
         best_params = sync_hyperparams(best_params)
 
         logging.info(f"worker_{worker_rank}: wait at barrier for best_params")
-        jax.experimental.multihost_utils.sync_global_devices(f"sync_barrier_for_worker_{worker_rank}")
+        jax.experimental.multihost_utils.sync_global_devices(f"sync_barrier_for_train_best")
         logging.info(f"worker_{worker_rank}: passed barrier for best_params")
         best_params = extract_correct_vizier_param_types_dict(best_params)
 
