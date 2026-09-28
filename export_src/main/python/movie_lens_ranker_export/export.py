@@ -110,7 +110,7 @@ def make_jax_module(trained_model: GraphRanker,  num_candidates:int) -> JaxModul
     return jax_module
 
 def export_models(trained_model: GraphRanker, batch_size:int,
-    params: Dict[str, Union[str, int]], output_savedmodel_dir_uri:str,
+    model_dict: Dict[str, Union[str, int]], output_savedmodel_dir_uri:str,
     n_local_devices:int=1):
     """
     export the model to TF SavedModel format along with a method to apply the model on the data.
@@ -121,22 +121,25 @@ def export_models(trained_model: GraphRanker, batch_size:int,
     :exception
     :param trained_model:
     :param batch_size: batch_size used for model training
-    :param params: dictionary with keys:
-        "max_history" : max length of user history used for model training
-        "num_candidates"  : the number of candidates to rank
-        "embed_len" : the lengths of the embeddings
-        "num_catalog_users" : number of users in the catalog of embeddings
-        "num_catalog_movies" : number of movies in the catalog of embeddings
-        "model_version" : version of the trained GraphRanker model
-        "trained_at_timestamp" : timestamp for the start of the model training
-        "git_commit_hash": optional, git commit hash for the training code.
-    Note that in recomendation_systems project
+    :param model_dict: dictionary with keys:
+       "inference_params" and "training_params".
+       "inference_params" keys are:
+            "max_history" : max length of user history used for model training
+            "num_candidates"  : the number of candidates to rank
+            "embed_len" : the lengths of the embeddings
+            "num_catalog_users" : number of users in the catalog of embeddings
+            "num_catalog_movies" : number of movies in the catalog of embeddings
+            "model_version" : version of the trained GraphRanker model
+            "trained_at_timestamp" : timestamp for the start of the model training
+            "git_commit_hash": optional, git commit hash for the training code.
+    Note that in recommendation_systems project
           the user ids are renumbered if needed to be between 1 and num_users,
           then the movie_ids are renumbered to be between num_users + 1 and num_users + 1 + num_movies.
 
     :return:
     """
 
+    params = model_dict['inference_params']
     max_history = params['max_history']
     num_candidates = params['num_candidates']
     embed_len = params['embed_len']
@@ -187,6 +190,9 @@ def export_models(trained_model: GraphRanker, batch_size:int,
         max_edges=jax_graph_comp_dict_batch['max_edges'],
         max_graphs=jax_graph_comp_dict_batch['max_graphs'],
         signature_name="serving_batch")
+
+    with open(os.path.join(assets_extra_dir, "training_hyperparameters.json"), "w") as f:
+        json.dump(model_dict['training_params'], f)
 
     print(f"saved model and metadata to {output_savedmodel_dir_uri}")
 

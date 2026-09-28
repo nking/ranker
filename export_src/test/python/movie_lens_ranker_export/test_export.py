@@ -6,6 +6,8 @@ from movie_lens_ranker.util import calc_number_jax_graph_components, summarize_t
 from movie_lens_ranker_export.export import export_models, make_jax_module, create_serving_signature
 from movie_lens_ranker_export.restore_from_orbax import restore_model_from_checkpoint
 from orbax.export.validate import ValidationManager, ValidationReportOption
+import numpy as np
+import json
 
 class ExportTest(unittest.TestCase):
 
@@ -62,6 +64,9 @@ class ExportTest(unittest.TestCase):
         params["num_catalog_users"] = restore_dict['config']['num_users']
         params['num_catalog_movies'] = restore_dict['config']['num_movies']
 
+        model_dict = {'inference_params' : params,
+                      "training_params": restore_dict['config'] }
+
         from flax import nnx
         print("model summary:")
         #print(nnx.state(restore_dict['model'], nnx.Param))
@@ -70,7 +75,7 @@ class ExportTest(unittest.TestCase):
         export_models(
             trained_model=restore_dict['model'],
             batch_size=batch_size,
-            params = params,
+            model_dict = model_dict,
             output_savedmodel_dir_uri = savedmodel_dir)
 
 
@@ -139,7 +144,6 @@ class ExportTest(unittest.TestCase):
             "n_node" :  fake_single.n_node,
             "n_edge" :  fake_single.n_edge,}
 
-        import numpy as np
         np.set_printoptions(threshold=np.inf)
         print(f'"instances": [\n{single_inputs}\n]\n')
 
@@ -174,7 +178,6 @@ class ExportTest(unittest.TestCase):
                          "n_edge" : fake_single.n_edge.tolist(),
         }
 
-        import json
         payload = {
             "inputs": single_inputs
         }
