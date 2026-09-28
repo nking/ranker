@@ -1,7 +1,7 @@
-2026-09-07 10:52:52.292958: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
-2026-09-07 10:52:52.361316: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+2026-09-28 16:13:02.179932: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2026-09-28 16:13:02.229718: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
 To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2026-09-07 10:52:54.349913: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+2026-09-28 16:13:04.750467: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
 
 MetaGraphDef with tag-set: 'serve' contains the following SignatureDefs:
 
@@ -18,7 +18,7 @@ signature_def['serving_batch']:
   The given SavedModel SignatureDef contains the following input(s):
     inputs['edge_features'] tensor_info:
         dtype: DT_INT32
-        shape: (33344)
+        shape: (35904)
         name: serving_batch_edge_features:0
     inputs['n_edge'] tensor_info:
         dtype: DT_INT32
@@ -30,36 +30,36 @@ signature_def['serving_batch']:
         name: serving_batch_n_node:0
     inputs['node_candidate_mask'] tensor_info:
         dtype: DT_BOOL
-        shape: (33600)
+        shape: (36160)
         name: serving_batch_node_candidate_mask:0
     inputs['node_embeddings'] tensor_info:
         dtype: DT_FLOAT
-        shape: (33600, 32)
+        shape: (36160, 32)
         name: serving_batch_node_embeddings:0
     inputs['node_ids'] tensor_info:
         dtype: DT_INT32
-        shape: (33600)
+        shape: (36160)
         name: serving_batch_node_ids:0
     inputs['node_label'] tensor_info:
         dtype: DT_INT32
-        shape: (33600)
+        shape: (36160)
         name: serving_batch_node_label:0
     inputs['node_type'] tensor_info:
         dtype: DT_INT32
-        shape: (33600)
+        shape: (36160)
         name: serving_batch_node_type:0
     inputs['receivers'] tensor_info:
         dtype: DT_INT32
-        shape: (33344)
+        shape: (35904)
         name: serving_batch_receivers:0
     inputs['senders'] tensor_info:
         dtype: DT_INT32
-        shape: (33344)
+        shape: (35904)
         name: serving_batch_senders:0
   The given SavedModel SignatureDef contains the following output(s):
     outputs['outputs'] tensor_info:
         dtype: DT_FLOAT
-        shape: (258, 70)
+        shape: (258, 80)
         name: StatefulPartitionedCall:0
   Method name is: tensorflow/serving/predict
 
@@ -108,9 +108,9 @@ signature_def['serving_default']:
   The given SavedModel SignatureDef contains the following output(s):
     outputs['outputs'] tensor_info:
         dtype: DT_FLOAT
-        shape: (3, 70)
+        shape: (3, 80)
         name: StatefulPartitionedCall_1:0
   Method name is: tensorflow/serving/predict
-The MetaGraph with tag set ['serve'] contains the following ops: {'Const', 'VarHandleOp', 'RestoreV2', 'DisableCopyOnRead', 'MergeV2Checkpoints', 'ReadVariableOp', 'Placeholder', 'SaveV2', 'StatefulPartitionedCall', 'Identity', 'StaticRegexFullMatch', 'XlaCallModule', 'Select', 'PreventGradient', 'AssignVariableOp', 'StringJoin', 'Pack', 'ShardedFilename', 'NoOp'}
+The MetaGraph with tag set ['serve'] contains the following ops: {'VarHandleOp', 'DisableCopyOnRead', 'NoOp', 'RestoreV2', 'XlaCallModule', 'ShardedFilename', 'Placeholder', 'MergeV2Checkpoints', 'SaveV2', 'ReadVariableOp', 'StatefulPartitionedCall', 'AssignVariableOp', 'Select', 'StringJoin', 'Const', 'Identity', 'PreventGradient', 'Pack', 'StaticRegexFullMatch'}
 
 Concrete Functions:
