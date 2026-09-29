@@ -75,49 +75,73 @@ pub fn get_train_val_test_liked_uris(
 }
 
 #[allow(dead_code)]
-pub fn get_embeddings_uris() -> (String, String) {
-    let mut user_embedding_uri : Option<PathBuf> = get_project_dir();
-    if let Some(ref mut p) = user_embedding_uri {
-        p.push("src/test/resources/data/user_emb-00000-of-00001.parquet");
-    }
-    let mut movie_embedding_uri : Option<PathBuf> = get_project_dir();
-    if let Some(ref mut p) = movie_embedding_uri {
-        p.push("src/test/resources/data/movie_emb-00000-of-00001.parquet");
-    }
+pub fn get_embeddings_uris(two_tower_version: Option<i32>) -> (String, String) {
 
-    (user_embedding_uri.unwrap().to_string_lossy().into_owned(),
-    movie_embedding_uri.unwrap().to_string_lossy().into_owned())
+    let base_dir = get_project_dir().expect("Failed to get project directory");
+    let data_dir = match two_tower_version {
+        Some(version) => format!("src/test/resources/data/tower_versions/{}/", version),
+        None => "src/test/resources/data/tower_versions/1/".to_string(),
+    };
+
+    let user_embedding_uri = base_dir
+        .join(&data_dir)
+        .join("user_emb-00000-of-00001.parquet");
+
+    let movie_embedding_uri = base_dir
+        .join(&data_dir)
+        .join("movie_emb-00000-of-00001.parquet");
+
+    (
+        user_embedding_uri.to_string_lossy().into_owned(),
+        movie_embedding_uri.to_string_lossy().into_owned(),
+    )
 }
 
 #[allow(dead_code)]
-pub fn get_embeddings_metadata_uris() -> (String, String) {
-    let mut user_uri : Option<PathBuf> = get_project_dir();
-    if let Some(ref mut p) = user_uri {
-        p.push("src/test/resources/data/user_emb_metadata.json");
-    }
-    let mut movie_uri : Option<PathBuf> = get_project_dir();
-    if let Some(ref mut p) = movie_uri {
-        p.push("src/test/resources/data/movie_emb_metadata.json");
-    }
+pub fn get_embeddings_metadata_uris(two_tower_version: Option<i32>) -> (String, String) {
+    let base_dir = get_project_dir().expect("Failed to get project directory");
+    let data_dir = match two_tower_version {
+        Some(version) => format!("src/test/resources/data/tower_versions/{}/", version),
+        None => "src/test/resources/data/tower_versions/1/".to_string(),
+    };
 
-    (user_uri.unwrap().to_string_lossy().into_owned(),
-        movie_uri.unwrap().to_string_lossy().into_owned())
+    let user_uri = base_dir
+        .join(&data_dir)
+        .join("user_emb_metadata.json");
+
+    let movie_uri = base_dir
+        .join(&data_dir)
+        .join("movie_emb_metadata.json");
+
+    (
+        user_uri.to_string_lossy().into_owned(),
+        movie_uri.to_string_lossy().into_owned(),
+    )
 }
 
 #[allow(dead_code)]
-pub fn get_recommended_movies_uris() -> (String, String) {
-    let movies_rec_uri = get_project_dir()
-        .map(|p| p.join("src/test/resources/data/recommended_movies.parquet"))
-        .map(|p| p.to_string_lossy().into_owned())
-        .expect("Project directory not found");
+pub fn get_recommended_movies_uris(two_tower_version: Option<i32>) -> (String, String) {
 
-    let movies_rec_ts_uri = get_project_dir()
-        .map(|p| p.join("src/test/resources/data/recommended_movies_timestamps.parquet"))
-        .map(|p| p.to_string_lossy().into_owned())
-        .expect("Project directory not found");
+    let base_dir = get_project_dir().expect("Failed to get project directory");
+    let data_dir = match two_tower_version {
+        Some(version) => format!("src/test/resources/data/tower_versions/{}/", version),
+        None => "src/test/resources/data/tower_versions/1/".to_string(),
+    };
 
-    (movies_rec_uri, movies_rec_ts_uri)
+    let movies_rec_uri = base_dir
+        .join(&data_dir)
+        .join("recommended_movies.parquet");
+
+    let movies_rec_ts_uri = base_dir
+        .join(&data_dir)
+        .join("recommended_movies_timestamps.parquet");
+
+    (
+        movies_rec_uri.to_string_lossy().into_owned(),
+        movies_rec_ts_uri.to_string_lossy().into_owned(),
+    )
 }
+
 #[allow(dead_code)]
 pub fn get_movies_uri() -> String {
     let movies_uri = get_project_dir()
@@ -129,43 +153,66 @@ pub fn get_movies_uri() -> String {
 }
 
 #[allow(dead_code)]
-pub fn get_ranker_metadata_single_uri() -> String {
-    let file_uri = get_project_dir()
-        .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_single.json"))
-        .map(|p| p.to_string_lossy().into_owned())
-        .expect("Project directory not found");
+pub fn get_ranker_metadata_single_uri(cross_encoder_version: Option<i32>) -> String {
 
-    file_uri
+    let base_dir = get_project_dir().expect("Failed to get project directory");
+    let data_dir = match cross_encoder_version {
+        Some(version) => format!("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/{}/", version),
+        None => "src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/".to_string(),
+    };
+    let file_uri = base_dir
+        .join(&data_dir)
+        .join("assets.extra/metadata_single.json");
+
+    file_uri.to_string_lossy().into_owned()
+
 }
 
 #[allow(dead_code)]
-pub fn get_ranker_metadata_batch_uri() -> String {
-    let file_uri = get_project_dir()
-        .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_batch.json"))
-        .map(|p| p.to_string_lossy().into_owned())
-        .expect("Project directory not found");
+pub fn get_ranker_metadata_batch_uri(cross_encoder_version: Option<i32>) -> String {
 
-    file_uri
+    let base_dir = get_project_dir().expect("Failed to get project directory");
+    let data_dir = match cross_encoder_version {
+        Some(version) => format!("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/{}/", version),
+        None => "src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/".to_string(),
+    };
+    let file_uri = base_dir
+        .join(&data_dir)
+        .join("assets.extra/metadata_batch.json");
+
+    file_uri.to_string_lossy().into_owned()
 }
 
 #[allow(dead_code)]
-pub fn get_query_metadata_uri() -> String {
-    let file_uri = get_project_dir()
-        .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/1/assets.extra/hyperparameters.json"))
-        .map(|p| p.to_string_lossy().into_owned())
-        .expect("Project directory not found");
+pub fn get_query_metadata_uri(cross_encoder_version: Option<i32>) -> String {
+    let base_dir = get_project_dir().expect("Failed to get project directory");
+    let data_dir = match cross_encoder_version {
+        Some(version) => format!("src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/{}/", version),
+        None => "src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/1/".to_string(),
+    };
+    let file_uri = base_dir
+        .join(&data_dir)
+        .join("assets.extra/hyperparameters.json");
 
-    file_uri
+    file_uri.to_string_lossy().into_owned()
+
 }
 
 #[allow(dead_code)]
-pub fn get_model_param_json_uri() -> String {
-    let params_uri = get_project_dir()
-        .map(|p| p.join("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_single.json"))
-        .map(|p| p.to_string_lossy().into_owned())
-        .expect("Project directory not found");
-    params_uri
+pub fn get_model_param_json_uri(cross_encoder_version: Option<i32>) -> String {
+
+    let base_dir = get_project_dir().expect("Failed to get project directory");
+    let data_dir = match cross_encoder_version {
+        Some(version) => format!("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/{}/", version),
+        None => "src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/".to_string(),
+    };
+    let file_uri = base_dir
+        .join(&data_dir)
+        .join("assets.extra/metadata_single.json");
+
+    file_uri.to_string_lossy().into_owned()
 }
+
 #[allow(dead_code)]
 pub fn get_config_json_uri() -> String {
     let params_uri = get_project_dir()

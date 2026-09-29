@@ -25,7 +25,7 @@ mod calc_metrics_2_tests {
     }
 
     mod helper {
-        // Tell Rust to literally include the code from helper.rs here
+        // include the code from helper.rs here
         include!("helper.rs");
         include!("helper_users.rs");
     }
@@ -51,6 +51,7 @@ mod calc_metrics_2_tests {
 
     use rand::seq::SliceRandom;
     use rand::thread_rng;
+    use inference_engine::query_model_metadata::QueryModelMetadata;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_calc_test_metrics() {
@@ -59,11 +60,10 @@ mod calc_metrics_2_tests {
         let config_path = get_config_json_uri();
         let config = AppConfig::load_from_file(&config_path).unwrap();
 
-        // the default confg is for the batch ranker model, so change to the single inference model:
+        // the default config is for the batch ranker model, so change to the single inference model:
         let ranker_metadat_uri = config.ranker_metadata_uri.clone();
-        let single_uri = ranker_metadat_uri.replace("batch", "single");
-
-        let ranker_metadata = RankerModelMetadata::load_from_file(&single_uri).unwrap();
+        //let single_uri = ranker_metadat_uri.replace("batch", "single");
+        let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadat_uri).unwrap();
 
         let _top_k = config.top_k;
         let _user_db_path: PathBuf = config.user_db_path.clone();

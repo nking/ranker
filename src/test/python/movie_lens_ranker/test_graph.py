@@ -1,9 +1,7 @@
 import unittest
 
 import jax.distributed
-import os
 from array_record.python import array_record_module
-from dotenv import dotenv_values
 
 from movie_lens_ranker.train import *
 
@@ -13,6 +11,7 @@ class TestGraph(unittest.TestCase):
 
     def setUp(self):
 
+        two_tower_version = 1
         # === these are so that grain dataloader can read data from fake gcs server running in docker ====
 
         ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.TINY, use_gcs_uri=True)
@@ -31,19 +30,19 @@ class TestGraph(unittest.TestCase):
 
         # (movie_id, float array of embed_dim as a tuple)
         self.movie_embeddings_uri = os.path.join(get_project_dir(),
-                                                 "src/test/resources/data/movie_emb-00000-of-00001.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/movie_emb-00000-of-00001.array_record")
 
         # (user_id, float array of embed_dim as a tuple)
         self.user_embeddings_uri = os.path.join(get_project_dir(),
-                                                "src/test/resources/data/user_emb-00000-of-00001.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/user_emb-00000-of-00001.array_record")
 
         # (user_id, int array of movie_ids as a tuple) is full catalog for each user, no history subtracted
         self.recommendations_uri = os.path.join(
             get_project_dir(),
-            "src/test/resources/data/recommended_movies.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/recommended_movies.array_record")
         self.recommendations_ts_uri = os.path.join(
             get_project_dir(),
-            "src/test/resources/data/recommended_movies_timestamps.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/recommended_movies_timestamps.array_record")
 
         # (movie_id, title, genres)
         self.movies_uri = os.path.join(get_project_dir(),

@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 // Assuming your UserRequest is accessible here
 pub mod helper {
-    use std::collections::HashSet;
 
     // Tell Rust to literally include the code from helper.rs here
     include!("helper.rs");

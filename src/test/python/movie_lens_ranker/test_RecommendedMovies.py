@@ -8,9 +8,10 @@ from helper import *
 from movie_lens_ranker.data_loading import *
 from movie_lens_ranker.util import get_num_users_movies
 
-
 class TestRecommendedMovies(unittest.TestCase):
     def setUp(self):
+
+        two_tower_version = 1
         ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.SMALL)
         
         self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]
@@ -28,22 +29,22 @@ class TestRecommendedMovies(unittest.TestCase):
         # user recommendations with each user history subtracted already:
         # (user id, (movie_ids))
         self.recommendations_uri = os.path.join(get_project_dir(),
-            "src/test/resources/recommended_movies.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/recommended_movies.array_record")
         
         self.movie_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/movie_emb-00000-of-00001.array_record")
+           f"src/test/resources/data/tower_versions/{two_tower_version}/movie_emb-00000-of-00001.array_record")
         
         self.user_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/user_emb-00000-of-00001.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/user_emb-00000-of-00001.array_record")
         
         self.movie_ids_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")
         
         # (user_id, int array of movie_ids as a tuple) is full catalog for each user, no history subtracted
         self.recommendations_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/recommended_movies.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/recommended_movies.array_record")
         self.recommendations_ts_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/recommended_movies_timestamps.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/recommended_movies_timestamps.array_record")
         
         # (movie_id, title, genres)
         self.movies_uri = os.path.join(get_project_dir(),

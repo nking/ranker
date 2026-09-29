@@ -11,7 +11,7 @@ mod ranker_model_metadata_tests {
 
     #[test]
     pub fn test_default_config() {
-        let config_path = get_ranker_metadata_single_uri();
+        let config_path = get_ranker_metadata_single_uri(Some(1));
         let metadata = RankerModelMetadata::load_from_file(&config_path).unwrap();
         
         assert!(metadata.num_candidates > 0, "num_candidates should be populated");
@@ -29,7 +29,7 @@ mod ranker_model_metadata_tests {
 
     #[test]
     pub fn test_batch_config() {
-        let config_path = get_ranker_metadata_batch_uri();
+        let config_path = get_ranker_metadata_batch_uri(Some(1));
         let metadata = RankerModelMetadata::load_from_file(&config_path).unwrap();
 
         assert!(metadata.num_candidates > 0, "num_candidates should be populated");

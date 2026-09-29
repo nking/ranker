@@ -10,7 +10,7 @@ mod query_model_metadata_tests {
 
     #[test]
     pub fn test_default_config() {
-        let config_path = get_query_metadata_uri();
+        let config_path = get_query_metadata_uri(Some(1));
         let metadata = QueryModelMetadata::load_from_file(&config_path).unwrap();
         
         assert!(metadata.embed_len > 0, "embed_len should be populated");

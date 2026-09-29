@@ -3,15 +3,16 @@ import unittest
 from array_record.python import array_record_module
 from helper import *
 
-from movie_lens_ranker.RatingsHistoryTransform import RatingsHistoryLookupTransform
 from movie_lens_ranker.data_loading import *
 from movie_lens_ranker.util import get_num_users_movies
 
 
 class TestRanker(unittest.TestCase):
     def setUp(self):
-        
-        ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.SMALL)
+
+        two_tower_version = 1
+
+        ratings_uri_dict = get_train_val_test_liked_uris(data_size=DataSize.FULL)
         
         self.ratings_train_liked_uri = ratings_uri_dict["train_liked"]
         self.ratings_val_liked_uri = ratings_uri_dict["val_liked"]
@@ -31,13 +32,13 @@ class TestRanker(unittest.TestCase):
         #    the natural hard negatives are the ones which user rated 1 or 2
         #  (user_id, tuple of negative movie_ids)
         self.negatives_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/recommended_movies.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/recommended_movies.array_record")
         
         self.movie_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/movie_emb-00000-of-00001.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/movie_emb-00000-of-00001.array_record")
         
         self.user_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/user_emb-00000-of-00001.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/user_emb-00000-of-00001.array_record")
         
         self.movie_ids_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")

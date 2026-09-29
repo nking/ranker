@@ -1,7 +1,5 @@
 import os
 
-import json
-
 #=== these are so that grain dataloader can read data from fake gcs server running in docker ====
 os.environ["STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:4443"
 os.environ["GOOGLE_CLOUD_PROJECT"] = "local-dev"
@@ -31,15 +29,16 @@ from movie_lens_ranker.data_contracts import *
 
 class TestDataContracts(unittest.TestCase):
     def setUp(self):
+        two_tower_version = 1
         # (user_id, (tuple of negative movie_ids))
         self.negatives_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/ratings_train_disliked.array_record")
         
         self.recommendations_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/recommended_movies.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/recommended_movies.array_record")
 
         self.recommendations_ts_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/recommended_movies_timestamps.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/recommended_movies_timestamps.array_record")
         
         self.ratings_train_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/ratings_train_liked.array_record")
@@ -51,10 +50,10 @@ class TestDataContracts(unittest.TestCase):
             "src/test/resources/data/ratings_test_liked.array_record")
         
         self.movie_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/movie_emb-00000-of-00001.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/movie_emb-00000-of-00001.array_record")
         
         self.user_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/user_emb-00000-of-00001.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/user_emb-00000-of-00001.array_record")
         
         self.movie_ids_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/movies-00000-of-00001.array_record")

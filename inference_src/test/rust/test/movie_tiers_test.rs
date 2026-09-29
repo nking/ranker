@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod movie_tiers_tests {
-    use std::collections::HashMap;
     use rustc_hash::FxHashMap;
     use inference_engine::app_config::AppConfig;
     use inference_engine::movie_tiers::load_from_file;

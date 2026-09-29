@@ -1,6 +1,4 @@
 import datetime
-import os
-import logging
 import sys
 # Force etils to think tensorflow doesn't exist, triggering the gcsfs fallback
 sys.modules['tensorflow'] = None
@@ -12,16 +10,6 @@ sys.modules['tensorflow'] = None
 
 # Force Python to spawn clean workers instead of cloning the GPU context.
 import multiprocessing as mp
-import os
-import logging
-
-import msgpack
-
-from movie_lens_ranker.CandidateIdTransform import CandidateIdTransform
-from movie_lens_ranker.RatingsHistoryTransform import RatingsHistoryLookupTransform
-from movie_lens_ranker.SuperGraphPaddingTransform import SuperGraphPaddingTransform
-from movie_lens_ranker.UserHistory import UserHistory
-from movie_lens_ranker.util_np import optimized_batch_and_pad
 
 def init_multiprocessing():
     if mp.get_start_method(allow_none=True) != 'spawn':
@@ -45,8 +33,6 @@ def init_multiprocessing():
 
 init_multiprocessing()
 
-import jax
-
 def safe_jax_init():
     try:
         # Force local-only initialization for unit tests
@@ -69,25 +55,18 @@ warnings.filterwarnings(
 import fsspec
 from vizier.service import clients as vz_clients
 from dotenv import dotenv_values
-import json
 
-import glob
 import os.path
 
 import psycopg2
-import time
 
 import jax.distributed
-import array_record.python as array_record
-
-from absl import flags
 
 from helper import *
 from movie_lens_ranker.train import *
 from movie_lens_ranker.util import set_flags_from_dict, \
     destringify_mlflow_params
-from movie_lens_ranker.util_plots import plot_metrics_dict, \
-    get_mlflow_metrics_by_exp_name
+from movie_lens_ranker.util_plots import get_mlflow_metrics_by_exp_name
 
 from movie_lens_ranker.app_runner_inner import main as app_runner
 from movie_lens_ranker.app_runner_inner import extract_correct_vizier_param_types_dict, \
@@ -230,6 +209,8 @@ class TestRanker(unittest.TestCase):
     def setUp(self):
 
         self.check_docker_services()
+
+        two_tower_version = 1
         
         # === these are so that grain dataloader can read data from fake gcs server running in docker ====
         env_file = os.path.join(get_project_dir(), ".env_unittests")
@@ -253,22 +234,22 @@ class TestRanker(unittest.TestCase):
         
         # (movie_id, float array of embed_dim as a tuple)
         self.movie_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/movie_emb-00000-of-00001.array_record")
+           f"src/test/resources/data/tower_versions/{two_tower_version}/movie_emb-00000-of-00001.array_record")
 
         self.movie_tiers_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/movie_tiers-00000-of-00001.array_record")
+           f"src/test/resources/data/tower_versions/{two_tower_version}/movie_tiers-00000-of-00001.array_record")
 
         # (user_id, float array of embed_dim as a tuple)
         self.user_embeddings_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/user_emb-00000-of-00001.array_record")
-        
+            f"src/test/resources/data/tower_versions/{two_tower_version}/user_emb-00000-of-00001.array_record")
+
         # (user_id, int array of movie_ids as a tuple) is full catalog for each user, no history subtracted
         self.recommendations_uri = os.path.join(
             get_project_dir(),
-            "src/test/resources/data/recommended_movies.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/recommended_movies.array_record")
         self.recommendations_ts_uri = os.path.join(
             get_project_dir(),
-            "src/test/resources/data/recommended_movies_timestamps.array_record")
+            f"src/test/resources/data/tower_versions/{two_tower_version}/recommended_movies_timestamps.array_record")
         
         # (movie_id, title, genres)
         self.movies_uri = os.path.join(get_project_dir(),
@@ -390,9 +371,9 @@ class TestRanker(unittest.TestCase):
         #DEBUG: temporarily commenting out 
         if True:
             return file_path
-        idx = file_path.find("/data/")
-        tr = f'gs://{file_path[idx+1:]}'
-        return tr
+        #idx = file_path.find("/data/")
+        #tr = f'gs://{file_path[idx+1:]}'
+        #return tr
     
     def test_local_info(self):
         print(f'local_devices={jax.local_devices()}') #[CpuDevice(id=0)]

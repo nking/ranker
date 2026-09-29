@@ -45,7 +45,7 @@ mod graph_builder_tests {
 
         let n_local_devices : usize = 1;
 
-        let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
+        let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris(Some(1));
 
         let ranker_batch_size : usize = batch_size;
         
@@ -223,7 +223,7 @@ mod graph_builder_tests {
         let num_candidates : usize = 5;
         let jax_n_local_devices : usize = 1;
 
-        let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
+        let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris(Some(1));
 
         assert_file_exists(&user_embeddings_uri);
         assert_file_exists(&movie_embeddings_uri);

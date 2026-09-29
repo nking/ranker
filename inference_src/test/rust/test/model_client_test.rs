@@ -82,7 +82,7 @@ mod client_tests {
         let movie_id_range = (6041, 6041 + (max_history + num_candidates + 2));
         let n_local_devices = 1;
 
-        let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris();
+        let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris(Some(1));
 
         let ranker_batch_size : usize = client.metadata.batch_size;
 
@@ -95,7 +95,7 @@ mod client_tests {
         );
 
         let (user_emb_metadata_uri, _movie_emb_metadata_uri) : (String, String)
-            = get_embeddings_metadata_uris();
+            = get_embeddings_metadata_uris(Some(1));
 
         let json_content = tokio::fs::read_to_string(&user_emb_metadata_uri).await?;
         let dict: HashMap<String, Value> = serde_json::from_str(&json_content)?;
