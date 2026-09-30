@@ -25,6 +25,7 @@ from array_record.python import array_record_module
 
 from absl import flags
 
+from movie_lens_ranker.app_runner_inner import get_vizier_for_hpo_tier
 from movie_lens_ranker.util import destringify_mlflow_params
 
 #found by ip addr show docker0
@@ -64,6 +65,10 @@ def get_best_parameters_for_training(config:Dict[str, Any]) -> Dict[str, Union[f
     best_trial_data = best_trial.materialize()
     # best_params contains only the params being tuned, not all params needed for train_fn
     best_params = extract_correct_vizier_param_types_dict( best_trial_data.parameters)
+    if "hpo_tier" in best_params:
+        fixed_params = get_vizier_for_hpo_tier(hpo_tier=best_params['hpo_tier'], embed_in_dim=best_params['embed_in_dim'],
+                                               top_k=best_params['top_k'])
+        best_params.update(**fixed_params)
     return best_params
 
 def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
@@ -117,6 +122,10 @@ def main():
     #best_params contains only the params being tuned, not all params needed for train_fn
     best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
     print("Available metrics:", list(best_trial_data.final_measurement.metrics.keys()), flush=True)
+    if "hpo_tier" in best_params:
+        fixed_params = get_vizier_for_hpo_tier(hpo_tier=best_params['hpo_tier'], embed_in_dim=best_params['embed_in_dim'],
+                                               top_k=best_params['top_k'])
+        best_params.update(**fixed_params)
     bfm = best_trial_data.final_measurement
     bfm = bfm.metrics.get(f'ndcg_20')
     best_value = bfm.value

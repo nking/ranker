@@ -81,7 +81,7 @@ def get_or_create_mlflow_experiment(experiment_name:str):
 def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
     config = {}
     int_keys = {"top_k", "num_layers", "num_heads","hidden_dim","max_history",
-        "num_candidates","out_dim","edge_embed_dim"}
+        "num_candidates","out_dim","edge_embed_dim", "hpo_tier"}
     for k, v in params.items():
         if k == "tier_weights":
             if isinstance(v, ndarray):
@@ -109,15 +109,73 @@ def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
                 config[k] = float(v)
     return config
 
+def get_vizier_for_hpo_tier(hpo_tier:int, embed_in_dim:int, top_k:int) -> Dict[str, Union[float, int, str]]:
+
+    # Safe range calculation: Ensures at least one valid value even if top_k >= 50
+    history_cand_max = int(max(100, (2 * top_k) + 10))
+    history_cand_range = list(range(int(2 * top_k), history_cand_max, 10))#40,50,60,70,80,90
+
+    if hpo_tier==0:
+        return dict({
+            #"tier_weights" : "[0.33, 0.33, 0.33]",
+            #"temperature" : 0.25,
+            #"top_k" : top_k,
+            "num_layers" : 2,
+            "hidden_dim" : 64,
+            "num_heads" : 2,
+            "dropout_rate" : 0.1,
+            "learning_rate" : 1e-3,
+            "weight_decay" : 1e-3,
+            "out_dim" : embed_in_dim,
+            "edge_embed_dim" : 8,
+            "max_history" : history_cand_range[0],
+            "num_candidates" : history_cand_range[0],
+            "mlp_hidden_dim" : 1.0,
+            "focal_loss_gamma" : 2.0})
+    elif hpo_tier==1:
+        return {
+            #"tier_weights" : "[0.33, 0.33, 0.33]",
+            #"temperature" : 0.25,
+            #"top_k" : top_k,
+            "num_layers" : 2,
+            "hidden_dim" : 128,
+            "num_heads" : 4,
+            "dropout_rate" : 0.2,
+            "learning_rate": 5e-4,
+            "weight_decay": 1e-4,
+            "out_dim": 1.5*embed_in_dim,
+            "edge_embed_dim": 16,
+            "max_history": history_cand_range[len(history_cand_range)//2],
+            "num_candidates": history_cand_range[len(history_cand_range)//2],
+            "mlp_hidden_dim": 1.0,
+            "focal_loss_gamma": 2.0}
+    else:
+        return {
+            #"tier_weights" : "[0.33, 0.33, 0.33]",
+            #"temperature" : 0.25,
+            #"top_k" : top_k,
+            "num_layers": 3,
+            "hidden_dim": 256,
+            "num_heads": 8,
+            "dropout_rate": 0.35,
+            "learning_rate": 1e-4,
+            "weight_decay": 1e-5,
+            "out_dim": 2*embed_in_dim,
+            "edge_embed_dim": 24,
+            "max_history": history_cand_range[-1],
+            "num_candidates": history_cand_range[-1],
+            "mlp_hidden_dim": 1.0,
+            "focal_loss_gamma": 2.0}
+
 def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:int=32):
     """
-    get the Vizier study config of hyperparameter ranges. for HPO default and ranges.
+    get the Vizier study config of hyperparameters for the 3 trial tuning on Kaggle.
     :param top_k:  the number of movie_ids that inference will return for a user
     :param use_batching_alg: if True, uses study_config.algorithm = 'GP_UCB_PE'
     else study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
     :param embed_in_dim: the embedding lengths from the bi-encoder QueryModel or CandidateModel.  This is expected
     to be in range[16, 64] inclusive.
-    :return: he Vizier study config of hyperparameter ranges
+    :return: the Vizier study config of hyperparameter ranges
     """
 
     if embed_in_dim % 8 != 0:
@@ -126,84 +184,122 @@ def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in
     problem = vz.ProblemStatement()
     #https://oss-vizier.readthedocs.io/en/latest/guides/user/search_spaces.html#search-spaces
     root = problem.search_space.select_root()
-    
+
+    # Fixed parameters injected into every trial
     root.add_discrete_param("top_k", feasible_values=[top_k])
-    root.add_discrete_param("num_layers", feasible_values=[2,3])
-    #hidden_dim % num_heads == 0
+    root.add_discrete_param("embed_in_dim", feasible_values=[embed_in_dim])
+
+    root.add_discrete_param("temperature", feasible_values=[0.25])
+    #feasible_values=[0.07, 0.1, 0.25, 0.5])
+    root.add_categorical_param("tier_weights", feasible_values=["[0.33, 0.33, 0.33]"])
+
+    root.add_discrete_param("hpo_tier", feasible_values=[0, 1, 2])
+
+    problem.metric_information.append(
+        vz.MetricInformation(name=f'composite_ndcg_{top_k}', goal=vz.ObjectiveMetricGoal.MAXIMIZE)
+    )
+
+    #since num_epochs=15, this is not necessary:
+    #problem.early_stopping_rule = vz.MedianStoppingRule(
+    #    min_iters=10,  # Minimum steps before early stopping can trigger.  this should match delay in _train_fn
+    #    window_size=5,  # Number of steps to average over (optional depending on rule variant)
+    #)
+
+    # Study Config
+    study_config = vz.StudyConfig.from_problem(problem)
+
+    # Algorithm Selection
+    if use_batching_alg:
+        study_config.algorithm = 'GP_UCB_PE'
+    else:
+        #study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
+        study_config.algorithm = 'GRID_SEARCH'
+
+    ## consider implementing a Pythia class for median early stopping
+    #study_config.automated_stopping_config = vz.AutomatedStoppingConfig....
+    # see https://oss-vizier.readthedocs.io/en/latest/guides/developer/early_stopping.html#id1
+
+    return study_config
+
+def _get_vizier_study_config_for_all(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:int=32):
+    """
+    get the Vizier study config of hyperparameter ranges. for HPO default and ranges.
+    :param top_k:  the number of movie_ids that inference will return for a user
+    :param use_batching_alg: if True, uses study_config.algorithm = 'GP_UCB_PE'
+    else study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
+    :param embed_in_dim: the embedding lengths from the bi-encoder QueryModel or CandidateModel.  This is expected
+    to be in range[16, 64] inclusive.
+    :return: the Vizier study config of hyperparameter ranges
+    """
+
+    if embed_in_dim % 8 != 0:
+        raise ValueError(f"emb_in_dim expected to be a multiple of 8.  found={embed_in_dim}")
+
+    problem = vz.ProblemStatement()
+    #https://oss-vizier.readthedocs.io/en/latest/guides/user/search_spaces.html#search-spaces
+    root = problem.search_space.select_root()
+
+    # Fixed parameters injected into every trial
+    root.add_discrete_param("top_k", feasible_values=[top_k])
+    root.add_discrete_param("temperature", feasible_values=[0.25])
+    #feasible_values=[0.07, 0.1, 0.25, 0.5])
+    root.add_categorical_param("tier_weights", feasible_values=["[0.33, 0.33, 0.33]"])
+
+    # Safe range calculation: Ensures at least one valid value even if top_k >= 50
+    history_cand_max = max(100, (2 * top_k) + 10)
+    history_cand_range = list(range(2 * top_k, history_cand_max, 10))
+
+    # Standard HPO Search Space
+    root.add_discrete_param("num_layers", feasible_values=[2, 3])
     root.add_discrete_param("num_heads", feasible_values=[2, 4, 8])
 
     # For embed_in_dim=32, yields [64, 128, 192, 256]
-    root.add_discrete_param(
-        "hidden_dim", feasible_values=[embed_in_dim * k for k in (2, 4, 6, 8)]
-    )
+    root.add_discrete_param("hidden_dim", feasible_values=[embed_in_dim * k for k in (2, 4, 6, 8)])
 
-    root.add_discrete_param("max_history", feasible_values=[i for i in range(2*top_k, 100, 10)])
-    root.add_discrete_param("num_candidates", feasible_values=[i for i in range(2*top_k, 100, 10)])
-
-    #if want a linear relationship between lr and wd, setup a dependency:
-    # wd_ratio = trial.suggest_float("wd_ratio", 0.01, 1.0, log=True)
-    # config['weight_decay'] = config['learning_rate'] * wd_ratio
-    #root.add_float_param("learning_rate", min_value=1e-4, max_value=1e-2, default_value=1e-3,
-    #    scale_type=vz.ScaleType.LOG)
-    #root.add_float_param("weight_decay", min_value=1e-4, max_value=1e-2, default_value=1e-3,
-    #    scale_type=vz.ScaleType.LOG)
     root.add_discrete_param("learning_rate", feasible_values=[1e-4, 5e-4, 1e-3])
     root.add_discrete_param("weight_decay", feasible_values=[1e-5, 1e-4, 1e-3])
-
-    #root.add_float_param("temperature", min_value=0.05, max_value=0.15, default_value=0.1,
-    #    scale_type=vz.ScaleType.LOG)
-    root.add_discrete_param("temperature", feasible_values=[0.07, 0.1, 0.2, 0.5])
-
-    feasible_out_dim = [embed_in_dim, int(embed_in_dim * 1.5), embed_in_dim * 2] # e.g., [32, 48, 64]
-
-    # out_dim avoids bottle-necking the incoming embeddings.
-    # For embed_in_dim=32, yields [32, 48, 64] (multiples of 16 for JAX vector alignment)
-    out_dim_param = root.add_discrete_param(
-        "out_dim",
-        feasible_values=feasible_out_dim
-    )
-    ## ths will be applied to out_dim which is out_features in GraphRanker.  max value allowed is 2*out_features
-    root.add_float_param("mlp_hidden_dim", min_value=0.5, max_value=2.0)
-
-    # Deduplicated edge embedding dimension logic
-    # For embed_in_dim=32, yields [8, 16, 24]
-    edge_dims = sorted(list({8, embed_in_dim // 2, int(embed_in_dim * 0.75)}))
-    root.add_discrete_param("edge_embed_dim", feasible_values=edge_dims)
 
     # Dropout range [0.10, 0.40] to stabilize GNN message passing
     root.add_discrete_param("dropout_rate", feasible_values=[round(i * 0.05, 2) for i in range(2, 9)])
 
-    #feasible_gammas = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0]
+    # For embed_in_dim=32, yields [32, 48, 64]
+    feasible_out_dim = [embed_in_dim, int(embed_in_dim * 1.5), embed_in_dim * 2]
+    root.add_discrete_param("out_dim", feasible_values=feasible_out_dim)
+
+    # Deduplicated edge embedding dimension logic
+    edge_dims = sorted(list({8, embed_in_dim // 2, int(embed_in_dim * 0.75)}))
+    root.add_discrete_param("edge_embed_dim", feasible_values=edge_dims)
+
+    root.add_discrete_param("max_history", feasible_values=history_cand_range)
+    root.add_discrete_param("num_candidates", feasible_values=history_cand_range)
+    #factor to apply to out_dim which is out_features in GraphRanker.  max value allowed is 2*out_features
+    root.add_float_param("mlp_hidden_dim", min_value=0.5, max_value=2.0)
     root.add_discrete_param('focal_loss_gamma', feasible_values=[0.0, 0.5, 2.0, 4.0], default_value=2.0)
 
-    ## we set this to match what is used for composite_ndcg in the TwoTowerDNN training,
-    ## but if wanted to separate w_head,_torso,_tail for the IPW tiered weightings,
-    ## then need to change eval_step's assignments of w_head, w_torso, and w_tail
-    root.add_categorical_param("tier_weights",
-        feasible_values=["[0.33, 0.33, 0.33]"
-                         #,"[0.65, 0.2, 0.15]"
-                         #,"[0.2, 0.65, 0.15]"
-                         ]
-        )
-
+    # Metrics
     problem.metric_information.append(
-        vz.MetricInformation(name=f'composite_ndcg_{top_k}',
-        goal=vz.ObjectiveMetricGoal.MAXIMIZE)
+        vz.MetricInformation(name=f'composite_ndcg_{top_k}', goal=vz.ObjectiveMetricGoal.MAXIMIZE)
     )
-    
+
+    #since num_epochs=15, this is not necessary:
+    #problem.early_stopping_rule = vz.MedianStoppingRule(
+    #    min_iters=10,  # Minimum steps before early stopping can trigger.  this should match delay in _train_fn
+    #    window_size=5,  # Number of steps to average over (optional depending on rule variant)
+    #)
+
+    # Study Config
     study_config = vz.StudyConfig.from_problem(problem)
-    #if using 4+ GPUs concurrently, choose GP_UCB_PE instead:
+
+    # Algorithm Selection
     if use_batching_alg:
         study_config.algorithm = 'GP_UCB_PE'
     else:
         study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
-        #study_config.algorithm = 'EAGLE_STRATEGY'
-        #study_config.algorithm = 'RANDOM_SEARCH'
-        #study_config.algorithm = 'DEFAULT'
-    
+
     ## consider implementing a Pythia class for median early stopping
     #study_config.automated_stopping_config = vz.AutomatedStoppingConfig....
     # see https://oss-vizier.readthedocs.io/en/latest/guides/developer/early_stopping.html#id1
+
     return study_config
 
 def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
@@ -225,8 +321,8 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
     resource_name = f"owners/{project_id}/studies/{study_name}"
     
     study_config = _get_vizier_study_config(top_k=top_k, use_batching_alg=use_batching_alg,
-                                            embed_in_dim=embed_in_dim)
-    
+            embed_in_dim=embed_in_dim)
+
     if jax.process_index() == 0:
         # Now connects to the explicitly created server.
         #loads existing by owner_id for study_id and study_config, else creates new study
@@ -253,7 +349,8 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
 def sync_hyperparams(params_dict: Dict, max_bytes: int = 2048) -> Dict:
     sync_keys = ["top_k", "num_layers", "num_heads", "hidden_dim",
                  "max_history","num_candidates", "learning_rate", "weight_decay", "out_dim",
-                 "mlp_hidden_dim", "edge_embed_dim","dropout_rate", "temperature", "focal_loss_gamma", "tier_weights"]
+                 "mlp_hidden_dim", "edge_embed_dim","dropout_rate", "temperature",
+                 "focal_loss_gamma", "tier_weights"]
     if jax.process_index() == 0:
         params_dict = extract_correct_vizier_param_types_dict(params_dict)
         #params_dict = {k:v for k,v in params_dict.items() if k in sync_keys}
@@ -393,13 +490,30 @@ def run_tune(config):
         logging.info(f"worker_{worker_rank}: creating vizier study")
         study = setup_vizier_study(project_id=config['project_id'], study_name=config['study_name'],
             endpoint=config['vizier_endpoint'], top_k=config['top_k'], use_batching_alg=n_large,
-                                   embed_in_dim=  embed_len)
+            embed_in_dim=  embed_len)
         unique_id = uuid.uuid4().hex[:8]
         resource_name = f"owners_{config['project_id']}_studies_{config['study_name']}"
         client_id = f"{resource_name}_{unique_id}"
-        #suggested_trials = study.suggest(count=len(trial_ids), client_id=study._client._client_id)
-        suggested_trials = study.suggest(count=len(trial_ids), client_id=client_id)
+
+        #for kaggle we can only fit 3 trials. so will make sure one each of hpo_tier is present
+        have_hpo_tiers = set()
+        suggested_trials = []
+        delete_trials = []
+        while len(have_hpo_tiers) < len(trial_ids):
+            trials = study.suggest(count=len(trial_ids), client_id=client_id)
+            for trial in trials:
+                id = trial.parameters["hpo_tier"]
+                if id in have_hpo_tiers:
+                    delete_trials.append(trial) #wait until all suggestions are done to avoid repeated suggestiona
+                else:
+                    suggested_trials.append(trial)
+                    have_hpo_tiers.add(id)
+        for trial in delete_trials:
+            trial.delete()
         logging.info(f"worker_{worker_rank}: has suggested trials")
+        #this for a large number of trials.
+        # list of vizier._src.service.clients.Trial
+        #suggested_trials = study.suggest(count=len(trial_ids), client_id=client_id)
 
     trial_suggestion = None
     hparams = {}
@@ -408,6 +522,9 @@ def run_tune(config):
         if worker_rank == 0:
             trial_suggestion = suggested_trials[i]
             hparams = {k: v for k, v in trial_suggestion.parameters.items()}
+            if "hpo_tier" in hparams:
+                hparams2 = get_vizier_for_hpo_tier(hparams["hpo_tier"], embed_in_dim=embed_len, top_k=config['top_k'])
+                hparams.update(hparams2)
             logging.info(f'suggested hparams: {hparams}')
 
         # broadcast hparams so all workers share identical configurations
@@ -543,6 +660,10 @@ def get_best_parameters_for_training(config:Dict[str, Any]) -> Dict[str, Union[f
     best_trial_data = best_trial.materialize()
     # best_params contains only the params being tuned, not all params needed for train_fn
     best_params = extract_correct_vizier_param_types_dict( best_trial_data.parameters)
+    if "hpo_tier" in best_params:
+        fixed_params = get_vizier_for_hpo_tier(hpo_tier=best_params['hpo_tier'], embed_in_dim=best_params['embed_in_dim'],
+                top_k=best_params['top_k'])
+        best_params.update(**fixed_params)
     return best_params
 
 def get_best_checkpoint_uri_for_testing(config:Dict[str, Any]) -> str:
@@ -685,6 +806,10 @@ def run_export_results(config: Dict[str, Any]):
         #best_params contains only the params being tuned, not all params needed for train_fn
         best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
         #logging.info("Available metrics:", list(best_trial_data.final_measurement.metrics.keys()))
+        if "hpo_tier" in best_params:
+            fixed_params = get_vizier_for_hpo_tier(hpo_tier=best_params['hpo_tier'], embed_in_dim=best_params['embed_in_dim'],
+                top_k=best_params['top_k'])
+            best_params.update(**fixed_params)
         bfm = best_trial_data.final_measurement
         _top_k = config.get('top_k', 20)
         bfm = bfm.metrics.get(f'composite_ndcg_{_top_k}')

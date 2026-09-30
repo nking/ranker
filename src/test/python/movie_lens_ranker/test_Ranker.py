@@ -1,5 +1,9 @@
 import datetime
 import sys
+import os
+
+from mlflow.tracing.utils import exception
+
 # Force etils to think tensorflow doesn't exist, triggering the gcsfs fallback
 sys.modules['tensorflow'] = None
 
@@ -32,7 +36,7 @@ def init_multiprocessing():
 
 
 init_multiprocessing()
-
+import jax
 def safe_jax_init():
     try:
         # Force local-only initialization for unit tests
@@ -68,7 +72,7 @@ from movie_lens_ranker.util import set_flags_from_dict, \
     destringify_mlflow_params
 from movie_lens_ranker.util_plots import get_mlflow_metrics_by_exp_name
 
-from movie_lens_ranker.app_runner_inner import main as app_runner
+from movie_lens_ranker.app_runner_inner import main as app_runner, get_vizier_for_hpo_tier
 from movie_lens_ranker.app_runner_inner import extract_correct_vizier_param_types_dict, \
     get_best_checkpoint_uri_for_testing, get_best_parameters_for_training
 
@@ -237,7 +241,7 @@ class TestRanker(unittest.TestCase):
            f"src/test/resources/data/tower_versions/{two_tower_version}/movie_emb-00000-of-00001.array_record")
 
         self.movie_tiers_uri = os.path.join(get_project_dir(),
-           f"src/test/resources/data/tower_versions/{two_tower_version}/movie_tiers-00000-of-00001.array_record")
+           "src/test/resources/data/movie_tiers-00000-of-00001.array_record")
 
         # (user_id, float array of embed_dim as a tuple)
         self.user_embeddings_uri = os.path.join(get_project_dir(),
@@ -678,6 +682,10 @@ class TestRanker(unittest.TestCase):
         best_trial_data = best_trial.materialize()
         # best_params contains only the params being tuned, not all params needed for train_fn
         best_params = extract_correct_vizier_param_types_dict(best_trial_data.parameters)
+        if "hpo_tier" in best_params:
+            fixed_params = get_vizier_for_hpo_tier(hpo_tier=best_params['hpo_tier'], embed_in_dim=best_params['embed_in_dim'],
+                    top_k=best_params['top_k'])
+            best_params.update(**fixed_params)
         bfm = best_trial_data.final_measurement
         print("best_params:", best_params, flush=True)
         print("Available metrics:", list(bfm.metrics.keys()), flush=True)
@@ -703,11 +711,14 @@ class TestRanker(unittest.TestCase):
         
         ## assert the values are the same
         for k, v in best_params.items():
-            if isinstance(v, float):
-                self.assertAlmostEqual(v, config[k], delta=0.01 * v)
-                self.assertAlmostEqual(v, best_params2[k], delta=0.01 * v)
-            else:
-                self.assertEqual(v, config[k])
+            try:
+                if isinstance(v, float):
+                    self.assertAlmostEqual(v, config[k], delta=0.01 * v)
+                    self.assertAlmostEqual(v, best_params2[k], delta=0.01 * v)
+                else:
+                    self.assertEqual(v, config[k])
+            except Exception as e:
+                self.fail(e)
     
     def _run_train_and_restore_chkpoint_and_assert(self, config):
         #### ====================================================== ####

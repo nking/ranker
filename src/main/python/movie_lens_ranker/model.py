@@ -53,6 +53,7 @@ class GraphRanker(nnx.Module):
             rngs=rngs
         )
 
+        #TODO: consider adding this to hyperparameters: root.add_discrete_param("mlp_hidden_dim_mult", feasible_values=[0.5, 1.0, 1.5, 2.0])
         # nearest multiple of 8, then lower bound of 16
         mlp_hidden_dim_int = max(16, int(round(mlp_hidden_dim * out_features / 8.0) * 8.0))
 

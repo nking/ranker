@@ -61,7 +61,9 @@ model_params_trainable_keys = {
     'temperature',
     'num_epochs',
     'batch_size',
-    "tier_weights"
+    "tier_weights",
+    "focal_loss_gamma",
+    "hpo_tier"
 }
 def get_recognized_keys():
     return {
