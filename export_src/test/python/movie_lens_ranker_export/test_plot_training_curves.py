@@ -26,8 +26,8 @@ class PlotTrainingTest(unittest.TestCase):
         #saved_model_dir = os.path.join(get_bin_dir(), "src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1")
         #hyperparams_dict = self.get_hyperparams_dict_from_saved_model(saved_model_dir)
 
-        logdir = os.path.join(get_project_dir(), "TMP17/hpo-results-bucket/kaggle-tune-train-test/kaggle-hpo/")
-        hyperparams_path = os.path.join(get_project_dir(), "TMP17/hpo-results-bucket/kaggle-tune-train-test/kaggle-hpo/tune/hparams.json")
+        logdir = os.path.join(get_project_dir(), "TMP18/hpo-results-bucket/kaggle-tune-train-test/kaggle-hpo/")
+        hyperparams_path = os.path.join(get_project_dir(), "TMP18/hpo-results-bucket/kaggle-tune-train-test/kaggle-hpo/tune/hparams.json")
         hyperparams_dict = self.get_hyperparams_dict(hyperparams_path)
 
         outdir = os.path.join(get_bin_dir(), "training_metrics_pngs")
@@ -36,12 +36,13 @@ class PlotTrainingTest(unittest.TestCase):
         top_k = hyperparams_dict.get("top_k", 20)
         batch_size = hyperparams_dict["batch_size"]
         temperature = hyperparams_dict["temperature"]
+        num_candidates = hyperparams_dict["num_candidates"]
 
         random_ndcg = self.calc_random_ndcg(k=top_k, movie_catalog_size=num_catalog_movies)
         random_recall = self.calc_random_recall(k=top_k, movie_catalog_size=num_catalog_movies)
         random_precision = self.calc_random_precision(k=top_k, movie_catalog_size=num_catalog_movies)
         random_mrr = self.calc_random_mrr(k=top_k, movie_catalog_size=num_catalog_movies)
-        random_loss = self.calc_random_inbatch_softmax_loss(batch_size)
+        random_loss = self.calc_random_softmax_loss(num_candidates)
 
 
         train_dir = os.path.join(logdir, "train")
@@ -80,8 +81,8 @@ class PlotTrainingTest(unittest.TestCase):
 
         print(f'wrote pngs to {outdir}')
 
-    def calc_random_inbatch_softmax_loss(self, batch_size:int):
-        return np.log(batch_size)
+    def calc_random_softmax_loss(self, num_candidates:int):
+        return np.log(num_candidates)
 
     def calc_random_ndcg(self, k: int, movie_catalog_size: int) -> float:
         s = np.sum([1 / np.log2(r + 1) for r in range(1, k + 1)])

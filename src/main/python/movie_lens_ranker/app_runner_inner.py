@@ -112,8 +112,7 @@ def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
 def get_vizier_for_hpo_tier(hpo_tier:int, embed_in_dim:int, top_k:int) -> Dict[str, Union[float, int, str]]:
 
     # Safe range calculation: Ensures at least one valid value even if top_k >= 50
-    history_cand_max = int(max(100, (2 * top_k) + 10))
-    history_cand_range = list(range(int(2 * top_k), history_cand_max, 10))#40,50,60,70,80,90
+    history_cand_range = list(range(100, 250, 50))#100, 150, 250
 
     if hpo_tier==0:
         return dict({
