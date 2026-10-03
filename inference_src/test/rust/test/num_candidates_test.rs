@@ -110,6 +110,7 @@ mod num_candidates_tests {
     //bring the gRPC trait into scope so its methods (.predict) are visible
     use inference_engine::pb::{ApproxNearestNeighborsResponse, UsersRequest};
     use tonic::{Request};
+    use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
     use inference_engine::movie_tiers::load_from_file;
     use crate::helper::{get_unique_user_and_first_timestamp, get_user_movie_tier_map, load_and_concat_parquet};
 
@@ -153,6 +154,9 @@ mod num_candidates_tests {
                 _ => "test",
             };
 
+            let query_model_version = Some(VersionChoice::Version(1));
+            let ranker_model_version = Some(VersionChoice::Version(1));
+
             let (_movie_tier_vec_map, user_ids, timestamps) : (Vec<HashMap<i32, HashSet<i32>>>,Vec<i32>, Vec<i64> )
                 = get_user_datastructures(&[&ratings_file_path], &movie_tiers)?;
 
@@ -172,7 +176,8 @@ mod num_candidates_tests {
             for (chunk_users, chunk_timestamps) in user_ids.chunks(ranker_batch_size).zip(timestamps.chunks(ranker_batch_size)) {
 
                 let tonic_request: Request<UsersRequest>  =
-                    harness.orchestrator.get_users_request(chunk_users, chunk_timestamps).await?;
+                    harness.orchestrator.get_users_request(chunk_users, chunk_timestamps,
+                    query_model_version.clone(), ranker_model_version.clone()).await?;
                 let mut users_request : UsersRequest = tonic_request.into_inner();
 
                 for  &k in &ks {

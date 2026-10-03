@@ -169,15 +169,13 @@ pub fn timestamp_now()-> u64 {
 /// returns: usize
 ///
 /// # Examples
-///
+/// ```text
 ///       arr       = [1, 2, 3, 3, 4]
-//          indexes =  0  1  2  3  4
-//
-//          ceil of srch=3 is index 3
-//          ceil of srch=4 is index 4
-//          ceil of srch=9 is index 5
-//          ceil of srch=0 is index 0
-///
+///          ceil of srch=3 is index 3
+///          ceil of srch=4 is index 4
+///          ceil of srch=9 is index 5
+///          ceil of srch=0 is index 0
+/// ```
 pub fn ceiling_search(arr: &[i64], srch: i64) -> usize {
     // Find the first index where the element is STRICTLY GREATER than `srch`.
     let p = arr.partition_point(|&x| x <= srch);

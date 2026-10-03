@@ -10,8 +10,6 @@ mod user_history_tests {
     //   cargo test
 
     mod helper {
-        use inference_engine::calc_metrics::Interaction;
-
         // Tell Rust to literally include the code from helper.rs here
         include!("helper.rs");
         include!("helper_users.rs");

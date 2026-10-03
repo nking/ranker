@@ -16,6 +16,7 @@ pub mod tf_core {
 }
 use tf_core::{Example, SignatureDef, TensorProto, DataType, TensorShapeProto, tensor_shape_proto::Dim};
 use tf_serving::{prediction_service_client::PredictionServiceClient, PredictRequest, ModelSpec};
+use crate::model_client::tf_serving::model_spec::VersionChoice;
 use crate::ranker_model_metadata::RankerModelMetadata;
 
 #[derive(Debug)]
@@ -44,11 +45,12 @@ impl QueryModelClient {
         }
     }
 
-    pub async fn get_users_embeddings(&self, request: UsersRequest) -> Result<Vec<f32>, Box<dyn Error>> {
+    pub async fn get_users_embeddings(&self, request: UsersRequest,
+        query_model_version_choice: Option<VersionChoice>) -> Result<Vec<f32>, Box<dyn Error>> {
 
         let n_valid_users : usize = request.n_users as usize;
 
-        let predict_req: PredictRequest = build_query_model_inputs(request);
+        let predict_req: PredictRequest = build_query_model_inputs(request, query_model_version_choice);
 
         // Send the request
         let response = self.client.clone().predict(predict_req).await?;
@@ -108,9 +110,11 @@ impl RankerModelClient {
         Self { client: tfs_client, metadata: metadata }
     }
 
-    pub async fn get_candidate_ranks(&self, padded_super_graph: JraphGraph, embed_len : usize) -> Result<Vec<f32>, Box<dyn Error>> {
+    pub async fn get_candidate_ranks(&self, padded_super_graph: JraphGraph, embed_len : usize,
+        ranker_model_version_choice: Option<VersionChoice>) -> Result<Vec<f32>, Box<dyn Error>> {
 
-        let predict_req : PredictRequest = build_graph_ranker_proto_inputs(padded_super_graph, embed_len, self.metadata.batch_size > 1);
+        let predict_req : PredictRequest = build_graph_ranker_proto_inputs(padded_super_graph,
+            embed_len, self.metadata.batch_size > 1, ranker_model_version_choice);
 
         //println!("Sending gRPC request to TF Serving for GraphRanker...");
 
@@ -145,7 +149,23 @@ impl RankerModelClient {
     }
 }
 
-pub fn build_query_model_inputs(req: UsersRequest) -> PredictRequest {
+///
+///
+/// # Arguments
+///
+/// * `req`: a UsersRequest instance that has everything needed to make ANN searches for the users.
+/// * `model_version_choice`: the Query model version to use.  defaults to 1 if None is given, else
+///     the value.
+///     e.g. Some(VersionChoice::Version(2))
+///     e.g. None
+/// returns: PredictRequest
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
+pub fn build_query_model_inputs(req: UsersRequest, model_version_choice: Option<VersionChoice>) -> PredictRequest {
 
     let mut inputs : HashMap<String, TensorProto> = HashMap::new();
 
@@ -161,6 +181,7 @@ pub fn build_query_model_inputs(req: UsersRequest) -> PredictRequest {
         model_spec: Some(ModelSpec {
             name: "query".to_string(),
             signature_name: "serving_default".to_string(),
+            version_choice: model_version_choice,
             ..Default::default()
         }),
         inputs: inputs,
@@ -168,7 +189,8 @@ pub fn build_query_model_inputs(req: UsersRequest) -> PredictRequest {
     }
 }
 
-pub fn build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len : usize, client_is_batch: bool) -> PredictRequest {
+pub fn build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len : usize,
+    client_is_batch: bool, ranker_model_version_choice: Option<VersionChoice>) -> PredictRequest {
     /*
     //MAX_GRAPHS:
     padded_super_graph.n_node
@@ -196,7 +218,8 @@ pub fn build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len
     let model_spec = ModelSpec {
         name: "graph-ranker".into(),
         signature_name: signature_name,
-        version_choice: None,
+        version_choice: ranker_model_version_choice,
+        ..Default::default()
     };
 
     PredictRequest {
@@ -246,15 +269,18 @@ fn _build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len: u
     inputs
 }
 
-pub fn build_batch_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len: usize
+pub fn build_batch_graph_ranker_proto_inputs(padded_super_graph: JraphGraph,
+    embed_len: usize, ranker_model_version_choice: Option<VersionChoice>
 ) -> PredictRequest {
 
-    let inputs : HashMap<String, TensorProto> = _build_graph_ranker_proto_inputs(padded_super_graph, embed_len);
+    let inputs : HashMap<String, TensorProto> = _build_graph_ranker_proto_inputs(
+        padded_super_graph, embed_len);
 
     PredictRequest {
         model_spec: Some(ModelSpec {
             name: "graph-ranker".into(),
             signature_name: "serving_batch".into(), // Targets the batch signature
+            version_choice: ranker_model_version_choice,
             ..Default::default()
         }),
         inputs,

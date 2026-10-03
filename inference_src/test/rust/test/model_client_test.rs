@@ -7,6 +7,7 @@ mod client_tests {
     use inference_engine::app_config::AppConfig;
     use inference_engine::model_client::{QueryModelClient, RankerModelClient};
     use inference_engine::graph_builder::{create_fake_padded_super_batch, JraphGraph};
+    use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
     //use super::*;
     // Assuming your UserRequest is accessible here
     use inference_engine::pb::UsersRequest;
@@ -37,11 +38,16 @@ mod client_tests {
             timestamps: vec![1620000000],
             n_users: 1,
             k : None,
+            query_model_version:1,
+            ranker_model_version:1
         };
+
+        let query_model_version_choice = Some(VersionChoice::Version(1));
 
         // If the docker container isn't running, or the model isn't loaded,
         // this will fail and print the gRPC status error.
-        let result : Result<Vec<f32>, Box<dyn Error>> = client.get_users_embeddings(mock_request).await;
+        let result : Result<Vec<f32>, Box<dyn Error>> = client.get_users_embeddings(mock_request,
+            query_model_version_choice).await;
 
         assert!(result.is_ok(), "Failed to get embedding: {:?}", result.err());
 
@@ -101,10 +107,12 @@ mod client_tests {
         let dict: HashMap<String, Value> = serde_json::from_str(&json_content)?;
         let embed_len = dict.get("embed_dim").and_then(|v| v.as_u64()).unwrap();
 
+        let query_model_version = Some(VersionChoice::Version(1));
+
         // If the docker container isn't running, or the model isn't loaded,
         // this will fail and print the gRPC status error.
         let result : Result<Vec<f32>, Box<dyn Error>> = client.get_candidate_ranks(
-            padded_super_graph, embed_len as usize).await;
+            padded_super_graph, embed_len as usize, query_model_version).await;
 
         assert!(result.is_ok(), "Failed to get ranks: {:?}", result.err());
 

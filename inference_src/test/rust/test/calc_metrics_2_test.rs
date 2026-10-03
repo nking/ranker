@@ -51,7 +51,7 @@ mod calc_metrics_2_tests {
 
     use rand::seq::SliceRandom;
     use rand::thread_rng;
-    use inference_engine::query_model_metadata::QueryModelMetadata;
+    use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_calc_test_metrics() {
@@ -154,8 +154,13 @@ mod calc_metrics_2_tests {
 
         let num_candidates: usize = ranker_metadata.num_candidates;
 
+        let query_model_version = Some(VersionChoice::Version(1));
+        let ranker_model_version = Some(VersionChoice::Version(1));
+
         for (chunk_users, chunk_timestamps) in user_ids.chunks(ranker_batch_size).zip(timestamps.chunks(ranker_batch_size)) {
-            let option_tonic_request: Option<Request<UsersRequest>> = user_db.get_request(chunk_users, chunk_timestamps);
+            let option_tonic_request: Option<Request<UsersRequest>>
+                = user_db.get_request(chunk_users, chunk_timestamps, query_model_version.clone(),
+                    ranker_model_version.clone());
             let tonic_req = option_tonic_request.ok_or("request not found for chunk")?;
             //let users_req = tonic_req.into_inner();
 
@@ -360,12 +365,17 @@ mod calc_metrics_2_tests {
         let mut rand_recall_tiers : Vec<f64> = vec![0.; 3];
         let mut count_metric_tiers: Vec<i32> = vec![0; 3];
 
+        let query_model_version = Some(VersionChoice::Version(1));
+        let ranker_model_version = Some(VersionChoice::Version(1));
+
         // from test dataset, need the user_ids and timestamps
         // see get_user_datastructures
 
         for (chunk_users, chunk_timestamps) in user_ids.chunks(ranker_batch_size).zip(timestamps.chunks(ranker_batch_size)) {
 
-            let option_tonic_request :  Option<Request<UsersRequest>> = user_db.get_request(chunk_users, chunk_timestamps);
+            let option_tonic_request :  Option<Request<UsersRequest>>
+                = user_db.get_request(chunk_users, chunk_timestamps,
+                query_model_version.clone(), ranker_model_version.clone());
             let tonic_req = option_tonic_request.ok_or("request not found for chunk")?;
             //let users_req = tonic_req.into_inner();
 
@@ -501,12 +511,17 @@ mod calc_metrics_2_tests {
         let mut count_metric_tiers: Vec<i32> = vec![0; 3];
         let mut count_predicted_tiers : Vec<f64> = vec![0.; 3];
 
+        let query_model_version = Some(VersionChoice::Version(1));
+        let ranker_model_version = Some(VersionChoice::Version(1));
+
         let mut recommended_set : HashSet<i32> = HashSet::new();
 
         for (chunk_users, chunk_timestamps) in user_ids.chunks(ranker_batch_size).zip(timestamps.chunks(ranker_batch_size)) {
             // chunks are &[i32] slices
 
-            let option_tonic_request :  Option<Request<UsersRequest>> = user_db.get_request(chunk_users, chunk_timestamps);
+            let option_tonic_request :  Option<Request<UsersRequest>>
+                = user_db.get_request(chunk_users, chunk_timestamps,
+                query_model_version.clone(), ranker_model_version.clone());
             let tonic_req = option_tonic_request.ok_or("request not found for chunk")?;
             //let users_req = tonic_req.into_inner();
 

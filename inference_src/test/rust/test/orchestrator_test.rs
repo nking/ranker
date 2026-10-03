@@ -93,6 +93,7 @@ mod orchestrator_tests {
     use inference_engine::pb::recommender_service_server::RecommenderService;
     use inference_engine::pb::{RankedMovies, UsersRequest};
     use tonic::Response;
+    use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
     use inference_engine::user_history::{_testable_build_map_async, UserMapEntry};
 
     #[tokio::test(flavor = "multi_thread")]
@@ -108,7 +109,12 @@ mod orchestrator_tests {
         let slice: &[&str] = &temp_vec;
         let user_ids = get_most_frequent_users(slice, n_users).unwrap();
         let tmp_timestamps : Vec<i64> = vec![2524608000; n_users]; // for year 2050
-        let users_req: UsersRequest = harness.orchestrator.get_users_request(&user_ids, &tmp_timestamps)
+
+        let query_model_version = Some(VersionChoice::Version(1));
+        let ranker_model_version = Some(VersionChoice::Version(1));
+        
+        let users_req: UsersRequest = harness.orchestrator.get_users_request(
+            &user_ids, &tmp_timestamps, query_model_version, ranker_model_version)
             .await?.into_inner();
 
         let temp_vec: Vec<&str> = harness.ratings_uris.iter().map(|s| s.as_str()).collect();
@@ -133,7 +139,9 @@ mod orchestrator_tests {
             ages: vec![users_req.ages[0]],
             timestamps: vec![user_histories[0].timestamps[mid_points[0]]],
             n_users: 1,
-            k : None
+            k : None,
+            query_model_version: 1,
+            ranker_model_version: 1
         };
 
         let tonic_req = tonic::Request::new(mock_single_request);
@@ -161,7 +169,9 @@ mod orchestrator_tests {
             ages: vec![users_req.ages[0], users_req.ages[1]],
             timestamps: vec![user_histories[0].timestamps[mid_points[0]], user_histories[1].timestamps[mid_points[1]]],
             n_users: 2,
-            k : None
+            k : None,
+            query_model_version: 1,
+            ranker_model_version: 1
         };
 
         let tonic_req = tonic::Request::new(mock_batch_request);

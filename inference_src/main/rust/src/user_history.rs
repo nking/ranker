@@ -283,8 +283,7 @@ pub async fn build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEn
 /// returns:     (user_ids, movie_ids, ratings, timestamps)
 ///               as (Vec<i32, Global>, Vec<i32, Global>, Vec<i32, Global>, Vec<i64, Global>)
 ///               where user_ids is length num_users,
-///               movie_ids, ratings, and timestamps are all length  n_users * max_history,
-///
+///               movie_ids, ratings, and timestamps are all length  n_users * max_history.
 ///               each user's range of movie_ids, ratings, and timestamps are ordered by
 ///               timestamp are the max_history most recent of the user's history
 ///               and when user's history is shorted than max_history the Vectors are
@@ -292,9 +291,6 @@ pub async fn build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEn
 ///
 /// # Examples
 ///
-/// ```
-///
-/// ```
 fn prepare_user_data(
     lookup: &FxHashMap<i32, UserMapEntry>,
     max_history: usize,

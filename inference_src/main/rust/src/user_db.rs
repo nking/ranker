@@ -4,6 +4,7 @@ use memmap2::Mmap;
 use std::fs::File;
 use std::io::Result;
 use tonic::Request;
+use crate::model_client::tf_serving::model_spec::VersionChoice;
 
 #[derive(Debug)]
 pub struct UserDb {
@@ -28,19 +29,9 @@ impl UserDb {
         })
     }
 
-    pub fn get_request(&self, user_ids: &[i32], timestamps: &[i64]) -> Option<Request<UsersRequest>> {
+    pub fn get_request(&self, user_ids: &[i32], timestamps: &[i64],
+        query_model_version: Option<VersionChoice>, ranker_model_version: Option<VersionChoice>) -> Option<Request<UsersRequest>> {
 
-        /*
-        message UsersRequest {
-          repeated int32 user_ids = 1;
-          repeated string genders = 2;
-          repeated int32 occupations = 3;
-          repeated int32 ages = 4;
-          repeated int64 timestamps = 5;
-          uint32 n_users = 6;
-          option unit32 k = 7;
-         }
-        */
         if user_ids.is_empty() {
             return None;
         }
@@ -98,6 +89,15 @@ impl UserDb {
 
         let n_users = valid_user_ids.len() as i32;
 
+        let query_version_num: i64 = match query_model_version {
+            Some(VersionChoice::Version(v)) => v,
+            _ => 1, // Default fallback version if None
+        };
+        let ranker_version_num: i64 = match ranker_model_version {
+            Some(VersionChoice::Version(v)) => v,
+            _ => 1, // Default fallback version if None
+        };
+
         Some(Request::new(UsersRequest {
             user_ids: valid_user_ids,
             genders,
@@ -105,7 +105,9 @@ impl UserDb {
             ages,
             timestamps: valid_timestamps,
             n_users : n_users as u32,
-            k : None
+            k : None,
+            query_model_version: query_version_num,
+            ranker_model_version: ranker_version_num
         }))
 
 

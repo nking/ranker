@@ -67,6 +67,7 @@ pub fn get_most_frequent_users(paths: &[&str], n_users: usize) -> Result<Vec<i32
 /// * `df`: ratings file loaded into a LazyFrame
 ///
 /// returns: (Vec<i32, Global>, Vec<i64, Global>)
+#[allow(dead_code)]
 pub fn get_unique_user_and_first_timestamp(df: LazyFrame) -> PolarsResult<(Vec<i32>, Vec<i64>)> {
 
     let collected_df = df
@@ -99,6 +100,7 @@ pub fn get_unique_user_and_first_timestamp(df: LazyFrame) -> PolarsResult<(Vec<i
 /// * `movie_tier_map_ref`:   reference to hashmap with key=movie_id, value= movie_tier
 ///
 /// returns: Vec<HashMap<i32, HashSet<i32>>>
+#[allow(dead_code)]
 pub fn get_user_movie_tier_map(lf: LazyFrame,
     movie_tier_map_ref: &FxHashMap<i32, i32>,
 ) -> PolarsResult<Vec<HashMap<i32, std::collections::HashSet<i32>>>> {
@@ -144,6 +146,7 @@ pub fn get_user_movie_tier_map(lf: LazyFrame,
     Ok(tier_user_gt_maps)
 }
 
+#[allow(dead_code)]
 pub fn create_user_movie_map(df_ratings: LazyFrame) -> PolarsResult<HashMap<i32, std::collections::HashSet<i32>>> {
 
     let df = df_ratings.collect()?;
@@ -165,6 +168,7 @@ pub fn create_user_movie_map(df_ratings: LazyFrame) -> PolarsResult<HashMap<i32,
     Ok(h)
 }
 
+#[allow(dead_code)]
 pub fn calc_normalized_emd_3(hist: &[f64], rec: &[f64]) -> f64 {
 
     if hist.len() != 3 || rec.len() != 3 {
@@ -184,6 +188,7 @@ pub fn calc_normalized_emd_3(hist: &[f64], rec: &[f64]) -> f64 {
     emd / 2.0
 }
 
+#[allow(dead_code)]
 /// Helper to calculate mean and standard deviation
 pub fn mean_and_std(data: &[f64]) -> (f64, f64) {
     if data.len() <= 1 {

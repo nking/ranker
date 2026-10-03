@@ -11,6 +11,7 @@ use crate::user_history::{build_user_history, UserHistory};
 use crate::pb::{UsersRequest, RankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse};
 use tonic::{Request, Response, Status};
 use usearch::ffi::Matches;
+use crate::model_client::tf_serving::model_spec::VersionChoice;
 use crate::pb::recommender_service_server::RecommenderService;
 use crate::query_model_metadata::QueryModelMetadata;
 use crate::ranker_model_metadata::RankerModelMetadata;
@@ -134,15 +135,19 @@ impl Orchestrator {
         Ok(())
     }
 
-    pub async fn get_users_request(&self, user_ids: &[i32], timestamps: &[i64]) -> Result<Request<UsersRequest>, Status> {
-        let user_req_opt : Option<Request<UsersRequest>> = self.user_db.get_request(&user_ids, &timestamps);
+    pub async fn get_users_request(&self, user_ids: &[i32], timestamps: &[i64],
+        query_model_version_choice: Option<VersionChoice>,
+        ranker_model_version_choice: Option<VersionChoice>) -> Result<Request<UsersRequest>, Status> {
+        let user_req_opt : Option<Request<UsersRequest>> = self.user_db.get_request(&user_ids,
+            &timestamps, query_model_version_choice, ranker_model_version_choice);
         user_req_opt.ok_or_else(|| {
             Status::not_found("The requested user record could not be found")
         })
     }
 
     async fn make_ranker_request(&self, user_ids : Vec<i32>, timestamps: Vec<i64>,
-        user_embeddings : Vec<f32>, candidate_ids : Vec<i32>) ->Result<RankedMovies, Status> {
+        user_embeddings : Vec<f32>, candidate_ids : Vec<i32>,
+        ranker_model_version_choice: Option<VersionChoice>) ->Result<RankedMovies, Status> {
 
         let n_users = user_ids.len();
 
@@ -181,7 +186,7 @@ impl Orchestrator {
 
         // Send to eployed Ranker model
         let final_response = self.ranker_model.get_candidate_ranks(
-            padded_super_graph_arrays,searcher.get_embed_len()).await;
+            padded_super_graph_arrays, searcher.get_embed_len(), ranker_model_version_choice).await;
 
         match final_response {
             Ok(mut ranks) => {
@@ -218,13 +223,15 @@ impl Orchestrator {
         // length: n_users * num_candidates
         let ann_movie_ids = ann_res.candidate_ids;
 
+        let ranker_model_version_choice = Some(VersionChoice::Version(user_reqs.ranker_model_version));
+
         //println!("_predict: n_users={}, num_ann_movies={}, num_candidates={}, embed_len={}, n_user_embeddings={}",
         //    user_ids.len(), ann_movie_ids.len()/user_ids.len(), self.ranker_model_metadata.num_candidates,
         //    self.ranker_model_metadata.embed_len,
         //    user_embeddings.len()/self.ranker_model_metadata.embed_len);
 
         let mut ranked_movies = self.make_ranker_request(user_ids.clone(),
-            user_reqs.timestamps, user_embeddings, ann_movie_ids).await?;
+            user_reqs.timestamps, user_embeddings, ann_movie_ids, ranker_model_version_choice).await?;
 
         let num_candidates = self.ranker_model_metadata.num_candidates;
 
@@ -254,9 +261,12 @@ impl Orchestrator {
 
         let users_req = req.into_inner();
 
+        let query_model_version_choice = Some(VersionChoice::Version(users_req.query_model_version));
+
         // Get user_embeddings from TFS Query model.  flattenend into a single array
         // length is n_users * embed_len
-        let user_embeddings : Vec<f32> = self.query_model.get_users_embeddings(users_req.clone()).await
+        let user_embeddings : Vec<f32> = self.query_model.get_users_embeddings(users_req.clone(),
+            query_model_version_choice).await
             .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
 
         //let _embed_len = user_embeddings.len() / users_req.user_ids.len();
@@ -411,7 +421,9 @@ impl RecommenderService for Orchestrator {
                 ages : user_reqs.ages[i0..i1].to_vec(),
                 timestamps : user_reqs.timestamps[i0..i1].to_vec(),
                 n_users : (i1 - i0) as u32,
-                k : None // defaults to num_candidates of ranker model.  could set it to query model k_retrieval
+                k : None, // defaults to num_candidates of ranker model.  could set it to query model k_retrieval
+                query_model_version: user_reqs.query_model_version,
+                ranker_model_version: user_reqs.ranker_model_version
             };
 
             let resp_i = self._predict(Request::new(req_i)).await?;
@@ -442,9 +454,12 @@ impl RecommenderService for Orchestrator {
         let user_ids = vec![rank_req.user_id];
         let timestamps = vec![rank_req.timestamp];
 
+        let query_model_version_choice = Some(VersionChoice::Version(rank_req.query_model_version));
+        let ranker_model_version_choice = Some(VersionChoice::Version(rank_req.ranker_model_version));
+
         // populate a UserRequest with age, gender and occupation.  The UserRequest is needed to get a user_embedding
         let user_req_opt : Option<Request<UsersRequest>> = self.user_db.get_request(
-            &user_ids, &timestamps);
+            &user_ids, &timestamps, query_model_version_choice.clone(), ranker_model_version_choice.clone());
         assert!(user_req_opt.is_some(), "User ID {} should exist in database", rank_req.user_id);
 
         let request = user_req_opt.ok_or_else(|| {
@@ -454,12 +469,13 @@ impl RecommenderService for Orchestrator {
         // 3. Extract the underlying UsersRequest message from the gRPC wrapper
         let users_request = request.into_inner();
 
-        let user_embeddings = self.query_model.get_users_embeddings(users_request).await
+        let user_embeddings = self.query_model.get_users_embeddings(users_request,
+            query_model_version_choice).await
             .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
 
         let ranked_movies =
             self.make_ranker_request(user_ids, timestamps,
-            user_embeddings, rank_req.candidate_ids).await?;
+            user_embeddings, rank_req.candidate_ids, ranker_model_version_choice).await?;
 
         Ok(Response::new( ranked_movies))
     }
@@ -479,7 +495,7 @@ impl RecommenderService for Orchestrator {
          */
         let ranked_all = self.rank_only_return_all(request).await?.into_inner();
 
-        let num_candidates = self.ranker_model_metadata.num_candidates as usize;
+        let num_candidates = self.ranker_model_metadata.num_candidates;
         let n_users = ranked_all.user_ids.len();
 
         // Early return if empty to prevent divide-by-zero later

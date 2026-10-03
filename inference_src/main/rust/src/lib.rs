@@ -7,7 +7,6 @@ pub mod graph_builder;
 pub mod bayesian;
 pub mod embeddings_util;
 
-pub mod calc_metrics;
 pub mod util;
 
 pub mod movie_tiers;
