@@ -122,8 +122,8 @@ def get_vizier_for_hpo_tier(hpo_tier:int, embed_in_dim:int, top_k:int) -> Dict[s
             "num_layers" : 2,
             "hidden_dim" : 64,
             "num_heads" : 2,
-            "dropout_rate" : 0.1,
-            "learning_rate" : 1e-3,
+            "dropout_rate" : 0.2,
+            "learning_rate" : 5e-4,
             "weight_decay" : 1e-3,
             "out_dim" : embed_in_dim,
             "edge_embed_dim" : 8,
@@ -142,7 +142,7 @@ def get_vizier_for_hpo_tier(hpo_tier:int, embed_in_dim:int, top_k:int) -> Dict[s
             "dropout_rate" : 0.2,
             "learning_rate": 5e-4,
             "weight_decay": 1e-4,
-            "out_dim": 1.5*embed_in_dim,
+            "out_dim": int(1.5*embed_in_dim),
             "edge_embed_dim": 16,
             "max_history": history_cand_range[len(history_cand_range)//2],
             "num_candidates": history_cand_range[len(history_cand_range)//2],
@@ -159,7 +159,7 @@ def get_vizier_for_hpo_tier(hpo_tier:int, embed_in_dim:int, top_k:int) -> Dict[s
             "dropout_rate": 0.35,
             "learning_rate": 1e-4,
             "weight_decay": 1e-5,
-            "out_dim": 2*embed_in_dim,
+            "out_dim": int(2*embed_in_dim),
             "edge_embed_dim": 24,
             "max_history": history_cand_range[-1],
             "num_candidates": history_cand_range[-1],
@@ -169,6 +169,7 @@ def get_vizier_for_hpo_tier(hpo_tier:int, embed_in_dim:int, top_k:int) -> Dict[s
 def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:int=32):
     """
     get the Vizier study config of hyperparameters for the 3 trial tuning on Kaggle.
+    note that hpo_tier is used later to retrieve the remaining parameters from get_vizier_for_hpo_tier.
     :param top_k:  the number of movie_ids that inference will return for a user
     :param use_batching_alg: if True, uses study_config.algorithm = 'GP_UCB_PE'
     else study_config.algorithm = 'GAUSSIAN_PROCESS_BANDIT'
@@ -188,7 +189,7 @@ def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in
     root.add_discrete_param("top_k", feasible_values=[top_k])
     root.add_discrete_param("embed_in_dim", feasible_values=[embed_in_dim])
 
-    root.add_discrete_param("use_focal_loss", feasible_values=[1])
+    root.add_discrete_param("use_focal_loss", feasible_values=[0])
     root.add_discrete_param("use_ipw", feasible_values=[0])
 
     root.add_discrete_param("temperature", feasible_values=[0.25])
@@ -516,7 +517,8 @@ def run_tune(config):
         if worker_rank == 0:
             trial_suggestion.update_metadata(vz.Metadata({'mlflow_run_id': mlflow_run_id}))
             trial_suggestion.complete(vz.Measurement(metrics={f'composite_ndcg_{config2["top_k"]}': float(best_val_composite_ndcg_k)}))
-            logging.info(f'wrote to vizier trial: mlflow_run_id={mlflow_run_id}, and metrics')
+            logging.info(f'wrote to vizier trial: mlflow_run_id={mlflow_run_id}, and metrics.  '
+                         f'composite_ndcg_{config2["top_k"]} = {float(best_val_composite_ndcg_k)}')
         
 def run_train(config):
    
@@ -578,6 +580,8 @@ def run_train(config):
                     mlflow.end_run()
         config['mlflow_experiment_id'] = experiment.experiment_id
         config['mlflow_parent_run_id'] = mlflow_parent_run_id
+        logging.info(f"experiment_name={experiment_name}, experiment_id={experiment.experiment_id},"
+                     f" mlflow_parent_run_id={mlflow_parent_run_id}")
     
     if config['phase'] == 'train-best':
         #worker==0 fetches the best parameters and then all workers synchronize to get best params
