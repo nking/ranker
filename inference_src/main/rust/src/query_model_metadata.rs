@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::BufReader;
 
 /// Command-line arguments and environment variables
-#[derive(Parser, Debug, Deserialize, Clone)]
+#[derive(Parser, Debug, Deserialize, Clone, Default)]
 #[command(name = "recommender-grpc")]
 #[command(about = "gRPC Recommender Service Orchestrator", long_about = None)]
 pub struct QueryModelMetadata {

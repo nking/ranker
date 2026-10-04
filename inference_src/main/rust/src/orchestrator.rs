@@ -1,7 +1,7 @@
 ﻿use std::cmp::min;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use arc_swap::ArcSwap;
 use crate::model_client::{QueryModelClient, RankerModelClient};
 use crate::embeddings_ann::Searcher;
@@ -25,8 +25,12 @@ pub struct Orchestrator {
     query_model: QueryModelClient,
     ranker_model: RankerModelClient,
     #[allow(dead_code)]
-    query_model_metadata: QueryModelMetadata,
-    ranker_model_metadata: RankerModelMetadata,
+    //query_model_metadata: QueryModelMetadata,
+    //ranker_model_metadata: RankerModelMetadata,
+    query_model_metadata_dict: ArcSwap<HashMap<i64, Arc<QueryModelMetadata>>>,
+    ranker_model_metadata_dict: ArcSwap<HashMap<i64, Arc<RankerModelMetadata>>>,
+    query_metadata_write_lock: Mutex<()>,
+    ranker_metadata_write_lock: Mutex<()>,
     searcher: ArcSwap<Searcher>, // updatable
     user_history: UserHistory,  // can be made updatable in future
     user_db: UserDb,
@@ -35,16 +39,22 @@ pub struct Orchestrator {
     persisted_index_path: PathBuf,
     pub top_k : usize, // the number of movie_ids that inference will return for a user
 }
-
+/**TODO:
+editing here for query_saved_models_uri and ranker_saved_models_uri
+will need to keep those and read version_number/assets.extra/hyperparameters.json
+and refactor all uses of query_model_metadata etc to use the dictionary
+which might require the version number to be present in more methods.
+refactoring to use a dictionary of metedata for different model versions is in progress
+*/
 impl Orchestrator {
     ///
     ///
     /// # Arguments
     ///
-    /// * `query_uri`: endpoint uri of the dpeloyed twotower query model
+    /// * `query_uri`: endpoint uri of the deployed twotower query model
     /// * `ranker_uri`: endpoint uri of the deployed graphranker model
-    /// * `query_metadata_uri`: uri for the query model metadata and hyperparameters json file
-    /// * `ranker_metadata_uri`: uri for the ranker model metadata json file
+    /// * `query_metadata_uri`: uri for the query model metadata and hyperparameters json file for version 1 query model
+    /// * `ranker_metadata_uri`: uri for the ranker model metadata json file for version 1 query model
     /// * `movie_embeddings_uri`: uri to the movie_embeddings parquet file
     /// * `ratings_uris`: Vector of ratings file uris usad to construct user histories
     /// * `ranker_n_local_devices`:
@@ -107,11 +117,27 @@ impl Orchestrator {
         })
     }
 
-    pub fn get_ranker_model_metadata(&self) -> RankerModelMetadata {
-         self.ranker_model_metadata.clone()
+    pub fn get_ranker_model_metadata(&self, ranker_model_version_choice: Option<VersionChoice>) -> RankerModelMetadata {
+        let ranker_version_num: i64 = match ranker_model_version_choice {
+            Some(VersionChoice::Version(v)) => v,
+            _ => 1, // Default fallback version if None
+        };
+        let map = self.ranker_model_metadata_dict.load();
+        map.get(&ranker_version_num)
+            .or_else(|| map.get(&1))
+            .map(|arc_meta| (**arc_meta).clone()) // Dereferences Arc and deep-clones struct
+            .unwrap_or_default()
     }
-    pub fn get_query_model_metadata(&self) -> QueryModelMetadata {
-        self.query_model_metadata.clone()
+    pub fn get_query_model_metadata(&self, query_model_version_choice: Option<VersionChoice>) -> QueryModelMetadata {
+        let query_version_num: i64 = match query_model_version_choice {
+            Some(VersionChoice::Version(v)) => v,
+            _ => 1, // Default fallback version if None
+        };
+        let map = self.query_model_metadata_dict.load();
+        map.get(&query_version_num)
+            .or_else(|| map.get(&1))
+            .map(|arc_meta| (**arc_meta).clone()) // Dereferences Arc and deep-clones struct
+            .unwrap_or_default()
     }
 
     pub async fn reload_embeddings(&self, movie_embeddings_uri: &str, num_candidates: usize) -> Result<(), Box<dyn std::error::Error>> {
