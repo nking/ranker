@@ -81,7 +81,7 @@ def get_or_create_mlflow_experiment(experiment_name:str):
 def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
     config = {}
     int_keys = {"top_k", "num_layers", "num_heads","hidden_dim","max_history",
-        "num_candidates","out_dim","edge_embed_dim", "hpo_tier"}
+        "num_candidates","out_dim","edge_embed_dim", "hpo_tier", "use_focal_loss", "use_ipw"}
     for k, v in params.items():
         if k == "tier_weights":
             if isinstance(v, ndarray):
@@ -188,6 +188,9 @@ def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in
     root.add_discrete_param("top_k", feasible_values=[top_k])
     root.add_discrete_param("embed_in_dim", feasible_values=[embed_in_dim])
 
+    root.add_discrete_param("use_focal_loss", feasible_values=[1])
+    root.add_discrete_param("use_ipw", feasible_values=[0])
+
     root.add_discrete_param("temperature", feasible_values=[0.25])
     #feasible_values=[0.07, 0.1, 0.25, 0.5])
     root.add_categorical_param("tier_weights", feasible_values=["[0.33, 0.33, 0.33]"])
@@ -239,6 +242,8 @@ def _get_vizier_study_config_for_all(top_k:int=20, use_batching_alg:bool=False, 
     root = problem.search_space.select_root()
 
     # Fixed parameters injected into every trial
+    root.add_discrete_param("use_focal_loss", feasible_values=[1])
+    root.add_discrete_param("use_ipw", feasible_values=[0])
     root.add_discrete_param("top_k", feasible_values=[top_k])
     root.add_discrete_param("temperature", feasible_values=[0.25])
     #feasible_values=[0.07, 0.1, 0.25, 0.5])
@@ -346,10 +351,7 @@ def setup_vizier_study(project_id: str, study_name: str, endpoint: str,
     raise RuntimeError(f"Worker {jax.process_index()} timed out waiting for study to be created by worker 0.")
 
 def sync_hyperparams(params_dict: Dict, max_bytes: int = 2048) -> Dict:
-    sync_keys = ["top_k", "num_layers", "num_heads", "hidden_dim",
-                 "max_history","num_candidates", "learning_rate", "weight_decay", "out_dim",
-                 "mlp_hidden_dim", "edge_embed_dim","dropout_rate", "temperature",
-                 "focal_loss_gamma", "tier_weights"]
+
     if jax.process_index() == 0:
         params_dict = extract_correct_vizier_param_types_dict(params_dict)
         #params_dict = {k:v for k,v in params_dict.items() if k in sync_keys}
@@ -375,46 +377,6 @@ def sync_hyperparams(params_dict: Dict, max_bytes: int = 2048) -> Dict:
 
     return json.loads(raw_bytes.decode('utf-8'))
 
-def sync_hyperparams0(params_dict) -> Dict[str, Union[int, float, str]]:
-    # Convert dict to a fixed-order array on Process 0
-    # Others initialize with zeros
-    sync_keys = ["top_k", "num_layers", "num_heads", "hidden_dim",
-                 "max_history","num_candidates", "learning_rate", "weight_decay", "out_dim",
-                 "mlp_hidden_dim", "edge_embed_dim","dropout_rate", "temperature", "focal_loss_gamma", "tier_weights"]
-    num_keys = len(sync_keys)
-    if jax.process_index() == 0:
-        #extract ParameterValue to primitives:
-        params_dict = extract_correct_vizier_param_types_dict(params_dict)
-        flat_vals = []
-        for k in sync_keys:
-            val = params_dict[k]
-            if k == "tier_weights":
-                flat_vals.extend([float(x) for x in val])
-            else:
-                flat_vals.append(float(val))
-        local_arr = jnp.array(flat_vals, dtype=jnp.float32)
-    else:
-        local_arr = jnp.zeros((num_keys,), dtype=jnp.float32)
-    
-    gathered = jax.experimental.multihost_utils.process_allgather(local_arr)
-    
-    final_params = jnp.sum(gathered, axis=0)
-    
-    # map back to dictionary
-    final_params_dict = {}
-    param_i = 0
-    for _i, k in enumerate(sync_keys):
-        if k == "tier_weights":
-            final_params_dict[k] = final_params[param_i: param_i+3]
-            param_i += 3
-        else:
-            final_params_dict[k] = final_params[param_i]
-            param_i += 1
-
-    # cast to int where needed:
-    final_params_dict = extract_correct_vizier_param_types_dict(final_params_dict)
-    return final_params_dict
-    
 def run_tune(config):
     
     if "debug" in config and config['debug']:

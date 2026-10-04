@@ -152,8 +152,8 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
                optimizer: nnx.Optimizer,
                movie_tiers:np.ndarray, movie_offset:int = 6040+1,
                tier_weights_config: Array = jnp.array([0.33, 0.33, 0.33]),
-               use_focal_loss: bool = False,
-               use_ipw: bool = False,
+               use_focal_loss: int = 0,
+               use_ipw: int = 0,
                focal_loss_gamma: float = 2.0,
                ) -> Array:
     """
@@ -184,15 +184,30 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         safe_scores = jnp.where(main_mask, scores_2d, -1e9)
 
         batch_size = labels_2d.shape[0]
+        #shape (batch_size, 1)
         combined_weights = jnp.ones((batch_size, 1))
+
+        #shape (batch_size, 1)
+        row_valid = jnp.any(main_mask, axis=-1, keepdims=True)
 
         if use_focal_loss:
             # FOCAL WEIGHTING ---
             # Calculate target probability p_t.
             # scales gradient by hard/easy predictions)
+            #shape is (batch_size, model.num_candidates)
             probs = jax.nn.softmax(safe_scores, axis=-1)
+            #shape (batch_size, 1)
             target_probs = jnp.sum(probs * labels_2d, axis=-1, keepdims=True)
-            focal_weights = jnp.power(1.0 - target_probs, focal_loss_gamma)
+
+            # Clamp base between 0.0 and 1.0 to prevent negative numbers
+            # from floating-point overshoots (which cause NaNs when powered).
+            #shape (batch_size, 1)
+            focal_base = jnp.clip(1.0 - target_probs, 0.0, 1.0)
+            focal_weights = jnp.power(focal_base, focal_loss_gamma)
+
+            # Zero out weights for invalid/padded rows
+            #shape (batch_size, 1)
+            focal_weights = jnp.where(row_valid, focal_weights, 0.0)
             combined_weights = combined_weights * focal_weights
 
         if use_ipw:
@@ -203,13 +218,20 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
             safe_target_ids = jnp.clip(batch_target_ids, 0, movie_tiers.shape[0] - 1)
             batch_target_tiers = movie_tiers[safe_target_ids]
             ipw_weights = normalized_weights[batch_target_tiers][:, None]
-            #shape (batch_size, 1)
+
+            ipw_weights = jnp.where(row_valid, ipw_weights, 0.0)
             combined_weights = combined_weights * ipw_weights
+            #shape (batch_size, 1)
 
         if use_focal_loss or use_ipw:
             # COMBINED LOSS
-            weight_mean = jnp.mean(combined_weights) + 1e-9
+            valid_count = jnp.maximum(jnp.sum(row_valid), 1.0)
+            weight_sum = jnp.sum(jnp.where(row_valid, combined_weights, 0.0))
+            weight_mean = (weight_sum / valid_count) + 1e-9
+
             combined_weights = combined_weights / weight_mean
+            # Ensure final combined weights for invalid rows are strictly zeroed out
+            combined_weights = jnp.where(row_valid, combined_weights, 0.0)
 
         loss = rax.softmax_loss(
             scores=safe_scores,

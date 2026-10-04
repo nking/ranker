@@ -323,8 +323,8 @@ def define_flags():
              "additionally, if JAX_PLATFORM_NAME=gpu there will be a check for expected number of GPUs found")
     flags.DEFINE_string("git_commit_hash", default=None, help="git commit hash for this running code.")
 
-    flags.DEFINE_bool("use_focal_loss", default=False, help="use focal loss in weighting of in-batch softmax loss")
-    flags.DEFINE_bool("use_ipw", default=False, help="use IPW in weighting of in-batch softmax loss")
+    flags.DEFINE_integer("use_focal_loss", default=0, help="if 1, use focal loss in weighting of in-batch softmax loss")
+    flags.DEFINE_integer("use_ipw", default=0, help="if 1, use IPW in weighting of in-batch softmax loss")
 
     flags.DEFINE_string('tier_weights', None, 'stringified list of the 3 tier weights which sum to 1')
 
