@@ -24,13 +24,17 @@ use crate::util::sort_in_place_by_desc_scores;
 pub struct Orchestrator {
     query_model: QueryModelClient,
     ranker_model: RankerModelClient,
-    #[allow(dead_code)]
+
+    query_saved_models_uri : String,
+    ranker_saved_models_uri : String,
+    ranker_serving_is_batched: bool,
     //query_model_metadata: QueryModelMetadata,
     //ranker_model_metadata: RankerModelMetadata,
     query_model_metadata_dict: ArcSwap<HashMap<i64, Arc<QueryModelMetadata>>>,
     ranker_model_metadata_dict: ArcSwap<HashMap<i64, Arc<RankerModelMetadata>>>,
     query_metadata_write_lock: Mutex<()>,
     ranker_metadata_write_lock: Mutex<()>,
+
     searcher: ArcSwap<Searcher>, // updatable
     user_history: UserHistory,  // can be made updatable in future
     user_db: UserDb,
@@ -39,13 +43,7 @@ pub struct Orchestrator {
     persisted_index_path: PathBuf,
     pub top_k : usize, // the number of movie_ids that inference will return for a user
 }
-/**TODO:
-editing here for query_saved_models_uri and ranker_saved_models_uri
-will need to keep those and read version_number/assets.extra/hyperparameters.json
-and refactor all uses of query_model_metadata etc to use the dictionary
-which might require the version number to be present in more methods.
-refactoring to use a dictionary of metedata for different model versions is in progress
-*/
+
 impl Orchestrator {
     ///
     ///
@@ -73,8 +71,9 @@ impl Orchestrator {
     pub async fn new(
         query_uri: String,
         ranker_uri: String,
-        query_metadata_uri : String,
-        ranker_metadata_uri : String,
+        query_saved_models_uri : String,
+        ranker_saved_models_uri : String,
+        ranker_serving_is_batched: bool,
         movie_embeddings_uri: &str,
         ratings_uris: Vec<&str>,
         ranker_n_local_devices : usize,
@@ -83,8 +82,25 @@ impl Orchestrator {
         user_db_path : impl AsRef<Path>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
 
+        let query_metadata_uri = format!(
+            "{}/{}/assets.extra/{}",
+            query_saved_models_uri.trim_end_matches('/'), 1, "hyperparameters.json");
         let query_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri)?;
+        let mut initial_query_dict = HashMap::new();
+        initial_query_dict.insert(1, Arc::new(query_metadata.clone()));
+
+        let filename = if ranker_serving_is_batched {
+            "metadata_batch.json"
+        } else {
+            "metadata_single.json"
+        };
+        let ranker_metadata_uri = format!(
+            "{}/{}/assets.extra/{}",
+            ranker_saved_models_uri.trim_end_matches('/'), 1, filename);;
         let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri)?;
+        let mut initial_ranker_dict = HashMap::new();
+        initial_ranker_dict.insert(1, Arc::new(ranker_metadata.clone()));
+
 
         if query_metadata.embed_len != ranker_metadata.embed_len {
             return Err(format!(
@@ -97,7 +113,7 @@ impl Orchestrator {
         let k = ranker_metadata.num_candidates;
         
         let initial_searcher = Searcher::new(movie_embeddings_uri, k, &persisted_index_path)?;
-        let query_client = QueryModelClient::new(query_uri, query_metadata.embed_len).await;
+        let query_client = QueryModelClient::new(query_uri, ranker_metadata.embed_len).await;
         let ranker_client = RankerModelClient::new(ranker_uri, ranker_metadata.clone()).await;
 
         let user_history: UserHistory = build_user_history(&ratings_uris, 2048).await;
@@ -106,8 +122,13 @@ impl Orchestrator {
         Ok(Self {
             query_model: query_client,
             ranker_model: ranker_client,
-            query_model_metadata : query_metadata,
-            ranker_model_metadata: ranker_metadata,
+            query_saved_models_uri : query_saved_models_uri.clone(),
+            ranker_saved_models_uri : ranker_saved_models_uri.clone(),
+            ranker_serving_is_batched: ranker_serving_is_batched,
+            query_model_metadata_dict : ArcSwap::from_pointee(initial_query_dict),
+            ranker_model_metadata_dict : ArcSwap::from_pointee(initial_ranker_dict),
+            query_metadata_write_lock: Mutex::new(()),
+            ranker_metadata_write_lock: Mutex::new(()),
             searcher: ArcSwap::from_pointee(initial_searcher),
             user_history: user_history,
             ranker_n_local_devices: ranker_n_local_devices,
@@ -117,27 +138,117 @@ impl Orchestrator {
         })
     }
 
-    pub fn get_ranker_model_metadata(&self, ranker_model_version_choice: Option<VersionChoice>) -> RankerModelMetadata {
-        let ranker_version_num: i64 = match ranker_model_version_choice {
-            Some(VersionChoice::Version(v)) => v,
-            _ => 1, // Default fallback version if None
-        };
-        let map = self.ranker_model_metadata_dict.load();
-        map.get(&ranker_version_num)
-            .or_else(|| map.get(&1))
-            .map(|arc_meta| (**arc_meta).clone()) // Dereferences Arc and deep-clones struct
-            .unwrap_or_default()
+    // filename can be a &str, String, &Path, or anything implementing AsRef<str> or Display
+    fn build_metadata_uri(&self,
+        saved_models_uri: &str,
+        model_version_num: i64,
+        filename: &str,
+    ) -> String {
+        format!(
+            "{}/{}/assets.extra/{}",
+            saved_models_uri.trim_end_matches('/'),
+            model_version_num,
+            filename
+        )
     }
-    pub fn get_query_model_metadata(&self, query_model_version_choice: Option<VersionChoice>) -> QueryModelMetadata {
+
+    pub fn get_or_fetch_query_metadata(&self, query_model_version_choice: Option<VersionChoice>)
+        -> Result<Arc<QueryModelMetadata>, Box<dyn std::error::Error>> {
+
         let query_version_num: i64 = match query_model_version_choice {
             Some(VersionChoice::Version(v)) => v,
             _ => 1, // Default fallback version if None
         };
+
+        // FAST Lock-free read.
+        // 99.99% of requests will hit this and return instantly.
         let map = self.query_model_metadata_dict.load();
-        map.get(&query_version_num)
-            .or_else(|| map.get(&1))
-            .map(|arc_meta| (**arc_meta).clone()) // Dereferences Arc and deep-clones struct
-            .unwrap_or_default()
+        if let Some(meta) = map.get(&query_version_num) {
+            return Ok(meta.clone());
+        }
+
+        // single or batched TFS serving?
+        let filename = "hyperparameters.json";
+
+        let query_metadata_uri = self.build_metadata_uri(&self.query_saved_models_uri,
+            query_version_num, filename);
+        let new_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri)?;
+
+        // FETCH (CPU or I/O bound): Do this outside the map update
+        let new_metadata_arc = Arc::new(new_metadata);
+
+        // COPY-ON-WRITE: Safely update the dictionary
+        // `rcu` automatically loops if another thread modified the map while we were working,
+        // ensuring we don't accidentally overwrite someone else's concurrent insertion.
+        self.query_model_metadata_dict.rcu(|current_map| {
+            // "Shallow clone": copies the i64 keys and Arc pointers. Takes nanoseconds.
+            let mut new_map = (**current_map).clone();
+
+            // Insert our new item
+            new_map.insert(query_version_num, new_metadata_arc.clone());
+
+            Arc::new(new_map)
+        });
+
+        Ok(new_metadata_arc)
+    }
+
+    pub fn get_or_fetch_ranker_metadata(&self, ranker_model_version_choice: Option<VersionChoice>)
+        -> Result<Arc<RankerModelMetadata>, Box<dyn std::error::Error>> {
+
+        let ranker_version_num: i64 = match ranker_model_version_choice {
+            Some(VersionChoice::Version(v)) => v,
+            _ => 1, // Default fallback version if None
+        };
+
+        // FAST Lock-free read.
+        // 99.99% of requests will hit this and return instantly.
+        let map = self.ranker_model_metadata_dict.load();
+        if let Some(meta) = map.get(&ranker_version_num) {
+            return Ok(meta.clone());
+        }
+
+        // ACQUIRE LOCK
+        // Only one thread gets past this line at a time.
+        // this is a heavy lock and is dropped when the variable goes out of scope when method is done
+        // but below we add a drop (unlock) for good code form.
+        let _guard = self.ranker_metadata_write_lock.lock().unwrap();
+
+        // DOUBLE CHECK
+        // If we were waiting for the lock, another thread might have just loaded it.
+        let map = self.ranker_model_metadata_dict.load();
+        if let Some(meta) = map.get(&ranker_version_num) {
+            return Ok(meta.clone());
+        }
+
+        // single or batched TFS serving?
+        let filename = if self.ranker_serving_is_batched {
+            "metadata_batch.json"
+        } else {
+            "metadata_single.json"
+        };
+
+        let ranker_metadata_uri = self.build_metadata_uri(&self.ranker_saved_models_uri,
+            ranker_version_num, filename);
+        let new_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri)?;
+
+        // FETCH (CPU or I/O bound): Do this outside the map update
+        let new_metadata_arc = Arc::new(new_metadata);
+
+        // COPY-ON-WRITE: Safely update the dictionary
+        // `rcu` automatically loops if another thread modified the map while we were working,
+        // ensuring we don't accidentally overwrite someone else's concurrent insertion.
+        self.ranker_model_metadata_dict.rcu(|current_map| {
+            // "Shallow clone": copies the i64 keys and Arc pointers. Takes nanoseconds.
+            let mut new_map = (**current_map).clone();
+            // Insert our new item
+            new_map.insert(ranker_version_num, new_metadata_arc.clone());
+            Arc::new(new_map)
+        });
+
+        drop(_guard);
+
+        Ok(new_metadata_arc)
     }
 
     pub async fn reload_embeddings(&self, movie_embeddings_uri: &str, num_candidates: usize) -> Result<(), Box<dyn std::error::Error>> {
@@ -171,16 +282,26 @@ impl Orchestrator {
         })
     }
 
+    pub fn get_ranker_batch_size(&self, ranker_model_version_choice: Option<VersionChoice>)
+    -> Result<usize, Box<dyn std::error::Error>> {
+        let ranker_metadata
+            = self.get_or_fetch_ranker_metadata(ranker_model_version_choice)?;
+        Ok(ranker_metadata.batch_size)
+    }
+
     async fn make_ranker_request(&self, user_ids : Vec<i32>, timestamps: Vec<i64>,
         user_embeddings : Vec<f32>, candidate_ids : Vec<i32>,
-        ranker_model_version_choice: Option<VersionChoice>) ->Result<RankedMovies, Status> {
+        ranker_model_version_choice: Option<VersionChoice>) -> Result<RankedMovies, Status> {
 
         let n_users = user_ids.len();
 
-        if n_users > self.ranker_model_metadata.batch_size {
+        let ranker_metadata
+            = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())?;
+
+        if n_users > ranker_metadata.batch_size {
             return Err(Status::invalid_argument(format!(
                 "n_users {} must be <= batch_size {}",
-                n_users, self.ranker_model_metadata.batch_size
+                n_users, ranker_metadata.batch_size
             )));
         }
 
@@ -190,17 +311,15 @@ impl Orchestrator {
         // target_movie_id should == 1
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
-        let batch_size : usize = self.ranker_model_metadata.batch_size;
-
         let padded_super_graph_arrays: JraphGraph = build_enriched_padded_supergraph(
-            batch_size,
+            ranker_metadata.batch_size,
             &user_ids,
             &timestamps,
             &candidate_ids,
             &labels,
             &self.user_history,
-            self.ranker_model_metadata.max_history,
-            self.ranker_model_metadata.num_catalog_users,
+            ranker_metadata.max_history,
+            ranker_metadata.num_catalog_users,
             searcher.get_num_catalog_movies(),
             searcher.get_embed_len(),
             searcher.get_movies_embedding_catalog_ref(),
@@ -226,7 +345,7 @@ impl Orchestrator {
                     user_ids,
                     movie_ids: candidate_ids,
                     scores: ranks,
-                    num_candidates: self.ranker_model_metadata.num_candidates as u32
+                    num_candidates: ranker_metadata.num_candidates as u32
                 })
             },
             Err(e) => {
@@ -259,7 +378,10 @@ impl Orchestrator {
         let mut ranked_movies = self.make_ranker_request(user_ids.clone(),
             user_reqs.timestamps, user_embeddings, ann_movie_ids, ranker_model_version_choice).await?;
 
-        let num_candidates = self.ranker_model_metadata.num_candidates;
+        let ranker_metadata
+            = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())?;
+
+        let num_candidates = ranker_metadata.num_candidates;
 
         sort_in_place_by_desc_scores(
             & mut ranked_movies.movie_ids, &mut ranked_movies.scores, num_candidates);
@@ -306,14 +428,19 @@ impl Orchestrator {
         // finds num_candidates approx nearest neighbors
         let searcher = self.searcher.load();
 
+        let ranker_model_version_choice = Some(VersionChoice::Version(users_req.ranker_model_version));
+
+        let ranker_metadata
+            = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())?;
+
         // get the searcher k if present, else default is num_candidates
         let k: Option<usize> = users_req.k.map(|val| val as usize);
-        let k = k.unwrap_or(self.ranker_model_metadata.num_candidates);
+        let k = k.unwrap_or(ranker_metadata.num_candidates);
 
         //TODO: consider limiting this to keep the search quick:
         let max_n_hist : usize = *(n_hists.iter().max().unwrap());
 
-        let num_catalog_users = self.ranker_model_metadata.num_catalog_users as i32;
+        let num_catalog_users = ranker_metadata.num_catalog_users as i32;
 
         // history is length n_users * max_n_hist
         let (history, _ratings) : (Vec<i32>, Vec<i32>) = self.user_history.get_history_before_timestamp(
@@ -419,11 +546,16 @@ impl RecommenderService for Orchestrator {
     ///
     async fn predict(&self, req: Request<UsersRequest>) -> Result<Response<RankedMovies>, Status> {
 
-        let batch_size : usize = self.ranker_model_metadata.batch_size;
-
         let user_reqs = req.into_inner();
 
         let n_users = user_reqs.user_ids.len();
+
+        let ranker_model_version_choice = Some(VersionChoice::Version(user_reqs.ranker_model_version));
+
+        let ranker_metadata
+            = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())?;
+
+        let batch_size : usize = ranker_metadata.batch_size;
 
         //println!("batch_size={}, n_users={}", batch_size, n_users);
 
@@ -432,8 +564,8 @@ impl RecommenderService for Orchestrator {
         }
 
         // reserve response arrays:
-        let mut final_candidate_ids: Vec<i32> = Vec::with_capacity(n_users * self.ranker_model_metadata.num_candidates);
-        let mut final_scores: Vec<f32> = Vec::with_capacity(n_users * self.ranker_model_metadata.num_candidates);
+        let mut final_candidate_ids: Vec<i32> = Vec::with_capacity(n_users * ranker_metadata.num_candidates);
+        let mut final_scores: Vec<f32> = Vec::with_capacity(n_users * ranker_metadata.num_candidates);
 
         for i0 in (0..n_users).step_by(batch_size) {
 

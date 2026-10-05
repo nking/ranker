@@ -47,8 +47,9 @@ impl AppRunner {
         let orchestrator = Orchestrator::new(
             self.config.query_uri,
             self.config.ranker_uri,
-            self.config.query_metadata_uri,
-            self.config.ranker_metadata_uri,
+            self.config.query_saved_models_uri,
+            self.config.ranker_saved_models_uri,
+            self.config.ranker_serving_is_batched,
             &self.config.movie_embeddings_path,
             ratings_uris_refs,
             self.config.ranker_n_local_devices,

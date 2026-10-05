@@ -62,13 +62,23 @@ pub struct AppConfig {
     #[arg(long, env = "MOVIE_TIERS_PATH")]
     pub movie_tiers_path : String,
 
-    // path to the query model hyperparameters json file
-    #[arg(long, env = "QUERY_METADATA_URI")]
-    pub query_metadata_uri : String,
+    // path to the query saved_models directory holding the query saved_models..   expecting to see
+    //     sub-directory of version numbers e.g. 1,2 and those subdirectories have the contents
+    //     of saved model directories.  one of those is assets.extra and that directory contains
+    //     the hyperparameters.json file for the model metadata
+    #[arg(long, env = "QUERY_SAVED_MODELS_URI")]
+    pub query_saved_models_uri : String,
 
-    // path to the ranker model metadata json file.  expecting either metadata_single.json or metadata_batch.json
-    #[arg(long, env = "RANKER_METADATA_URI")]
-    pub ranker_metadata_uri : String,
+    // path to the ranker saved_models directory holding the query saved_models..   expecting to see
+    //   sub-directory of version numbers e.g. 1,2 and those subdirectories have the contents
+    //   of saved model directories.  one of those is assets.extra and that directory contains
+    //   the hyperparameters.json file for the model metadata
+    #[arg(long, env = "RANKER_SAVED_MODELS_URI")]
+    pub ranker_saved_models_uri : String,
+
+    // whether the ranker saved models are serveving the batch signatures else single inference signatures
+    #[arg(long, env = "RANKER_SERVING_IS_BATCHED")]
+    pub ranker_serving_is_batched : bool,
 }
 
 impl AppConfig {
