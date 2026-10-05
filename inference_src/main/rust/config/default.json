@@ -20,5 +20,5 @@
   "persisted_index_path": "./target/movie_embeddings_indexer",
   "query_saved_models_uri": "../../../src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/",
   "ranker_saved_models_uri": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/",
-  "ranker_serving_is_batched" : "true"
+  "ranker_serving_is_batched" : true
 }

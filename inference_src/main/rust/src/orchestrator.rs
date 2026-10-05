@@ -96,7 +96,7 @@ impl Orchestrator {
         };
         let ranker_metadata_uri = format!(
             "{}/{}/assets.extra/{}",
-            ranker_saved_models_uri.trim_end_matches('/'), 1, filename);;
+            ranker_saved_models_uri.trim_end_matches('/'), 1, filename);
         let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri)?;
         let mut initial_ranker_dict = HashMap::new();
         initial_ranker_dict.insert(1, Arc::new(ranker_metadata.clone()));
@@ -153,7 +153,7 @@ impl Orchestrator {
     }
 
     pub fn get_or_fetch_query_metadata(&self, query_model_version_choice: Option<VersionChoice>)
-        -> Result<Arc<QueryModelMetadata>, Box<dyn std::error::Error>> {
+        -> Result<Arc<QueryModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
 
         let query_version_num: i64 = match query_model_version_choice {
             Some(VersionChoice::Version(v)) => v,
@@ -166,6 +166,12 @@ impl Orchestrator {
         if let Some(meta) = map.get(&query_version_num) {
             return Ok(meta.clone());
         }
+
+        // ACQUIRE LOCK
+        // Only one thread gets past this line at a time.
+        // this is a heavy lock and is dropped when the variable goes out of scope when method is done
+        // but below we add a drop (unlock) for good code form.
+        let _guard = self.query_metadata_write_lock.lock().unwrap();
 
         // single or batched TFS serving?
         let filename = "hyperparameters.json";
@@ -190,11 +196,13 @@ impl Orchestrator {
             Arc::new(new_map)
         });
 
+        drop(_guard);
+
         Ok(new_metadata_arc)
     }
 
     pub fn get_or_fetch_ranker_metadata(&self, ranker_model_version_choice: Option<VersionChoice>)
-        -> Result<Arc<RankerModelMetadata>, Box<dyn std::error::Error>> {
+        -> Result<Arc<RankerModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
 
         let ranker_version_num: i64 = match ranker_model_version_choice {
             Some(VersionChoice::Version(v)) => v,
@@ -283,7 +291,7 @@ impl Orchestrator {
     }
 
     pub fn get_ranker_batch_size(&self, ranker_model_version_choice: Option<VersionChoice>)
-    -> Result<usize, Box<dyn std::error::Error>> {
+    -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let ranker_metadata
             = self.get_or_fetch_ranker_metadata(ranker_model_version_choice)?;
         Ok(ranker_metadata.batch_size)
@@ -295,8 +303,13 @@ impl Orchestrator {
 
         let n_users = user_ids.len();
 
-        let ranker_metadata
-            = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())?;
+        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .map_err(|e| {
+                // Optional: log it so you can see the error in your server console
+                eprintln!("Failed to fetch ranker metadata: {}", e);
+                // Convert to a gRPC Status
+                Status::internal(format!("Internal metadata error: {}", e))
+            })?;
 
         if n_users > ranker_metadata.batch_size {
             return Err(Status::invalid_argument(format!(
@@ -376,10 +389,15 @@ impl Orchestrator {
         //    user_embeddings.len()/self.ranker_model_metadata.embed_len);
 
         let mut ranked_movies = self.make_ranker_request(user_ids.clone(),
-            user_reqs.timestamps, user_embeddings, ann_movie_ids, ranker_model_version_choice).await?;
+            user_reqs.timestamps, user_embeddings, ann_movie_ids, ranker_model_version_choice.clone()).await?;
 
-        let ranker_metadata
-            = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())?;
+        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .map_err(|e| {
+                // Optional: log it so you can see the error in your server console
+                eprintln!("Failed to fetch ranker metadata: {}", e);
+                // Convert to a gRPC Status
+                Status::internal(format!("Internal metadata error: {}", e))
+            })?;
 
         let num_candidates = ranker_metadata.num_candidates;
 
@@ -430,8 +448,13 @@ impl Orchestrator {
 
         let ranker_model_version_choice = Some(VersionChoice::Version(users_req.ranker_model_version));
 
-        let ranker_metadata
-            = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())?;
+        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .map_err(|e| {
+                // Optional: log it so you can see the error in your server console
+                eprintln!("Failed to fetch ranker metadata: {}", e);
+                // Convert to a gRPC Status
+                Status::internal(format!("Internal metadata error: {}", e))
+            })?;
 
         // get the searcher k if present, else default is num_candidates
         let k: Option<usize> = users_req.k.map(|val| val as usize);
@@ -552,8 +575,13 @@ impl RecommenderService for Orchestrator {
 
         let ranker_model_version_choice = Some(VersionChoice::Version(user_reqs.ranker_model_version));
 
-        let ranker_metadata
-            = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())?;
+        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .map_err(|e| {
+                // Optional: log it so you can see the error in your server console
+                eprintln!("Failed to fetch ranker metadata: {}", e);
+                // Convert to a gRPC Status
+                Status::internal(format!("Internal metadata error: {}", e))
+            })?;
 
         let batch_size : usize = ranker_metadata.batch_size;
 
@@ -651,9 +679,20 @@ impl RecommenderService for Orchestrator {
               uint32 num_candidates = 4;
             }
          */
+        let req = request.into_inner();
+        let request = Request::new(req.clone());
         let ranked_all = self.rank_only_return_all(request).await?.into_inner();
 
-        let num_candidates = self.ranker_model_metadata.num_candidates;
+        let ranker_model_version_choice = Some(VersionChoice::Version(req.ranker_model_version));
+        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .map_err(|e| {
+                // Optional: log it so you can see the error in your server console
+                eprintln!("Failed to fetch ranker metadata: {}", e);
+                // Convert to a gRPC Status
+                Status::internal(format!("Internal metadata error: {}", e))
+            })?;
+
+        let num_candidates = ranker_metadata.num_candidates;
         let n_users = ranked_all.user_ids.len();
 
         // Early return if empty to prevent divide-by-zero later

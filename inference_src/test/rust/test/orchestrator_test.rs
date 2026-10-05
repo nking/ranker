@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 // Assuming your UserRequest is accessible here
 pub mod helper {
-
     // Tell Rust to literally include the code from helper.rs here
     include!("helper.rs");
     include!("helper_users.rs");
@@ -21,8 +20,9 @@ struct TestHarness {
 impl TestHarness {
     async fn new() -> Self {
         println!("\n[SETUP]: Initializing test resource...");
-        let config_path = get_tiny_config_json_uri();
-        let config = AppConfig::load_from_file(&config_path).unwrap();
+        let config_path = get_tiny_config_json_uri().to_string();
+        let config = AppConfig::load_from_file(&config_path)
+            .expect("Could not load tiny config json file");
 
         let query_uri = config.query_uri.clone();
         let ranker_uri = config.ranker_uri.clone();
@@ -51,8 +51,9 @@ impl TestHarness {
         let orchestrator = Orchestrator::new(
             query_uri,
             ranker_uri,
-            config.query_metadata_uri,
-            config.ranker_metadata_uri,
+            config.query_saved_models_uri,
+            config.ranker_saved_models_uri,
+            config.ranker_serving_is_batched,
             &movie_embeddings_uri,
             ratings_uris,
             ranker_n_local_devices,
@@ -112,7 +113,7 @@ mod orchestrator_tests {
 
         let query_model_version = Some(VersionChoice::Version(1));
         let ranker_model_version = Some(VersionChoice::Version(1));
-        
+
         let users_req: UsersRequest = harness.orchestrator.get_users_request(
             &user_ids, &tmp_timestamps, query_model_version, ranker_model_version)
             .await?.into_inner();
@@ -129,7 +130,6 @@ mod orchestrator_tests {
 
         let mid_points: Vec<usize> = user_histories.iter()
             .map(|mapentry| mapentry.timestamps.len()/2).collect();
-
 
 
         let mock_single_request = UsersRequest {

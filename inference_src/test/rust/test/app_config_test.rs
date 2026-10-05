@@ -7,27 +7,34 @@ mod app_config_tests {
         // Tell Rust to literally include the code from helper.rs here
         include!("helper.rs");
     }
-    use crate::app_config_tests::helper::{get_config_json_uri};
-
     use inference_engine::app_config::AppConfig;
+    use crate::app_config_tests::helper::get_config_json_uri;
 
     #[test]
     fn test_config_deserialization() {
         let json_data = r#"{
-            "server_addr": "127.0.0.1:50051",
-            "query_uri": "http://localhost:8500",
-            "ranker_uri": "http://localhost:8510",
-            "query_metadata_uri" : "./path_to_file",
-            "ranker_metadata_uri" : "./path_to_file",
-            "params_json_path": "./params.json",
-            "movie_embeddings_path": "./movie_embeddings.bin",
-            "movie_tiers_path" : "./movie_tiers.json",
-            "ratings_uris": ["file1.csv", "file2.csv"],
-            "ranker_n_local_devices": 2,
-            "top_k": 50,
-            "movies_path": "./movies.bin",
-            "persisted_index_path": "./index_dir",
-            "user_db_path" : "./user_db.bin"
+              "server_addr": "0.0.0.0:50051",
+              "query_uri": "http://172.17.0.1:8500",
+              "ranker_uri": "http://172.17.0.1:8510",
+              "params_json_path": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_batch.json",
+              "movie_embeddings_path": "../../../src/test/resources/data/tower_versions/1/movie_emb-00000-of-00001.parquet",
+              "movie_tiers_path": "../../../src/test/resources/data/movie_tiers.json",
+              "ratings_uris": [
+                "../../../src/test/resources/data/tiny3/ratings_train_liked.parquet",
+                "../../../src/test/resources/data/tiny3/ratings_train_3.parquet",
+                "../../../src/test/resources/data/tiny3/ratings_train_disliked.parquet",
+                "../../../src/test/resources/data/tiny3/ratings_val_liked.parquet",
+                "../../../src/test/resources/data/tiny3/ratings_val_3.parquet",
+                "../../../src/test/resources/data/tiny3/ratings_val_disliked.parquet"
+              ],
+              "user_db_path":"../../../src/test/resources/data/users.bin",
+              "movies_path": "../../../src/test/resources/data/movies.parquet",
+              "ranker_n_local_devices": 1,
+              "top_k": 20,
+              "persisted_index_path": "./target/movie_embeddings_indexer",
+              "query_saved_models_uri": "../../../src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/",
+              "ranker_saved_models_uri": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/",
+              "ranker_serving_is_batched" : "true"
         }"#;
 
         // Create a temporary file to test the load function

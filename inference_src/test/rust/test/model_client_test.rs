@@ -26,7 +26,11 @@ mod client_tests {
         let config_path = get_config_json_uri();
         let config = AppConfig::load_from_file(&config_path).unwrap();
 
-        let query_metadata = QueryModelMetadata::load_from_file(&config.query_metadata_uri).unwrap();
+        let query_metadata_uri = format!(
+            "{}/{}/assets.extra/{}",
+            config.query_saved_models_uri.trim_end_matches('/'), 1, "hyperparameters.json");
+
+        let query_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri).unwrap();
 
         let client = QueryModelClient::new(config.query_uri, query_metadata.embed_len).await;
 
@@ -64,9 +68,17 @@ mod client_tests {
         let config_path = get_config_json_uri();
         let config = AppConfig::load_from_file(&config_path).unwrap();
 
+        let filename = if config.ranker_serving_is_batched {
+            "metadata_batch.json"
+        } else {
+            "metadata_single.json"
+        };
+        let ranker_metadata_uri = format!(
+            "{}/{}/assets.extra/{}",
+            config.ranker_saved_models_uri.trim_end_matches('/'), 1, filename);
+
         // the default confg is for the batch ranker model, so change to the single inference model:
-        let ranker_metadat_uri = config.ranker_metadata_uri;
-        let single_uri = ranker_metadat_uri.replace("batch", "single");
+        let single_uri = ranker_metadata_uri.replace("batch", "single");
 
         let ranker_metadata = RankerModelMetadata::load_from_file(&single_uri).unwrap();
 

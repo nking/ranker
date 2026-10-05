@@ -28,8 +28,14 @@ mod app_runner_tests {
         let mut config = AppConfig::load_from_file(&config_path).unwrap();
 
         //  "ranker_metadata_uri": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_batch.json"
-        let ranker_metadata_uri = config.ranker_metadata_uri.clone();
-        config.ranker_metadata_uri = ranker_metadata_uri.replace("batch", "single");
+        let filename = if config.ranker_serving_is_batched {
+            "metadata_batch.json"
+        } else {
+            "metadata_single.json"
+        };
+        let ranker_metadata_uri = format!(
+            "{}/{}/assets.extra/{}",
+            config.ranker_saved_models_uri.trim_end_matches('/'), 1, filename);
 
         let runner = AppRunner::new(config.clone());
 

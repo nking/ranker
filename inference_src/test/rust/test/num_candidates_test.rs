@@ -58,11 +58,13 @@ impl TestHarness {
         ];
         let full_ratings_map = get_train_val_test_liked_uris(DataSize::Full, false);
 
+
         let orchestrator = Orchestrator::new(
             query_uri,
             ranker_uri,
-            config.query_metadata_uri,
-            config.ranker_metadata_uri,
+            config.query_saved_models_uri,
+            config.ranker_saved_models_uri,
+            config.ranker_serving_is_batched,
             &movie_embeddings_uri,
             ratings_uris,
             ranker_n_local_devices,
@@ -128,7 +130,8 @@ mod num_candidates_tests {
 
         let movie_tiers : FxHashMap<i32, i32> = load_from_file(&harness.movie_tiers_path)?;
 
-        let ranker_batch_size = harness.orchestrator.get_ranker_model_metadata().batch_size;
+        let ranker_model_version_choice = Some(VersionChoice::Version(1));
+        let ranker_batch_size = harness.orchestrator.get_ranker_batch_size(ranker_model_version_choice)?;
 
         let common_user_ids : HashSet<i32> = get_intersection_of_user_ids_tier_2(&harness.train_uri, &harness.val_uri,
             &harness.test_uri, &movie_tiers)?;

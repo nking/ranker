@@ -2,6 +2,8 @@ use std::env;
 use std::path::{PathBuf};
 use std::collections::HashMap;
 
+use inference_engine::app_config::AppConfig;
+
 pub fn get_project_dir() -> Option<PathBuf> {
     let cwd = env::current_dir().ok()?;
 
@@ -150,6 +152,20 @@ pub fn get_movies_uri() -> String {
         .expect("Project directory not found");
 
     movies_uri
+}
+
+#[allow(dead_code)]
+pub fn get_ranker_metadata_uri(config: AppConfig) -> String {
+    let filename = if config.ranker_serving_is_batched {
+        "metadata_batch.json"
+    } else {
+        "metadata_single.json"
+    };
+    let ranker_metadata_uri = format!(
+        "{}/{}/assets.extra/{}",
+        config.ranker_saved_models_uri.trim_end_matches('/'), 1, filename);
+
+    ranker_metadata_uri
 }
 
 #[allow(dead_code)]

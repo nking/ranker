@@ -47,7 +47,7 @@ mod calc_metrics_2_tests {
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
     use inference_engine::user_db::UserDb;
     use inference_engine::user_history::{build_map_async, UserMapEntry};
-    use crate::calc_metrics_2_tests::helper::{get_config_json_uri, get_train_val_test_liked_uris, DataSize, calc_normalized_emd_3, mean_and_std};
+    use crate::calc_metrics_2_tests::helper::{get_config_json_uri, get_train_val_test_liked_uris, DataSize, calc_normalized_emd_3, mean_and_std, get_ranker_metadata_uri};
 
     use rand::seq::SliceRandom;
     use rand::thread_rng;
@@ -61,7 +61,7 @@ mod calc_metrics_2_tests {
         let config = AppConfig::load_from_file(&config_path).unwrap();
 
         // the default config is for the batch ranker model, so change to the single inference model:
-        let ranker_metadat_uri = config.ranker_metadata_uri.clone();
+        let ranker_metadat_uri = get_ranker_metadata_uri(config.clone());
         //let single_uri = ranker_metadat_uri.replace("batch", "single");
         let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadat_uri).unwrap();
 
@@ -143,7 +143,9 @@ mod calc_metrics_2_tests {
 
         let user_db : UserDb = UserDb::new(&config.user_db_path).expect("Failed to initialize UserDb from binary path");
 
-        let ranker_metadata = RankerModelMetadata::load_from_file(&config.ranker_metadata_uri).unwrap();
+        let ranker_metadata_uri = get_ranker_metadata_uri(config.clone());
+
+        let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri).unwrap();
 
         let ranker_batch_size = ranker_metadata.batch_size;
 
@@ -351,7 +353,8 @@ mod calc_metrics_2_tests {
 
         let user_db : UserDb = UserDb::new(&config.user_db_path).expect("Failed to initialize UserDb from binary path");
 
-        let ranker_metadata = RankerModelMetadata::load_from_file(&config.ranker_metadata_uri).unwrap();
+        let ranker_metadata_uri = get_ranker_metadata_uri(config.clone());
+        let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri).unwrap();
 
         let ranker_batch_size = ranker_metadata.batch_size;
 
@@ -498,7 +501,9 @@ mod calc_metrics_2_tests {
 
         let user_db : UserDb = UserDb::new(&config.user_db_path).expect("Failed to initialize UserDb from binary path");
 
-        let ranker_metadata = RankerModelMetadata::load_from_file(&config.ranker_metadata_uri).unwrap();
+        let ranker_metadata_uri = get_ranker_metadata_uri(config.clone());
+
+        let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri).unwrap();
 
         let ranker_batch_size = ranker_metadata.batch_size;
 
