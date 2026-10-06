@@ -324,6 +324,8 @@ impl Orchestrator {
         // target_movie_id should == 1
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
+        //DEBUG
+        println!("about to create input graph arrays for ranker request");
         let padded_super_graph_arrays: JraphGraph = build_enriched_padded_supergraph(
             ranker_metadata.batch_size,
             &user_ids,
@@ -691,6 +693,8 @@ impl RecommenderService for Orchestrator {
             Status::invalid_argument("None of the requested user IDs were found or valid")
         })?;
 
+        //DEBUG
+        println!("about to request user embeddings");
         let users_request = request.into_inner();
         let user_embeddings = self.query_model.get_users_embeddings(users_request,
             query_model_version_choice).await

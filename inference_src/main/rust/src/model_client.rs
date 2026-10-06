@@ -116,14 +116,14 @@ impl RankerModelClient {
         let predict_req : PredictRequest = build_graph_ranker_proto_inputs(padded_super_graph,
             embed_len, self.metadata.batch_size > 1, ranker_model_version_choice);
 
-        //println!("Sending gRPC request to TF Serving for GraphRanker...");
+        println!("Sending gRPC request to TF Serving for GraphRanker...");
 
         let response = self.client.clone().predict(predict_req).await?;
 
         let inner_response = response.into_inner();
 
-        //debug
-        //println!("Triton Response for ranker model: {:#?}", inner_response);
+        //DEBUG
+        println!("TFS Response for ranker model: {:#?}", inner_response);
 
         // 32-bit floats for the scores
         if let Some((_key, tensor_proto)) = inner_response.outputs.into_iter().next() {
