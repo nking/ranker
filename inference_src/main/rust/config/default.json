@@ -13,6 +13,7 @@
     "../../../src/test/resources/data/ratings_val_3.parquet",
     "../../../src/test/resources/data/ratings_val_disliked.parquet"
   ],
+  "ratings_test_positive_uri": "../../../src/test/resources/data/ratings_test_liked.parquet",
   "user_db_path":"../../../src/test/resources/data/users.bin",
   "movies_path": "../../../src/test/resources/data/movies.parquet",
   "ranker_n_local_devices": 1,

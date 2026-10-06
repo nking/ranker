@@ -1,7 +1,7 @@
 //use polars::prelude::*;
 
 use polars::df;
-use polars::prelude::{concat, LazyFrame, PlRefPath, PolarsResult, ScanArgsParquet, UnionArgs, DataFrame, SortMultipleOptions, IdxSize, col, len, JoinArgs, JoinType, IntoLazy};
+use polars::prelude::{concat, LazyFrame, PlRefPath, PolarsResult, ScanArgsParquet, UnionArgs, DataFrame, SortMultipleOptions, IdxSize, col, len, JoinArgs, JoinType, IntoLazy, DataType, QuantileMethod, when, lit};
 use rustc_hash::FxHashMap;
 
 #[allow(dead_code)]
@@ -14,6 +14,86 @@ pub fn load_and_concat_parquet(paths: &[&str]) -> PolarsResult<LazyFrame> {
         })
         .collect();
     concat(frames?, UnionArgs::default())
+}
+
+/// Given a Polars DataFrame with ['user_id', ...],
+/// returns DataFrame with columns 'user_id', 'user_tier' where tier is 0, 1, or 2 for
+/// head, torso, and tail of the distribution of the number of users ratings.
+pub fn get_user_tiers_df(
+    ratings_history_df: &LazyFrame,
+    user_catalog_df: &LazyFrame
+) -> LazyFrame {
+    _get_key_tiers_df(ratings_history_df, user_catalog_df, "user")
+}
+
+
+/// Given a Polars DataFrame with ['movie_id', ...],
+/// returns DataFrame with columns 'movie_id', 'movie_tier' where tier is 0, 1, or 2 for
+/// head, torso, and tail of the distribution of the number of users ratings.
+pub fn get_movie_tiers_df(
+    ratings_history_df: &LazyFrame,
+    movie_catalog_df: &LazyFrame
+) -> LazyFrame {
+    _get_key_tiers_df(ratings_history_df, movie_catalog_df, "movie")
+}
+
+
+pub fn _get_key_tiers_df(
+    ratings_history_df: &LazyFrame,
+    user_catalog_df: &LazyFrame,
+    key : &str
+) -> LazyFrame {
+
+    let key_id = format!("{}_id", key);
+    let key_counts = format!("{}_counts", key);
+    let key_tier = format!("{}_tier", key);
+
+    // Count history length per user
+    let counts_lf = ratings_history_df.clone()
+        .group_by([col(&key_id)])
+        .agg([len().alias(&key_counts)]);
+
+    // Define pure lazy expressions for the 80th and 20th percentiles.
+    // By filtering for strictly > 0, we exactly replicate the Python logic
+    // of computing percentiles BEFORE the 0-count users are joined in.
+    let non_zero_counts = col(&key_counts)
+        .filter(col(&key_counts).gt(lit(0)))
+        .cast(DataType::Float64); // Cast to float for accurate quantile interpolation
+
+    // If ratings_lf is completely empty, quantile() returns null.
+    // .fill_null(0.0) safely handles the fallback matching your Python code.
+    let head_min_expr = non_zero_counts.clone()
+        .quantile(lit(0.80), QuantileMethod::Linear)
+        .fill_null(lit(0.0));
+
+    let torso_min_expr = non_zero_counts
+        .quantile(lit(0.20), QuantileMethod::Linear)
+        .fill_null(lit(0.0));
+
+    // Construct the final LazyFrame graph
+    user_catalog_df.clone()
+        .select([col(&key_id)])
+        .left_join(
+            counts_lf,
+            col(&key_id),
+            col(&key_id)
+        )
+        .with_columns([
+            col(&key_counts).fill_null(lit(0))
+        ])
+        .with_columns([
+            // Use the lazily evaluated quantile expressions directly
+            when(
+                col(&key_counts).eq(lit(0))
+                    .or(col(&key_counts).cast(DataType::Float64).lt(torso_min_expr))
+            )
+                .then(lit(2))  // Tail
+                .when(col(&key_counts).cast(DataType::Float64).gt_eq(head_min_expr))
+                .then(lit(0))  // Head
+                .otherwise(lit(1)) // Torso
+                .alias(&key_tier)
+        ])
+        .select([col(&key_id), col(&key_tier)])
 }
 
 ///
