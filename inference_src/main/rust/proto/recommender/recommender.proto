@@ -34,6 +34,15 @@ message RankedMovies {
   //map<int32, string> unique_movie_titles = 5;
 }
 
+// input request to return scored candidate_ids.  candidate_ids is currently a flat vector
+message UsersRankOnlyRequest {
+  repeated int32 user_ids = 1;
+  repeated int64 timestamps = 2;
+  repeated int32 candidate_ids = 3;
+  int64 query_model_version = 4;
+  int64 ranker_model_version = 5;
+}
+
 // input request to return scored candidate_ids
 message RankOnlyRequest {
   int32 user_id = 1;
@@ -43,7 +52,7 @@ message RankOnlyRequest {
   int64 ranker_model_version = 5;
 }
 
-// Response message containing the user embedding and retrieved candidate IDs
+// Response message containing the user embedding and retrieved candidate IDs.  candidate_ids is currently a flat vector
 message ApproxNearestNeighborsResponse {
   repeated int32 user_ids = 1;
   repeated float user_embeddings = 2;
@@ -54,6 +63,8 @@ message ApproxNearestNeighborsResponse {
 service RecommenderService {
   // request to retun top_k unwatched recommended movies for the user, descending order by score
   rpc Predict (UsersRequest) returns (RankedMovies);
+  rpc RanksOnly(UsersRankOnlyRequest) returns (RankedMovies);
+
   // request to return the top_k of the candidate_ids in order of descending score
   rpc RankOnly(RankOnlyRequest) returns (RankedMovies);
 

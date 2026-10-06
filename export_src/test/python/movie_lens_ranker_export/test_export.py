@@ -15,6 +15,9 @@ class ExportTest(unittest.TestCase):
 
         checkpoint_uri = os.path.join(get_project_dir(),
                 "src/test/resources/checkpoint-bucket/best/kaggle-hpo/train_0/")
+
+        checkpoint_uri = os.path.join(get_project_dir(),
+                                      "TMP21/checkpoint-bucket/best/kaggle-hpo/train_0/")
         
         checkpoint_uri = os.path.abspath(checkpoint_uri)
         savedmodel_dir = os.path.join(get_bin_dir(), "savedmodels", "1")

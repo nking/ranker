@@ -159,7 +159,7 @@ pub fn get_unique_user_and_first_timestamp(df: LazyFrame) -> PolarsResult<(Vec<i
     let user_ca = collected_df.column("user_id")?.i32()?;
     let time_ca = collected_df.column("timestamp")?.i64()?;
 
-    // 3. Collect into vectors using the fast no-null iterator
+    // Collect into vectors using the fast no-null iterator
     let users: Vec<i32> = user_ca.into_no_null_iter().collect();
     let timestamps: Vec<i64> = time_ca.into_no_null_iter().collect();
 

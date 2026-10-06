@@ -169,6 +169,16 @@ pub fn get_ranker_metadata_uri(config: AppConfig) -> String {
 }
 
 #[allow(dead_code)]
+pub fn get_ranker_training_hyperparameters_uri(config: AppConfig) -> String {
+    let filename = "training_hyperparameters.json";
+    let ranker_metadata_uri = format!(
+        "{}/{}/assets.extra/{}",
+        config.ranker_saved_models_uri.trim_end_matches('/'), 1, filename);
+
+    ranker_metadata_uri
+}
+
+#[allow(dead_code)]
 pub fn get_ranker_metadata_single_uri(cross_encoder_version: Option<i32>) -> String {
 
     let base_dir = get_project_dir().expect("Failed to get project directory");

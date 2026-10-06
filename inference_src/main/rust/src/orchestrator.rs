@@ -8,7 +8,7 @@ use crate::embeddings_ann::Searcher;
 use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
 use crate::user_history::{build_user_history, UserHistory};
 
-use crate::pb::{UsersRequest, RankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse};
+use crate::pb::{UsersRequest, UsersRankOnlyRequest, RankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse};
 use tonic::{Request, Response, Status};
 use usearch::ffi::Matches;
 use crate::model_client::tf_serving::model_spec::VersionChoice;
@@ -662,6 +662,43 @@ impl RecommenderService for Orchestrator {
         let ranked_movies =
             self.make_ranker_request(user_ids, timestamps,
             user_embeddings, rank_req.candidate_ids, ranker_model_version_choice).await?;
+
+        Ok(Response::new( ranked_movies))
+    }
+
+    async fn ranks_only(&self, request: Request<UsersRankOnlyRequest>) -> Result<Response<RankedMovies>, Status> {
+
+        /*
+        UsersRankOnlyRequest has:
+              repeated int32 user_ids = 1;
+              repeated int64 timestamps = 2;
+              repeated int32 candidate_ids = 3;
+              int64 query_model_version = 4;
+              int64 ranker_model_version = 5;
+         */
+        let rank_req = request.into_inner();
+        let user_ids = rank_req.user_ids;
+        let timestamps = rank_req.timestamps;
+
+        let query_model_version_choice = Some(VersionChoice::Version(rank_req.query_model_version));
+        let ranker_model_version_choice = Some(VersionChoice::Version(rank_req.ranker_model_version));
+
+        // populate a UserRequest with age, gender and occupation.  The UserRequest is needed to get a user_embedding
+        let user_req_opt : Option<Request<UsersRequest>> = self.user_db.get_request(
+            &user_ids, &timestamps, query_model_version_choice.clone(), ranker_model_version_choice.clone());
+
+        let request = user_req_opt.ok_or_else(|| {
+            Status::invalid_argument("None of the requested user IDs were found or valid")
+        })?;
+
+        let users_request = request.into_inner();
+        let user_embeddings = self.query_model.get_users_embeddings(users_request,
+            query_model_version_choice).await
+            .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
+
+        let ranked_movies =
+            self.make_ranker_request(user_ids, timestamps,
+                user_embeddings, rank_req.candidate_ids, ranker_model_version_choice).await?;
 
         Ok(Response::new( ranked_movies))
     }
