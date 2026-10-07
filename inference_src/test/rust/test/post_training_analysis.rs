@@ -193,8 +193,8 @@ mod post_training_analysis {
     use super::*;
 
     use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
-    use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMovies, UsersRankOnlyRequest, UsersRequest};
-    use inference_engine::pb::recommender_service_server::RecommenderService;
+    use inference_engine::pb::{ApproxNearestNeighborsResponse, UsersRequest};
+    use inference_engine::util::{get_top_k_desc_scores};
     use crate::helper::get_unique_user_and_first_timestamp;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -216,11 +216,23 @@ mod post_training_analysis {
     async fn calc_metrics_at_k(harness: &TestHarness, query_model_version:Option<VersionChoice>,
         ranker_model_version:Option<VersionChoice>) ->  Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
+        /*let ranker_version_num: i64 = match ranker_model_version {
+            Some(VersionChoice::Version(v)) => v,
+            _ => 1, // Default fallback version if None
+        };*/
+
+        let ranker_metadata = harness.orchestrator.get_or_fetch_ranker_metadata(
+            ranker_model_version.clone()
+        ).expect("error fetching ranker metadata");
+        let ranker_batch_size = ranker_metadata.batch_size;
+        let num_candidates = ranker_metadata.num_candidates;
+
         // calculate top_k=20 for retrieval then ranker
 
         let ranker_metatadata =
             harness.orchestrator.get_or_fetch_ranker_metadata(ranker_model_version.clone())?;
         let top_k = harness.orchestrator.top_k;
+        let embed_len = ranker_metatadata.embed_len;
 
         // calc retrieval metrics @20 and ranker metrics @20
         // calculate kendall tau and spearman rank correlation between the ranked results too
@@ -246,23 +258,33 @@ mod post_training_analysis {
         // to make requests, need user_ids and their first timestamps
         let (user_ids, timestamps) = get_unique_user_and_first_timestamp(
             harness.pos_test_df.clone()
-        )?;
+        ).expect("error fetching user_ids and first timestamps");
+
+        let n_users = user_ids.len();
 
         // =========== RETRIEVAL ===============================
-
-        edit to retrieva all and keep top 20 for metrics but use all 100 for rank_only request
 
         // no batch_size constraints for the query model or ANN requests
         let tonic_request: Request<UsersRequest>  =
             harness.orchestrator.get_users_request(&user_ids, &timestamps,
                 query_model_version.clone(), ranker_model_version.clone()).await?;
         let mut users_request : UsersRequest = tonic_request.into_inner();
-        users_request.k = Some(top_k as u32);
+        users_request.k = Some(num_candidates as u32);
         let ann_reqs = Request::new(users_request.clone());
         let ann_res: ApproxNearestNeighborsResponse = harness.orchestrator
             ._approx_nearest_neighbors(ann_reqs).await?.into_inner();
-        // length: n_users * k
+        // length: n_users * num_candidates
         let ann_movie_ids: Vec<i32> = ann_res.candidate_ids;
+        assert_eq!(ann_movie_ids.len(), n_users * num_candidates);
+        let mut retrieval_movie_ids : Vec<i32> = Vec::with_capacity(n_users * top_k);
+
+        for i in (0..n_users).step_by(1){
+            let i0 = i * num_candidates;
+            let i1 = i0 + top_k;
+            let top = ann_movie_ids[i0..i1].to_vec();
+            retrieval_movie_ids.extend(top)
+        }
+        assert_eq!(retrieval_movie_ids.len(), n_users * top_k);
 
         let tag1 = "retrieval_ann";
 
@@ -275,7 +297,7 @@ mod post_training_analysis {
                 &harness.user_tiers_df,
                 &user_gt_counts,
                 &user_ids,
-                &ann_movie_ids,
+                &retrieval_movie_ids,
                 &harness.parquet_output_dir,
                 tag1
             );
@@ -287,18 +309,7 @@ mod post_training_analysis {
 
         // =========== RANKER ===============================
 
-        let ranker_version_num: i64 = match ranker_model_version {
-            Some(VersionChoice::Version(v)) => v,
-            _ => 1, // Default fallback version if None
-        };
-        let query_version_num: i64 = match query_model_version {
-            Some(VersionChoice::Version(v)) => v,
-            _ => 1, // Default fallback version if None
-        };
-
         let n_users = user_ids.len();
-        let ranker_batch_size =
-            harness.orchestrator.get_ranker_batch_size(ranker_model_version.clone()).expect("cannot get ranker batch_size");
 
         let mut ranker_movie_ids: Vec<i32> = Vec::with_capacity(ann_movie_ids.len());
 
@@ -308,25 +319,21 @@ mod post_training_analysis {
 
             let i1 = std::cmp::min(i0 + ranker_batch_size, n_users);
 
-            let j0 = i0 * top_k;
-            let j1 = i1 * top_k;
-
-            let rank_req = Request::new(UsersRankOnlyRequest {
-                user_ids: user_ids[i0..i1].to_vec(),
-                timestamps: timestamps[i0..i1].to_vec(),
-                candidate_ids: ann_movie_ids[j0..j1].to_vec(),
-                query_model_version: query_version_num,
-                ranker_model_version: ranker_version_num
-            });
-
             println!("about to rank movie_ids for users: {}-{}", i0, i1);
 
-            let ranked_movies: RankedMovies = match harness.orchestrator.ranks_only(rank_req).await {
-                Ok(response) => response.into_inner(),
+            let mut ranked_movies = match harness.orchestrator._make_ranker_request(
+                &user_ids[i0..i1],
+                &timestamps[i0..i1],
+                &ann_res.user_embeddings[i0*embed_len..i1*embed_len],
+                &ann_movie_ids[i0*num_candidates..i1*num_candidates],
+                ranker_model_version.clone()
+            ).await {
+                Ok(response) => response,
                 Err(e) => {
                     eprintln!("\n[ERROR] Ranker request failed for user batch indices {} to {}", i0, i1);
                     eprintln!("   - Number of users in batch: {}", i1 - i0);
-                    eprintln!("   - Number of candidates sent: {}", j1 - j0);
+                    eprintln!("   - Number of candidates sent: {}", (i1 - i0) * num_candidates);
+                    eprintln!("   - Range of embedding elements sent: {}", (i1 - i0) * embed_len);
                     eprintln!("   - Error Details: {:#?}", e);
 
                     // Bubble the error up to the function's return type
@@ -334,7 +341,12 @@ mod post_training_analysis {
                 }
             };
 
-            ranker_movie_ids.extend(ranked_movies.movie_ids);
+            //truncate to top_k movies for each user
+            let (top_movie_ids, _top_scores) = get_top_k_desc_scores(
+                & mut ranked_movies.movie_ids, &mut ranked_movies.scores, num_candidates, top_k
+            );
+
+            ranker_movie_ids.extend(top_movie_ids);
         }
 
         let tag2 = "ranker";
@@ -561,7 +573,7 @@ mod post_training_analysis {
                 .column("user_tier")?
                 .as_materialized_series()
                 .i32()?
-                .equal(t as i32); // Notice we also remove the `?` at the end here!
+                .equal(t as i32);
 
             let filtered_df = metrics_df.filter(&mask)?;
 

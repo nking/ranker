@@ -98,8 +98,8 @@ pub fn next_64(x : usize) -> usize {
     64 * (1 + (x / 64))
 }
 
-/// given and array of ids and an array of scores, both of same length, make an ascending
-/// sort of both arrays by the values in scores array.
+/// given and array of ids and an array of scores which are flat arrays containing n_users*num_candidates
+/// elements each, for each user, sort the movie_ids and scores in order descending scores
 ///
 /// # Arguments
 ///
@@ -135,6 +135,61 @@ pub fn sort_in_place_by_desc_scores(movie_ids : &mut [i32], scores : &mut [f32],
             }
         });
 
+}
+
+/// Given slices of ids and scores containing n_users * num_candidates elements,
+/// sorts the candidates for each user in descending order by score, and extracts
+/// the top_k results into new flattened vectors.
+///
+/// # Arguments
+///
+/// * `movie_ids`: Flattened slice of movie IDs
+/// * `scores`: Flattened slice of scores
+/// * `num_candidates`: The original number of candidates per user
+/// * `top_k`: The maximum number of top candidates to keep per user
+///
+/// returns: (Vec<i32>, Vec<f32>) - The truncated, flattened top_k arrays
+pub fn get_top_k_desc_scores(
+    movie_ids: &[i32],
+    scores: &[f32],
+    num_candidates: usize,
+    top_k: usize
+) -> (Vec<i32>, Vec<f32>) {
+
+    // Ensure top_k is strictly bounded by the actual number of candidates available
+    let safe_top_k = top_k.min(num_candidates);
+    let n_users = movie_ids.len() / num_candidates;
+
+    // Pre-allocate the exact capacity needed for the truncated flat output
+    let mut out_movie_ids = Vec::with_capacity(n_users * safe_top_k);
+    let mut out_scores = Vec::with_capacity(n_users * safe_top_k);
+
+    // OPTIMIZATION: Pre-allocate a single sorting buffer to avoid
+    // re-allocating a new Vec for every single user in the batch.
+    let mut paired: Vec<(i32, f32)> = Vec::with_capacity(num_candidates);
+
+    // We use a standard for-loop instead of .for_each() so we can mutably borrow the 'paired' buffer
+    for (movie_chunk, score_chunk) in movie_ids.chunks_exact(num_candidates).zip(scores.chunks_exact(num_candidates)) {
+
+        // Clear the buffer and refill it with the current user's candidates
+        paired.clear();
+        paired.extend(
+            movie_chunk.iter()
+                .zip(score_chunk.iter())
+                .map(|(&id, &score)| (id, score))
+        );
+
+        // Sort the pairs by score in descending order
+        paired.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
+
+        // Extract only the top K elements and push them to the flattened outputs
+        for &(id, score) in paired.iter().take(safe_top_k) {
+            out_movie_ids.push(id);
+            out_scores.push(score);
+        }
+    }
+
+    (out_movie_ids, out_scores)
 }
 
 /// get timestamp in seconds for "now".  timestamp is the number of seconds since

@@ -16,7 +16,7 @@ use crate::pb::recommender_service_server::RecommenderService;
 use crate::query_model_metadata::QueryModelMetadata;
 use crate::ranker_model_metadata::RankerModelMetadata;
 use crate::user_db::UserDb;
-use crate::util::sort_in_place_by_desc_scores;
+use crate::util::{get_top_k_desc_scores};
 
 // the number of local_devices attached to the ranker TFS.  e.g. = 2 for the kaggle T4x2 GPUs
 // max_history, num_candidates are hyper-parameters of the ranker_model
@@ -337,17 +337,20 @@ impl Orchestrator {
     /// ```
     ///
     /// ```
-    async fn make_ranker_request(&self, user_ids : Vec<i32>, timestamps: Vec<i64>,
-        user_embeddings : Vec<f32>, candidate_ids : Vec<i32>,
-        ranker_model_version_choice: Option<VersionChoice>) -> Result<RankedMovies, Status> {
+    pub async fn _make_ranker_request(
+        &self,
+        user_ids: &[i32],               // Changed to slice
+        timestamps: &[i64],             // Changed to slice
+        user_embeddings: &[f32],        // Changed to slice
+        candidate_ids: &[i32],          // Changed to slice
+        ranker_model_version_choice: Option<VersionChoice>
+    ) -> Result<RankedMovies, Status> {
 
         let n_users = user_ids.len();
 
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
             .map_err(|e| {
-                // Optional: log it so you can see the error in your server console
                 eprintln!("Failed to fetch ranker metadata: {}", e);
-                // Convert to a gRPC Status
                 Status::internal(format!("Internal metadata error: {}", e))
             })?;
 
@@ -358,48 +361,41 @@ impl Orchestrator {
             )));
         }
 
-        // finds num_candidates approx nearest neighbors
         let searcher = self.searcher.load();
 
-        // target_movie_id should == 1
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
-        //DEBUG
         println!("about to create input graph arrays for ranker request");
+
+        // Note: We removed the `&` prefixes here because the arguments are ALREADY references (slices)
         let padded_super_graph_arrays: JraphGraph = build_enriched_padded_supergraph(
             ranker_metadata.batch_size,
-            &user_ids,
-            &timestamps,
-            &candidate_ids,
-            &labels,
+            user_ids,                 // Was &user_ids
+            timestamps,               // Was &timestamps
+            candidate_ids,            // Was &candidate_ids
+            &labels,                  // Still needs & because we created it as a Vec locally
             &self.user_history,
             ranker_metadata.max_history,
             ranker_metadata.num_catalog_users,
             searcher.get_num_catalog_movies(),
             searcher.get_embed_len(),
             searcher.get_movies_embedding_catalog_ref(),
-            &user_embeddings,
+            user_embeddings,          // Was &user_embeddings
             self.ranker_n_local_devices
         );
 
-        //println!("padded graph n_node={:?}", padded_super_graph_arrays.n_node);
-
-        // Send to deployed Ranker model
-        // returns all num_candidates rankings, not truncated to top_k
         let final_response = self.ranker_model.get_candidate_ranks(
             padded_super_graph_arrays, searcher.get_embed_len(), ranker_model_version_choice).await;
 
         match final_response {
             Ok(mut ranks) => {
-                // The JAX model returns statically shaped output (max_graphs).
-                // Truncate the padded scores to match the actual number of valid inputs in this chunk.
-
-                // the padded values are all at the end so truncate can remove them:
                 ranks.truncate(candidate_ids.len());
 
                 Ok(RankedMovies {
-                    user_ids,
-                    movie_ids: candidate_ids,
+                    // Convert slices back to owned Vecs ONLY when we absolutely have to
+                    // for the protobuf struct payload
+                    user_ids: user_ids.to_vec(),
+                    movie_ids: candidate_ids.to_vec(),
                     scores: ranks,
                     num_candidates: ranker_metadata.num_candidates as u32
                 })
@@ -431,8 +427,8 @@ impl Orchestrator {
         //    self.ranker_model_metadata.embed_len,
         //    user_embeddings.len()/self.ranker_model_metadata.embed_len);
 
-        let mut ranked_movies = self.make_ranker_request(user_ids.clone(),
-            user_reqs.timestamps, user_embeddings, ann_movie_ids, ranker_model_version_choice.clone()).await?;
+        let mut ranked_movies = self._make_ranker_request(
+            &user_ids, &user_reqs.timestamps, &user_embeddings, &ann_movie_ids, ranker_model_version_choice.clone()).await?;
 
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
             .map_err(|e| {
@@ -444,19 +440,9 @@ impl Orchestrator {
 
         let num_candidates = ranker_metadata.num_candidates;
 
-        sort_in_place_by_desc_scores(
-            & mut ranked_movies.movie_ids, &mut ranked_movies.scores, num_candidates);
-
-        // extract each response to top_k
-        let n_final = user_ids.len() * self.top_k;
-        let mut top_movie_ids : Vec<i32> = Vec::with_capacity(n_final);
-        let mut top_scores: Vec<f32> = Vec::with_capacity(n_final);
-        ranked_movies.movie_ids.chunks_exact(num_candidates)
-            .zip(ranked_movies.scores.chunks_exact(num_candidates))
-            .for_each(|(movie_chunk, score_chunk)| {
-                top_movie_ids.extend(movie_chunk.iter().take(self.top_k));
-                top_scores.extend(score_chunk.iter().take(self.top_k));
-            });
+        let (top_movie_ids, top_scores) = get_top_k_desc_scores(
+            & mut ranked_movies.movie_ids, &mut ranked_movies.scores, num_candidates, self.top_k
+        );
 
         Ok(Response::new( RankedMovies{
             user_ids: user_ids,
@@ -703,8 +689,8 @@ impl RecommenderService for Orchestrator {
             .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
 
         let ranked_movies =
-            self.make_ranker_request(user_ids, timestamps,
-            user_embeddings, rank_req.candidate_ids, ranker_model_version_choice).await?;
+            self._make_ranker_request(&user_ids, &timestamps,
+            &user_embeddings, &rank_req.candidate_ids, ranker_model_version_choice).await?;
 
         Ok(Response::new( ranked_movies))
     }
@@ -734,8 +720,8 @@ impl RecommenderService for Orchestrator {
             .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
 
         let ranked_movies =
-            self.make_ranker_request(user_ids, timestamps,
-                user_embeddings, rank_req.candidate_ids, ranker_model_version_choice).await?;
+            self._make_ranker_request(&user_ids, &timestamps,
+                &user_embeddings, &rank_req.candidate_ids, ranker_model_version_choice).await?;
 
         Ok(Response::new( ranked_movies))
     }
