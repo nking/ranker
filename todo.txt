@@ -1,3 +1,15 @@
+- consider how to change model version logic so that not 
+  specifying a model version results in the latest version
+  being selected by TFS instead of version "1" as I have
+  currently coded for.
+   - in the ModelSpec, the version number should not be set
+     so that TFS defaults to the latest version available.
+   - the metadata loading and logic might need to change to
+     include a sweep of all versions in saved_model directory
+     and storing the latest.
+   - might need to pass a -1 as the version number in structs
+     as a placeholder for "None".
+
 - consider making an OpenAPI/Swagger v3 specification openapi.yaml file
   and make it discoverable at the inference endpoint as /spec.
   then a google adk agent can fetch the spec and process it with

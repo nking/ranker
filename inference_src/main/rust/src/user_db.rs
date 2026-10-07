@@ -89,6 +89,8 @@ impl UserDb {
 
         let n_users = valid_user_ids.len() as i32;
 
+        //TODO: consider mapping Default version fallback to max version key in HashMap
+
         let query_version_num: i64 = match query_model_version {
             Some(VersionChoice::Version(v)) => v,
             _ => 1, // Default fallback version if None

@@ -155,6 +155,7 @@ impl Orchestrator {
     pub fn get_or_fetch_query_metadata(&self, query_model_version_choice: Option<VersionChoice>)
         -> Result<Arc<QueryModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
 
+        //TODO: consider mapping Default version fallback to max version key in HashMap
         let query_version_num: i64 = match query_model_version_choice {
             Some(VersionChoice::Version(v)) => v,
             _ => 1, // Default fallback version if None
@@ -204,6 +205,7 @@ impl Orchestrator {
     pub fn get_or_fetch_ranker_metadata(&self, ranker_model_version_choice: Option<VersionChoice>)
         -> Result<Arc<RankerModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
 
+        //TODO: consider mapping Default version fallback to max version key in HashMap
         let ranker_version_num: i64 = match ranker_model_version_choice {
             Some(VersionChoice::Version(v)) => v,
             _ => 1, // Default fallback version if None
@@ -293,6 +295,8 @@ impl Orchestrator {
     pub fn get_users_rank_only_request(&self, users_req : &UsersRequest, candidate_ids: &[i32],
         query_model_version_choice: Option<VersionChoice>,
         ranker_model_version_choice: Option<VersionChoice>) -> UsersRankOnlyRequest {
+
+        //TODO: consider mapping Default version fallback to max version key in HashMap
 
         let ranker_version_num: i64 = match ranker_model_version_choice {
             Some(VersionChoice::Version(v)) => v,
