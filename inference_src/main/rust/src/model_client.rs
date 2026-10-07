@@ -116,7 +116,7 @@ impl RankerModelClient {
         let predict_req : PredictRequest = build_graph_ranker_proto_inputs(padded_super_graph,
             embed_len, self.metadata.batch_size > 1, ranker_model_version_choice);
 
-        println!("Sending gRPC request to TF Serving for GraphRanker...");
+        //println!("Sending gRPC request to TF Serving for GraphRanker...");
 
         let response = self.client.clone().predict(predict_req).await?;
 

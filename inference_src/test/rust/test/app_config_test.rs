@@ -34,7 +34,7 @@ mod app_config_tests {
               "persisted_index_path": "./target/movie_embeddings_indexer",
               "query_saved_models_uri": "../../../src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/",
               "ranker_saved_models_uri": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/",
-              "ranker_serving_is_batched" : "true"
+              "ranker_serving_is_batched" : true
         }"#;
 
         // Create a temporary file to test the load function
@@ -43,9 +43,9 @@ mod app_config_tests {
 
         let config = AppConfig::load_from_file(temp_file.path().to_str().unwrap()).unwrap();
 
-        assert_eq!(config.top_k, 50);
-        assert_eq!(config.ranker_n_local_devices, 2);
-        assert_eq!(config.ratings_uris.len(), 2);
+        assert_eq!(config.top_k, 20);
+        assert_eq!(config.ranker_n_local_devices, 1);
+        assert_eq!(config.ratings_uris.len(), 6);
         assert_eq!(config.server_addr.port(), 50051);
     }
 

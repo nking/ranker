@@ -365,7 +365,7 @@ impl Orchestrator {
 
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
-        println!("about to create input graph arrays for ranker request");
+        //println!("about to create input graph arrays for ranker request");
 
         // Note: We removed the `&` prefixes here because the arguments are ALREADY references (slices)
         let padded_super_graph_arrays: JraphGraph = build_enriched_padded_supergraph(
@@ -713,7 +713,7 @@ impl RecommenderService for Orchestrator {
         })?;
 
         //DEBUG
-        println!("about to request user embeddings");
+        //println!("about to request user embeddings");
         let users_request = request.into_inner();
         let user_embeddings = self.query_model.get_users_embeddings(users_request,
             query_model_version_choice).await

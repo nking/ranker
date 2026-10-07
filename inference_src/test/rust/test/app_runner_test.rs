@@ -25,7 +25,7 @@ mod app_runner_tests {
 
         //  Configure a test instance binding to port (dynamic port allocation)
         let config_path = get_config_json_uri();
-        let mut config = AppConfig::load_from_file(&config_path).unwrap();
+        let config = AppConfig::load_from_file(&config_path).unwrap();
 
         //  "ranker_metadata_uri": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_batch.json"
         let filename = if config.ranker_serving_is_batched {

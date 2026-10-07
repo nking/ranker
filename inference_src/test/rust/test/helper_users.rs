@@ -16,6 +16,7 @@ pub fn load_and_concat_parquet(paths: &[&str]) -> PolarsResult<LazyFrame> {
     concat(frames?, UnionArgs::default())
 }
 
+#[allow(dead_code)]
 /// Given a Polars DataFrame with ['user_id', ...],
 /// returns DataFrame with columns 'user_id', 'user_tier' where tier is 0, 1, or 2 for
 /// head, torso, and tail of the distribution of the number of users ratings.
@@ -26,7 +27,7 @@ pub fn get_user_tiers_df(
     _get_key_tiers_df(ratings_history_df, user_catalog_df, "user")
 }
 
-
+#[allow(dead_code)]
 /// Given a Polars DataFrame with ['movie_id', ...],
 /// returns DataFrame with columns 'movie_id', 'movie_tier' where tier is 0, 1, or 2 for
 /// head, torso, and tail of the distribution of the number of users ratings.
