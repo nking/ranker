@@ -174,7 +174,7 @@ pub async fn build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEn
         let absolute_path = std::fs::canonicalize(_path)
             .expect("Failed to canonicalize path: File does not exist or access denied");
 
-        println!("DEBUG: Attempting to access file at: {:?}", absolute_path);
+        //println!("DEBUG: Attempting to access file at: {:?}", absolute_path);
 
         let sem = semaphore.clone();
 

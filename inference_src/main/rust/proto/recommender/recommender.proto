@@ -65,9 +65,6 @@ service RecommenderService {
   rpc Predict (UsersRequest) returns (RankedMovies);
   rpc RanksOnly(UsersRankOnlyRequest) returns (RankedMovies);
 
-  // request to return the top_k of the candidate_ids in order of descending score
-  rpc RankOnly(RankOnlyRequest) returns (RankedMovies);
-
   // request to return all of the candidate_ids, not reordered nor truncated
   rpc RankOnlyReturnAll(RankOnlyRequest) returns (RankedMovies);
   // request to return return nearest neighbors of user embedding

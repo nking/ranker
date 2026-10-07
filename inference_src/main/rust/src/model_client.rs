@@ -123,7 +123,7 @@ impl RankerModelClient {
         let inner_response = response.into_inner();
 
         //DEBUG
-        println!("TFS Response for ranker model: {:#?}", inner_response);
+        //println!("TFS Response for ranker model: {:#?}", inner_response);
 
         // 32-bit floats for the scores
         if let Some((_key, tensor_proto)) = inner_response.outputs.into_iter().next() {

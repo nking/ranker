@@ -86,21 +86,107 @@ impl Drop for TestHarness {
 
 #[cfg(test)]
 mod orchestrator_tests {
+    use polars::prelude::LazyFrame;
     use rustc_hash::FxHashMap;
     // Bring everything from the outer scope (TestHarness, helper functions, etc.) into the test module
     use super::*;
 
     //bring the gRPC trait into scope so its methods (.predict) are visible
     use inference_engine::pb::recommender_service_server::RecommenderService;
-    use inference_engine::pb::{RankedMovies, UsersRequest};
-    use tonic::Response;
+    use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMovies, UsersRequest};
+    use tonic::{Request, Response};
     use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
     use inference_engine::user_history::{_testable_build_map_async, UserMapEntry};
+    use crate::helper::{get_unique_user_and_first_timestamp, load_and_concat_parquet};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_orchestrator() -> Result<(), Box<dyn std::error::Error>>{
         // Setup runs here
         let harness = TestHarness::new().await;
+
+        let _ = small(&harness).await;
+        let _ = larger(&harness).await;
+
+        Ok(())
+
+        // Teardown automatically runs here when `_harness` goes out of scope at the end of the test function
+    }
+
+    async fn larger(harness: &TestHarness) -> Result<(), Box<dyn std::error::Error>>{
+        //predict
+        //approx_nearest_neighbors
+        // ranks_only
+
+        let top_k = harness.orchestrator.top_k;
+        let query_model_version = Some(VersionChoice::Version(1));
+        let ranker_model_version = Some(VersionChoice::Version(1));
+
+        let ranker_metatadata =
+            harness.orchestrator.get_or_fetch_ranker_metadata(ranker_model_version.clone()).expect("error fetching ranker metadata");
+        let num_candidates = ranker_metatadata.num_candidates;
+
+        let borrowed_vec: Vec<&str> = harness.test_uris.iter().map(|s| s.as_str()).collect();
+        let pos_test_df: LazyFrame = load_and_concat_parquet(&borrowed_vec).expect("error reading test ratings into df");
+
+        let (user_ids, timestamps) = get_unique_user_and_first_timestamp(
+            pos_test_df.clone()
+        ).expect("error getting unique user and first timestamp");
+
+        let n_users = user_ids.len();
+
+        let tonic_request: Request<UsersRequest>  =
+            harness.orchestrator.get_users_request(&user_ids, &timestamps,
+                query_model_version.clone(), ranker_model_version.clone()).await?;
+        let mut users_request : UsersRequest = tonic_request.into_inner();
+        users_request.k = Some(top_k as u32);
+
+        // ===========  predict ====================
+        let predict_req = tonic::Request::new(users_request.clone());
+        let results: Result<Response<RankedMovies>, tonic::Status> =
+            harness.orchestrator.predict(predict_req).await;
+        assert!(results.is_ok(), "Prediction failed: {:?}", results.err());
+        let ranked_movies = results.unwrap().into_inner();
+
+        assert_eq!(ranked_movies.num_candidates as usize, top_k);
+        assert_eq!(ranked_movies.user_ids.len(), n_users);
+        assert_eq!(ranked_movies.scores.len(), n_users * top_k);
+        assert_eq!(ranked_movies.movie_ids.len(), n_users * top_k);
+
+        // ===========  approx_nearest_neighbors ====================
+
+        let tonic_request: Request<UsersRequest>  =
+            harness.orchestrator.get_users_request(&user_ids, &timestamps,
+                query_model_version.clone(), ranker_model_version.clone()).await?;
+        let mut users_request : UsersRequest = tonic_request.into_inner();
+        users_request.k = Some(num_candidates as u32);
+
+        let ann_reqs = Request::new(users_request.clone());
+        let results = harness.orchestrator
+            ._approx_nearest_neighbors(ann_reqs).await;
+        assert!(results.is_ok(), "Neighbor neighbors failed: {:?}", results.is_err());
+        let ann_res : ApproxNearestNeighborsResponse = results.unwrap().into_inner();
+
+        let ann_movie_ids: Vec<i32> = ann_res.candidate_ids;
+
+        assert_eq!(ann_res.user_ids.len(), n_users);
+        assert_eq!(ann_movie_ids.len(), n_users * num_candidates);
+
+        // ===========  ranks_only ====================
+        let users_rank_only_req = harness.orchestrator.get_users_rank_only_request(
+            &users_request, &ann_movie_ids, query_model_version.clone(), ranker_model_version.clone()
+        );
+        let reqs = Request::new(users_rank_only_req);
+        let results = harness.orchestrator.ranks_only(reqs).await;
+        assert!(results.is_ok(), "ranks_only_requestfailed: {:?}", results.is_err());
+        let ranked_movies_res : RankedMovies = results.unwrap().into_inner();
+        assert_eq!(ranked_movies_res.user_ids.len(), n_users);
+        assert_eq!(ranked_movies_res.scores.len(), n_users * num_candidates);
+        assert_eq!(ranked_movies_res.num_candidates as usize, num_candidates);
+
+        Ok(())
+    }
+
+    async fn small(harness: &TestHarness) -> Result<(), Box<dyn std::error::Error>>{
 
         // ===================================
         //   get a couple of test users

@@ -290,6 +290,28 @@ impl Orchestrator {
         })
     }
 
+    pub fn get_users_rank_only_request(&self, users_req : &UsersRequest, candidate_ids: &[i32],
+        query_model_version_choice: Option<VersionChoice>,
+        ranker_model_version_choice: Option<VersionChoice>) -> UsersRankOnlyRequest {
+
+        let ranker_version_num: i64 = match ranker_model_version_choice {
+            Some(VersionChoice::Version(v)) => v,
+            _ => 1, // Default fallback version if None
+        };
+        let query_version_num: i64 = match query_model_version_choice {
+            Some(VersionChoice::Version(v)) => v,
+            _ => 1, // Default fallback version if None
+        };
+
+        UsersRankOnlyRequest {
+            user_ids: users_req.user_ids.clone(),
+            timestamps: users_req.timestamps.clone(),
+            candidate_ids: candidate_ids.to_vec(),
+            query_model_version: query_version_num,
+            ranker_model_version: ranker_version_num
+        }
+    }
+
     pub fn get_ranker_batch_size(&self, ranker_model_version_choice: Option<VersionChoice>)
     -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let ranker_metadata
@@ -297,6 +319,24 @@ impl Orchestrator {
         Ok(ranker_metadata.batch_size)
     }
 
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// * `user_ids`:
+    /// * `timestamps`:
+    /// * `user_embeddings`:
+    /// * `candidate_ids`:
+    /// * `ranker_model_version_choice`:
+    ///
+    /// returns: Result<RankedMovies, Status>   the number of scored restuls returned per sued is num_candidates
+    /// and has not been truncated to top_k
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
     async fn make_ranker_request(&self, user_ids : Vec<i32>, timestamps: Vec<i64>,
         user_embeddings : Vec<f32>, candidate_ids : Vec<i32>,
         ranker_model_version_choice: Option<VersionChoice>) -> Result<RankedMovies, Status> {
@@ -344,7 +384,8 @@ impl Orchestrator {
 
         //println!("padded graph n_node={:?}", padded_super_graph_arrays.n_node);
 
-        // Send to eployed Ranker model
+        // Send to deployed Ranker model
+        // returns all num_candidates rankings, not truncated to top_k
         let final_response = self.ranker_model.get_candidate_ranks(
             padded_super_graph_arrays, searcher.get_embed_len(), ranker_model_version_choice).await;
 
@@ -670,14 +711,6 @@ impl RecommenderService for Orchestrator {
 
     async fn ranks_only(&self, request: Request<UsersRankOnlyRequest>) -> Result<Response<RankedMovies>, Status> {
 
-        /*
-        UsersRankOnlyRequest has:
-              repeated int32 user_ids = 1;
-              repeated int64 timestamps = 2;
-              repeated int32 candidate_ids = 3;
-              int64 query_model_version = 4;
-              int64 ranker_model_version = 5;
-         */
         let rank_req = request.into_inner();
         let user_ids = rank_req.user_ids;
         let timestamps = rank_req.timestamps;
@@ -705,97 +738,6 @@ impl RecommenderService for Orchestrator {
                 user_embeddings, rank_req.candidate_ids, ranker_model_version_choice).await?;
 
         Ok(Response::new( ranked_movies))
-    }
-
-    async fn rank_only(&self, request: Request<RankOnlyRequest>) -> Result<Response<RankedMovies>, Status> {
-
-        // get response.
-        // unroll the results by user, sort the movie_ids and scores by scores dsending,
-        // and pack up the top_k movie_ids and scores for each user
-        /*
-        message RankedMovies {
-              repeated int32 user_ids = 1;
-              repeated int32 movie_ids = 2; // "repeated" means it's a Vec in Rust
-              repeated float scores = 3;
-              uint32 num_candidates = 4;
-            }
-         */
-        let req = request.into_inner();
-        let request = Request::new(req.clone());
-        let ranked_all = self.rank_only_return_all(request).await?.into_inner();
-
-        let ranker_model_version_choice = Some(VersionChoice::Version(req.ranker_model_version));
-        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
-            .map_err(|e| {
-                // Optional: log it so you can see the error in your server console
-                eprintln!("Failed to fetch ranker metadata: {}", e);
-                // Convert to a gRPC Status
-                Status::internal(format!("Internal metadata error: {}", e))
-            })?;
-
-        let num_candidates = ranker_metadata.num_candidates;
-        let n_users = ranked_all.user_ids.len();
-
-        // Early return if empty to prevent divide-by-zero later
-        if n_users == 0 {
-            return Ok(Response::new(RankedMovies {
-                user_ids: vec![],
-                movie_ids: vec![],
-                scores: vec![],
-                num_candidates: num_candidates as u32,
-            }));
-        }
-
-        // Determine how many movies were returned per user in the flattened payload
-        let movies_per_user = ranked_all.movie_ids.len() / n_users;
-
-        debug_assert!(movies_per_user == num_candidates);
-
-        // Safety check to ensure perfectly rectangular tensors
-        if ranked_all.movie_ids.len() % n_users != 0 {
-            return Err(Status::internal(
-                "Mismatched columnar data: movie_ids length is not a clean multiple of user_ids"
-            ));
-        }
-
-        // Pre-allocate the exact capacities for the final response
-        let mut final_movie_ids: Vec<i32> = Vec::with_capacity(n_users * num_candidates);
-        let mut final_scores: Vec<f32> = Vec::with_capacity(n_users * num_candidates);
-
-        for i in 0..n_users {
-            let start = i * movies_per_user;
-            let end = start + movies_per_user;
-
-            let user_movies = &ranked_all.movie_ids[start..end];
-            let user_scores = &ranked_all.scores[start..end];
-
-            // Zip scores and IDs together so they sort as a pair
-            let mut pairs: Vec<(f32, i32)> = user_scores.iter().copied()
-                .zip(user_movies.iter().copied())
-                .collect();
-
-            //TODO: revisit this for caring about order for ties during sort:
-
-            // Sort descending by score.
-            // f32 cannot use `.sort()` directly due to NaN ambiguity, so we use `partial_cmp`.
-            // `sort_unstable_by` is used over `sort_by` because it is significantly faster and
-            // we don't care about preserving the original order of duplicate scores.
-            pairs.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-
-            // Unpack the top `num_candidates` back into the flattened arrays
-            for (score, movie_id) in pairs.into_iter().take(num_candidates) {
-                final_scores.push(score);
-                final_movie_ids.push(movie_id);
-            }
-        }
-
-        // Return the assembled response
-        Ok(Response::new(RankedMovies {
-            user_ids: ranked_all.user_ids, // Reuse the original user_ids vector directly
-            movie_ids: final_movie_ids,
-            scores: final_scores,
-            num_candidates: num_candidates as u32,
-        }))
     }
 
 }
