@@ -19,8 +19,6 @@ struct TestHarness {
     test_uris: Vec<String>,
     #[allow(dead_code)]
     ratings_uris: Vec<String>,
-    summary_output_dir: String,
-    parquet_output_dir: String,
     #[allow(dead_code)]
     train_history_df: LazyFrame,
     pos_test_df: LazyFrame,
@@ -88,15 +86,6 @@ impl TestHarness {
             ratings_map.get("val_disliked").unwrap().clone(),
         ];
 
-        // change this to another directory if wanted
-        let output_base_dir = get_bin_dir().unwrap().to_string_lossy().into_owned();
-        let summary_output_dir = format!("{}/post_training_analysis",
-            output_base_dir.trim_end_matches('/'));
-        let _ = recreate_directory(summary_output_dir.as_str()).unwrap();
-        let parquet_output_dir = format!("{}/parquet_metrics",
-            output_base_dir.trim_end_matches('/'));
-        let _ = recreate_directory(parquet_output_dir.as_str()).unwrap();
-
         // read in data frames
         let pos_test_df: LazyFrame = load_and_concat_parquet(&[&ratings_map.get("test_liked").unwrap().clone()]).expect("error reading test ratings into df");
         let uri_slices: Vec<&str> = ratings_uris.iter().map(|s| s.as_str()).collect();
@@ -128,8 +117,6 @@ impl TestHarness {
 
         Self {
             orchestrator: orchestrator, test_uris: test_ratings_uris, ratings_uris: ratings_uris,
-            summary_output_dir: summary_output_dir,
-            parquet_output_dir: parquet_output_dir,
             movies_df: movies_df,
             movies_offset: movies_offset,
             num_catalog_movies: num_catalog_movies,
@@ -200,21 +187,30 @@ mod post_training_analysis {
     #[tokio::test(flavor = "multi_thread")]
     pub async fn test_analysis() ->  Result<(), Box<dyn std::error::Error + Send + Sync>>{
 
-        // change these for the model choices and output directory to write stats to
-        let query_model_version = Some(VersionChoice::Version(1));
-        let ranker_model_version = Some(VersionChoice::Version(1));
-
         let harness = TestHarness::new().await;
 
-        let _ = calc_metrics_at_k(&harness, query_model_version.clone(), ranker_model_version.clone()).await;
+        let query_model_version = Some(VersionChoice::Version(1));
 
+        // change these for the model choices and output directory to write stats to
+        let ranker_model_version = Some(VersionChoice::Version(1));
+        let output_base_dir = get_bin_dir().unwrap().to_string_lossy().into_owned();
+        let summary_output_dir = format!("{}/post_training_analysis", output_base_dir.trim_end_matches('/'));
+        let _ = recreate_directory(summary_output_dir.as_str()).unwrap();
+        let parquet_output_dir = format!("{}/parquet_metrics",  output_base_dir.trim_end_matches('/'));
+        let _ = recreate_directory(parquet_output_dir.as_str()).unwrap();
+
+
+        // calculate @k metrics for retrieval and ranking for given model versions
+        let _ = calc_metrics_at_k(&harness, query_model_version.clone(), ranker_model_version.clone(),
+            &summary_output_dir, &parquet_output_dir).await;
 
         Ok(())
         // harness destructs when goes out of scope when method frame is done
     }
 
     async fn calc_metrics_at_k(harness: &TestHarness, query_model_version:Option<VersionChoice>,
-        ranker_model_version:Option<VersionChoice>) ->  Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        ranker_model_version:Option<VersionChoice>,
+        summary_output_dir: &str, parquet_output_dir: &str) ->  Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         /*let ranker_version_num: i64 = match ranker_model_version {
             Some(VersionChoice::Version(v)) => v,
@@ -286,9 +282,27 @@ mod post_training_analysis {
         }
         assert_eq!(retrieval_movie_ids.len(), n_users * top_k);
 
-        let tag1 = "retrieval_ann";
-
+        let tag1 = format!("retrieval_ann_{}", num_candidates).as_str();
         let result1 = //tokio::task::spawn_blocking(move || {
+            metrics(
+                num_candidates,
+                ranker_metatadata.num_catalog_movies,
+                &harness.pos_test_df,
+                &harness.movie_tiers_df,
+                &harness.user_tiers_df,
+                &user_gt_counts,
+                &user_ids,
+                &ann_movie_ids,
+                &parquet_output_dir,
+                tag1
+            );
+        //}).await.expect("Spawn blocking panicked")?;
+
+        let (res1, concl1) = result1.expect("metrics failed for tag1");
+        println!("have results1");
+
+        let tag2 = format!("retrieval_ann_{}", top_k).as_str();
+        let result2 = //tokio::task::spawn_blocking(move || {
             metrics(
                 top_k,
                 ranker_metatadata.num_catalog_movies,
@@ -298,14 +312,15 @@ mod post_training_analysis {
                 &user_gt_counts,
                 &user_ids,
                 &retrieval_movie_ids,
-                &harness.parquet_output_dir,
-                tag1
+                &parquet_output_dir,
+                tag2
             );
         //}).await.expect("Spawn blocking panicked")?;
 
-        let (res1, concl1) = result1.expect("metrics failed for tag1");
+        let (res2, concl2) = result2.expect("metrics failed for tag2");
 
-        println!("have results1");
+        println!("have results2");
+
 
         // =========== RANKER ===============================
 
@@ -349,8 +364,8 @@ mod post_training_analysis {
             ranker_movie_ids.extend(top_movie_ids);
         }
 
-        let tag2 = "ranker";
-        let result2 = //tokio::task::spawn_blocking(move || {
+        let tag3 = format!("ranker_{}", top_k).as_str();
+        let result3 = //tokio::task::spawn_blocking(move || {
             metrics(
                 top_k,
                 ranker_metatadata.num_catalog_movies,
@@ -360,29 +375,35 @@ mod post_training_analysis {
                 &user_gt_counts,
                 &user_ids,
                 &ranker_movie_ids,
-                &harness.parquet_output_dir,
-                tag2
+                &parquet_output_dir,
+                tag3
             );
         //}).await.expect("Spawn blocking panicked")?;
 
-        println!("have results2");
+        println!("have results3");
 
-        let (res2, concl2) = result2.expect("metrics failed for tag2");
+        let (res3, concl3) = result3.expect("metrics failed for tag3");
 
+        //TODO:  analyze the funnel from num_candidates to top_k
+        //TODO:  analyze whether the ranker ranking improves upon the retrieval for same top_k
         let agg_res = serde_json::json!(
             {
-                format!("{}_at_{}", tag1, top_k): {
+               tag1: {
                     "metrics": res1,
                     "automated_conclusions": concl1
                 },
-                 format!("{}_at_{}", tag2, top_k): {
+                tag2: {
                     "metrics": res2,
                     "automated_conclusions": concl2
+                },
+                tag3: {
+                    "metrics": res3,
+                    "automated_conclusions": concl3
                 }
             }
         );
 
-        let output_file_path = Path::new(&harness.summary_output_dir).join(format!("stratified_metrics_top_{}.json", top_k));
+        let output_file_path = Path::new(&summary_output_dir).join("stratified_metrics.json");
         let file = File::create(output_file_path.clone())?;
         serde_json::to_writer_pretty(file, &agg_res)?;
 
