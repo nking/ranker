@@ -100,7 +100,7 @@ impl Orchestrator {
         let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri)?;
         let mut initial_ranker_dict = HashMap::new();
         initial_ranker_dict.insert(1, Arc::new(ranker_metadata.clone()));
-
+        let num_candidates = ranker_metadata.num_candidates;
 
         if query_metadata.embed_len != ranker_metadata.embed_len {
             return Err(format!(
@@ -110,9 +110,8 @@ impl Orchestrator {
         }
 
         // we want ANN to return 10x to 100x num_candidates so that scoring will reorder and produce num_candidates top results
-        let k = ranker_metadata.num_candidates;
-        
-        let initial_searcher = Searcher::new(movie_embeddings_uri, k, &persisted_index_path)?;
+
+        let initial_searcher = Searcher::new(movie_embeddings_uri, num_candidates, &persisted_index_path)?;
         let query_client = QueryModelClient::new(query_uri, ranker_metadata.embed_len).await;
         let ranker_client = RankerModelClient::new(ranker_uri, ranker_metadata.clone()).await;
 
