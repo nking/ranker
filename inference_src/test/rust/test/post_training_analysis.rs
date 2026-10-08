@@ -175,6 +175,7 @@ mod post_training_analysis {
     use std::path::Path;
     use polars::df;
     use polars::prelude::*;
+    use rayon::prelude::*; // Required for parallel slate comparisons in _diversity_metrics
     use tonic::Request;
     // Bring everything from the outer scope (TestHarness, helper functions, etc.) into the test module
     use super::*;
@@ -330,6 +331,7 @@ mod post_training_analysis {
         //polars is already spinning up threads to use all cores available, so run these
         //   sequentially rather than in parallel.
 
+        /*
         let _ = calc_and_write(
             &harness,
             &ranker_metadata,
@@ -381,22 +383,7 @@ mod post_training_analysis {
             _popularity_bias
         ).await;
 
-        let _ = calc_and_write(
-            &harness,
-            &ranker_metadata,
-            num_candidates,
-            top_k,
-            &user_gt_counts,
-            &user_ids,
-            &candidate_movie_ids, //num_candidates
-            &top_k_movie_ids, //top_k
-            &ranker_movie_ids,
-            &parquet_output_dir,
-            &summary_output_dir,
-            "interlist_diversity.json".as_ref(),
-            "interlist_diversity".as_ref(),
-            _interlist_diversity
-        ).await;
+         */
 
         let _ = calc_and_write(
             &harness,
@@ -410,9 +397,9 @@ mod post_training_analysis {
             &ranker_movie_ids,
             &parquet_output_dir,
             &summary_output_dir,
-            "intralist_diversity.json".as_ref(),
-            "intralist_diversity".as_ref(),
-            _intralist_diversity
+            "diversity_metrics.json".as_ref(),
+            "diversity_metrics".as_ref(),
+            _diversity_metrics
         ).await;
 
         /*
@@ -448,7 +435,7 @@ mod post_training_analysis {
         top_k: usize,
         user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
         user_ids: &[i32],            // shape: (n_users)
-        candidate_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        candidate_movie_ids: &[i32],    // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
         top_k_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
         ranker_movie_ids: &[i32],         // shape: (n_users * top_k)
         parquet_output_dir: &str,
@@ -825,28 +812,143 @@ mod post_training_analysis {
         summary_output_dir: &str,
         tag: &str,
     ) -> PolarsResult<(HashMap<String, f64>, Vec<String>)> {
-        /*
 
-         */
-        Ok((HashMap::new(), Vec::new()))
+        let mut agg_res: HashMap<String, f64> = HashMap::new();
+        let mut conclusions: Vec<String> = Vec::new();
+
+        // Calculate Global Item Popularity from Training History
+        let item_pop_lf = harness.train_history_df.clone()
+            .group_by([col("movie_id")])
+            .agg([len().alias("global_pop_count")]);
+
+        // Build Recommendation LazyFrame
+        let n_users = user_ids.len();
+        let repeated_users: Vec<i32> = user_ids.iter()
+            .flat_map(|&u| std::iter::repeat(u).take(k))
+            .collect();
+        let ranks: Vec<i32> = (0..n_users)
+            .flat_map(|_| 1..=k as i32)
+            .collect();
+        let rec_lf = df!(
+            "user_id" => repeated_users,
+            "movie_id" => neighbors,
+            "rank" => ranks,
+        )?.lazy();
+
+        // Calculate Average Popularity of Recommended Slates per User
+        let user_rec_pop_lf = rec_lf
+            .left_join(item_pop_lf.clone(), col("movie_id"), col("movie_id"))
+            .with_columns([col("global_pop_count").fill_null(lit(0u32))])
+            .group_by([col("user_id")])
+            .agg([col("global_pop_count").mean().alias("rec_mean_pop")]);
+
+        // Calculate Average Popularity of Organic User History
+        let user_hist_pop_lf = harness.train_history_df.clone()
+            .left_join(item_pop_lf, col("movie_id"), col("movie_id"))
+            .group_by([col("user_id")])
+            .agg([col("global_pop_count").mean().alias("hist_mean_pop")]);
+
+        //  Combine, Calculate Delta, and Stratify by User Tier
+        //  Columns: ["user_id", "rec_mean_pop", "hist_mean_pop", "user_tier", "pop_bias_delta"]
+        let mut user_bias_df = user_rec_pop_lf
+            .left_join(user_hist_pop_lf, col("user_id"), col("user_id"))
+            .left_join(harness.user_tiers_df.clone(), col("user_id"), col("user_id"))
+            .with_columns([
+                // Positive delta means model amplifies popularity; Negative means model explores niche
+                (col("rec_mean_pop") - col("hist_mean_pop")).alias("pop_bias_delta")
+            ])
+            .collect()?;
+
+        // Write User-Level Metrics to Parquet for Pairwise T-Tests
+        let parquet_path = Path::new(parquet_output_dir).join(format!("popularity_bias_k_{}_{}.parquet", k, tag));
+        let mut file = File::create(&parquet_path)?;
+        ParquetWriter::new(&mut file).finish(&mut user_bias_df)?;
+
+        // Aggregate Global Statistics
+        let extract_mean = |df: &DataFrame, c: &str| -> f64 {
+            df.column(c).ok()
+                .and_then(|col| col.cast(&DataType::Float64).ok())
+                .and_then(|col| col.f64().ok().map(|ca| ca.mean().unwrap_or(0.0)))
+                .unwrap_or(0.0)
+        };
+
+        let global_rec_pop = extract_mean(&user_bias_df, "rec_mean_pop");
+        let global_hist_pop = extract_mean(&user_bias_df, "hist_mean_pop");
+        let global_delta = extract_mean(&user_bias_df, "pop_bias_delta");
+
+        agg_res.insert(format!("pop_bias_rec_mean_k_{}_{}", k, tag), global_rec_pop);
+        agg_res.insert(format!("pop_bias_hist_mean_{}", tag), global_hist_pop);
+        agg_res.insert(format!("pop_bias_delta_mean_k_{}_{}", k, tag), global_delta);
+
+        // Aggregate Stratified Statistics by User Tier
+        for t in 0..=2 {
+            let mask = user_bias_df.column("user_tier")?.as_materialized_series().i32()?.equal(t as i32);
+            let tier_df = user_bias_df.filter(&mask)?;
+
+            let t_rec = extract_mean(&tier_df, "rec_mean_pop");
+            let t_hist = extract_mean(&tier_df, "hist_mean_pop");
+            let t_delta = extract_mean(&tier_df, "pop_bias_delta");
+
+            agg_res.insert(format!("pop_bias_rec_mean_k_{}_user_tier_{}_{}", k, t, tag), t_rec);
+            agg_res.insert(format!("pop_bias_hist_mean_user_tier_{}_{}", t, tag), t_hist);
+            agg_res.insert(format!("pop_bias_delta_mean_k_{}_user_tier_{}_{}", k, t, tag), t_delta);
+        }
+
+        // 9. Automated Conclusions
+        let delta_pct = (global_delta / global_hist_pop) * 100.0;
+
+        if delta_pct > 25.0 {
+            conclusions.push(format!("SEVERE POPULARITY AMPLIFICATION ({}): The model recommends items that are {:.1}% more popular than users naturally consume. It is acting as a popularity echo chamber.", tag, delta_pct));
+        } else if delta_pct > 5.0 {
+            conclusions.push(format!("MODERATE POPULARITY BIAS ({}): The model leans toward popular items, inflating slate popularity by {:.1}% over historical behavior.", tag, delta_pct));
+        } else if delta_pct < -10.0 {
+            conclusions.push(format!("NICHE EXPLORATION ({}): The model actively suppresses popularity, surfacing items {:.1}% less popular than organic consumption.", tag, delta_pct.abs()));
+        } else {
+            conclusions.push(format!("POPULARITY CALIBRATED ({}): The model perfectly mirrors organic user popularity preferences (Delta: {:.1}%).", tag, delta_pct));
+        }
+
+        let t2_delta = *agg_res.get(&format!("pop_bias_delta_mean_k_{}_user_tier_2_{}", k, tag)).unwrap_or(&0.0);
+        let t0_delta = *agg_res.get(&format!("pop_bias_delta_mean_k_{}_user_tier_0_{}", k, tag)).unwrap_or(&0.0);
+
+        if t2_delta > t0_delta + (global_hist_pop * 0.1) {
+            conclusions.push(format!("POWER USER PENALTY ({}): Power users experience significantly worse popularity bias than light users. The model ignores their rich histories and defaults to blockbusters.", tag));
+        } else if t2_delta < t0_delta {
+            conclusions.push(format!("SUCCESSFUL PERSONALIZATION ({}): The model leverages the rich histories of Power users to surface less mainstream, personalized items compared to Light users.", tag));
+        }
+
+        Ok((agg_res, conclusions))
+
     }
 
-    pub fn _intralist_diversity(
+    /// calculate intra-list diversity and inter-list diversion.
+    /// Intra-list diversity (personalization):
+    ///      calculates the similarity between User A and User B's
+    ///      slates by movie_id.
+    /// Inter-list diversity (novelty/ breadth)"
+    ///     calculates simularity between Movie X to Movie Y within User A's slate.
+    ///     This method requires a representation of the movies such as features or the embeddings.
+    ///
+    /// # Arguments
+    ///
+    /// * `k`:
+    /// * `catalog_size`:
+    /// * `harness`:
+    /// * `user_gt_counts`:
+    /// * `user_ids`:
+    /// * `neighbors`:
+    /// * `parquet_output_dir`:
+    /// * `summary_output_dir`:
+    /// * `tag`:
+    ///
+    /// returns: Result<(HashMap<String, f64, RandomState, Global>, Vec<String, Global>), PolarsError>
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
+    pub fn _diversity_metrics(
         k: usize,                    // either num_candidates or top_k
-        catalog_size: usize,
-        harness: &TestHarness,
-        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
-        user_ids: &[i32],            // shape: (n_users)
-        neighbors: &[i32],           // shape: (n_users * k)   these are the retrieved or ranked movie_ids
-        parquet_output_dir: &str,
-        summary_output_dir: &str,
-        tag: &str,
-    ) -> PolarsResult<(HashMap<String, f64>, Vec<String>)> {
-        Ok((HashMap::new(), Vec::new()))
-    }
-
-    pub fn _interlist_diversity(
-        k: usize,                     // either num_candidates or top_k
         catalog_size: usize,
         harness: &TestHarness,
         user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
