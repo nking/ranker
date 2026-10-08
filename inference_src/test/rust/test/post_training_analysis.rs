@@ -181,6 +181,7 @@ mod post_training_analysis {
 
     use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
     use inference_engine::pb::{ApproxNearestNeighborsResponse, UsersRequest};
+    use inference_engine::ranker_model_metadata::RankerModelMetadata;
     use inference_engine::util::{get_top_k_desc_scores};
     use crate::helper::get_unique_user_and_first_timestamp;
 
@@ -225,10 +226,10 @@ mod post_training_analysis {
 
         // calculate top_k=20 for retrieval then ranker
 
-        let ranker_metatadata =
+        let ranker_metadata =
             harness.orchestrator.get_or_fetch_ranker_metadata(ranker_model_version.clone())?;
         let top_k = harness.orchestrator.top_k;
-        let embed_len = ranker_metatadata.embed_len;
+        let embed_len = ranker_metadata.embed_len;
 
         // calc retrieval metrics @20 and ranker metrics @20
         // calculate kendall tau and spearman rank correlation between the ranked results too
@@ -270,63 +271,22 @@ mod post_training_analysis {
         let ann_res: ApproxNearestNeighborsResponse = harness.orchestrator
             ._approx_nearest_neighbors(ann_reqs).await?.into_inner();
         // length: n_users * num_candidates
-        let ann_movie_ids: Vec<i32> = ann_res.candidate_ids;
-        assert_eq!(ann_movie_ids.len(), n_users * num_candidates);
-        let mut retrieval_movie_ids : Vec<i32> = Vec::with_capacity(n_users * top_k);
+        let candidate_movie_ids: Vec<i32> = ann_res.candidate_ids;
+        assert_eq!(candidate_movie_ids.len(), n_users * num_candidates);
+        let mut top_k_movie_ids: Vec<i32> = Vec::with_capacity(n_users * top_k);
 
         for i in (0..n_users).step_by(1){
             let i0 = i * num_candidates;
             let i1 = i0 + top_k;
-            let top = ann_movie_ids[i0..i1].to_vec();
-            retrieval_movie_ids.extend(top)
+            let top = candidate_movie_ids[i0..i1].to_vec();
+            top_k_movie_ids.extend(top)
         }
-        assert_eq!(retrieval_movie_ids.len(), n_users * top_k);
+        assert_eq!(top_k_movie_ids.len(), n_users * top_k);
 
-        let tag1 = format!("retrieval_ann_{}", num_candidates).as_str();
-        let result1 = //tokio::task::spawn_blocking(move || {
-            metrics(
-                num_candidates,
-                ranker_metatadata.num_catalog_movies,
-                &harness.pos_test_df,
-                &harness.movie_tiers_df,
-                &harness.user_tiers_df,
-                &user_gt_counts,
-                &user_ids,
-                &ann_movie_ids,
-                &parquet_output_dir,
-                tag1
-            );
-        //}).await.expect("Spawn blocking panicked")?;
-
-        let (res1, concl1) = result1.expect("metrics failed for tag1");
-        println!("have results1");
-
-        let tag2 = format!("retrieval_ann_{}", top_k).as_str();
-        let result2 = //tokio::task::spawn_blocking(move || {
-            metrics(
-                top_k,
-                ranker_metatadata.num_catalog_movies,
-                &harness.pos_test_df,
-                &harness.movie_tiers_df,
-                &harness.user_tiers_df,
-                &user_gt_counts,
-                &user_ids,
-                &retrieval_movie_ids,
-                &parquet_output_dir,
-                tag2
-            );
-        //}).await.expect("Spawn blocking panicked")?;
-
-        let (res2, concl2) = result2.expect("metrics failed for tag2");
-
-        println!("have results2");
-
-
-        // =========== RANKER ===============================
 
         let n_users = user_ids.len();
 
-        let mut ranker_movie_ids: Vec<i32> = Vec::with_capacity(ann_movie_ids.len());
+        let mut ranker_movie_ids: Vec<i32> = Vec::with_capacity(candidate_movie_ids.len());
 
         // put through ranker
         // a request should be batch_size
@@ -334,13 +294,13 @@ mod post_training_analysis {
 
             let i1 = std::cmp::min(i0 + ranker_batch_size, n_users);
 
-            println!("about to rank movie_ids for users: {}-{}", i0, i1);
+            //println!("about to rank movie_ids for users: {}-{}", i0, i1);
 
             let mut ranked_movies = match harness.orchestrator._make_ranker_request(
                 &user_ids[i0..i1],
                 &timestamps[i0..i1],
                 &ann_res.user_embeddings[i0*embed_len..i1*embed_len],
-                &ann_movie_ids[i0*num_candidates..i1*num_candidates],
+                &candidate_movie_ids[i0*num_candidates..i1*num_candidates],
                 ranker_model_version.clone()
             ).await {
                 Ok(response) => response,
@@ -364,11 +324,127 @@ mod post_training_analysis {
             ranker_movie_ids.extend(top_movie_ids);
         }
 
-        let tag3 = format!("ranker_{}", top_k).as_str();
-        let result3 = //tokio::task::spawn_blocking(move || {
-            metrics(
+        // ======= at this point we have all the retrievals and ranked movie ids for all test users ======
+
+        //polars is already spinning up threads to use all cores available, so run these
+        //   sequentially rather than in parallel.
+
+        let _ = calc_and_write_metrics(
+            &harness,
+            &ranker_metadata,
+            num_candidates,
+            top_k,
+            ranker_metadata.num_catalog_movies,
+            &harness.pos_test_df,
+            &harness.movie_tiers_df,
+            &harness.user_tiers_df,
+            &user_gt_counts,
+            &user_ids,
+            &candidate_movie_ids, //num_candidates
+            &top_k_movie_ids, //top_k
+            &ranker_movie_ids,
+            &parquet_output_dir,
+            &summary_output_dir
+        ).await;
+
+        let _ = calc_and_write_coverage_and_gini(
+            &harness,
+            &ranker_metadata,
+            num_candidates,
+            top_k,
+            ranker_metadata.num_catalog_movies,
+            &harness.pos_test_df,
+            &harness.movie_tiers_df,
+            &harness.user_tiers_df,
+            &user_gt_counts,
+            &user_ids,
+            &candidate_movie_ids, //num_candidates
+            &top_k_movie_ids, //top_k
+            &ranker_movie_ids,
+            &parquet_output_dir,
+            &summary_output_dir
+        ).await;
+
+
+
+
+        //TODO: intra-, inter- list diversities, coverage, popularity bias, gini coefficients
+
+        //TODO:  analyze the funnel from num_candidates to top_k
+        //TODO:  analyze whether the ranker ranking improves upon the retrieval for same top_k
+
+        Ok(())
+    }
+
+    async fn calc_and_write_coverage_and_gini(
+        harness: &TestHarness,
+        ranker_metadata: &Arc<RankerModelMetadata>,
+        num_candidates: usize,
+        top_k: usize,
+        catalog_size: usize,
+        pos_test_df: &LazyFrame,     // [user_id, movie_id, rating, timestamp]
+        movie_tiers_df: &LazyFrame,  // [movie_id, movie_tier]
+        user_tiers_df: &LazyFrame,   // [user_id, user_tier]
+        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
+        user_ids: &[i32],            // shape: (n_users)
+        candidate_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        top_k_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        ranker_movie_ids: &[i32],         // shape: (n_users * top_k)
+        parquet_output_dir: &str,
+        summary_output_dir: &str,
+        )-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
+        // =====================  Gini and coverage ======================
+        let tag1 = format!("retrieval_ann_{}", num_candidates);
+        let result1 = //tokio::task::spawn_blocking(move || {
+            _coverage_and_gini(
+                num_candidates,
+                ranker_metadata.num_catalog_movies,
+                &harness.pos_test_df,
+                &harness.movie_tiers_df,
+                &harness.user_tiers_df,
+                &user_gt_counts,
+                &user_ids,
+                &candidate_movie_ids,
+                &parquet_output_dir,
+                &summary_output_dir,
+                &tag1
+            );
+        //}).await.expect("Spawn blocking panicked")?;
+
+        let (res1, concl1) = result1.expect("coverage failed for tag1");
+        println!("have results1");
+
+        let tag2 = format!("retrieval_ann_{}", top_k);
+        let result2 = //tokio::task::spawn_blocking(move || {
+            _coverage_and_gini(
                 top_k,
-                ranker_metatadata.num_catalog_movies,
+                ranker_metadata.num_catalog_movies,
+                &harness.pos_test_df,
+                &harness.movie_tiers_df,
+                &harness.user_tiers_df,
+                &user_gt_counts,
+                &user_ids,
+                &top_k_movie_ids,
+                &parquet_output_dir,
+                &summary_output_dir,
+                &tag2
+            );
+        //}).await.expect("Spawn blocking panicked")?;
+
+        let (res2, concl2) = result2.expect("coverage failed for tag2");
+
+        println!("have results2");
+
+
+        // =========== RANKER ===============================
+
+
+        let tag3 = format!("ranker_{}", top_k);
+        let result3 = //tokio::task::spawn_blocking(move || {
+            _coverage_and_gini(
+                top_k,
+                ranker_metadata.num_catalog_movies,
                 &harness.pos_test_df,
                 &harness.movie_tiers_df,
                 &harness.user_tiers_df,
@@ -376,7 +452,117 @@ mod post_training_analysis {
                 &user_ids,
                 &ranker_movie_ids,
                 &parquet_output_dir,
-                tag3
+                &summary_output_dir,
+                &tag3
+            );
+        //}).await.expect("Spawn blocking panicked")?;
+
+        println!("have results3");
+
+        let (res3, concl3) = result3.expect("coverage failed for tag3");
+
+        let agg_res = serde_json::json!(
+            {
+               tag1: {
+                    "metrics": res1,
+                    "automated_conclusions": concl1
+                },
+                tag2: {
+                    "metrics": res2,
+                    "automated_conclusions": concl2
+                },
+                tag3: {
+                    "metrics": res3,
+                    "automated_conclusions": concl3
+                }
+            }
+        );
+
+        let output_file_path = Path::new(&summary_output_dir).join("coverage.json");
+        let file = File::create(output_file_path.clone())?;
+        serde_json::to_writer_pretty(file, &agg_res)?;
+
+        println!("{}", format!("wrote to {:?}", output_file_path));
+
+        Ok(())
+    }
+
+    async fn calc_and_write_metrics(
+        harness: &TestHarness,
+        ranker_metadata: &Arc<RankerModelMetadata>,
+        num_candidates: usize,
+        top_k: usize,
+        catalog_size: usize,
+        pos_test_df: &LazyFrame,     // [user_id, movie_id, rating, timestamp]
+        movie_tiers_df: &LazyFrame,  // [movie_id, movie_tier]
+        user_tiers_df: &LazyFrame,   // [user_id, user_tier]
+        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
+        user_ids: &[i32],            // shape: (n_users)
+        candidate_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        top_k_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        ranker_movie_ids: &[i32],         // shape: (n_users * top_k)
+        parquet_output_dir: &str,
+        summary_output_dir: &str,
+       ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
+        let tag1 = format!("retrieval_ann_{}", num_candidates);
+        let result1 = //tokio::task::spawn_blocking(move || {
+            _metrics(
+                num_candidates,
+                ranker_metadata.num_catalog_movies,
+                &harness.pos_test_df,
+                &harness.movie_tiers_df,
+                &harness.user_tiers_df,
+                &user_gt_counts,
+                &user_ids,
+                &candidate_movie_ids,
+                &parquet_output_dir,
+                &tag1
+            );
+        //}).await.expect("Spawn blocking panicked")?;
+
+        let (res1, concl1) = result1.expect("metrics failed for tag1");
+        println!("have results1");
+
+        let tag2 = format!("retrieval_ann_{}", top_k);
+        let result2 = //tokio::task::spawn_blocking(move || {
+            _metrics(
+                top_k,
+                ranker_metadata.num_catalog_movies,
+                &harness.pos_test_df,
+                &harness.movie_tiers_df,
+                &harness.user_tiers_df,
+                &user_gt_counts,
+                &user_ids,
+                &top_k_movie_ids,
+                &parquet_output_dir,
+                &tag2
+            );
+        //}).await.expect("Spawn blocking panicked")?;
+
+        let (res2, concl2) = result2.expect("metrics failed for tag2");
+
+        println!("have results2");
+
+
+        // =========== RANKER ===============================
+
+        let n_users = user_ids.len();
+
+
+        let tag3 = format!("ranker_{}", top_k);
+        let result3 = //tokio::task::spawn_blocking(move || {
+            _metrics(
+                top_k,
+                ranker_metadata.num_catalog_movies,
+                &harness.pos_test_df,
+                &harness.movie_tiers_df,
+                &harness.user_tiers_df,
+                &user_gt_counts,
+                &user_ids,
+                &ranker_movie_ids,
+                &parquet_output_dir,
+                &tag3
             );
         //}).await.expect("Spawn blocking panicked")?;
 
@@ -384,8 +570,7 @@ mod post_training_analysis {
 
         let (res3, concl3) = result3.expect("metrics failed for tag3");
 
-        //TODO:  analyze the funnel from num_candidates to top_k
-        //TODO:  analyze whether the ranker ranking improves upon the retrieval for same top_k
+
         let agg_res = serde_json::json!(
             {
                tag1: {
@@ -412,8 +597,274 @@ mod post_training_analysis {
         Ok(())
     }
 
+    /// calculate retrieval or ranking catalog coverage,
+    /// gini, and lorenz curve where
+    /// lorenz curve shows the discrete frequency distribution of items appearing in the
+    /// generated recommendation user slates across all users.
+    /// The lorenz curve X axis is the cumulative percentage of items sorted from least
+    /// recommended to most recommended.
+    /// The lorenz curve Y axis is the total number of recommendations (or impressions) that that item
+    /// received.
+    /// if every item in the catalog receives the exact same number of recommendations, then
+    /// the lorenz curve is a 45 degree line due to it being a cumulated sum.
+    /// That 45 degree line is the line of Perfect Equality (the bottom 50% receive 50% of recommendations).
+    /// The gini coefficient is a measure of concentration (essentially the opposite of the
+    /// information entropy which measures dispersion).
+    /// The gini coefficient is in range [0,1] inclusive where 0 is perfect equality where all
+    /// items are recommended the same number of times and a gini of 1 means that 1 item represents
+    /// 100% of the recommendations.
+    /// The gini coefficient is derived as (the abs value of area between the lorenz 45 degree perfect equality
+    /// curve and the real observed lorenz curve) divided by (the area under the perfect equality curve)..
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// * `top_k`:
+    /// * `catalog_size`:
+    /// * `pos_test_df`:
+    /// * `movie_tiers_df`:
+    /// * `user_tiers_df`:
+    /// * `user_gt_counts`:
+    /// * `user_ids`:
+    /// * `neighbors`:
+    /// * `parquet_output_dir`:
+    /// * `tag`:
+    ///
+    /// returns: Result<(HashMap<String, f64, RandomState, Global>, Vec<String, Global>), PolarsError>
+    pub fn _coverage_and_gini(
+        top_k: usize,
+        catalog_size: usize,
+        pos_test_df: &LazyFrame,     // [user_id, movie_id, rating, timestamp]
+        movie_tiers_df: &LazyFrame,  // [movie_id, movie_tier]
+        user_tiers_df: &LazyFrame,   // [user_id, user_tier]
+        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
+        user_ids: &[i32],            // shape: (n_users)
+        neighbors: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        parquet_output_dir: &str,
+        summary_output_dir: &str,
+        tag: &str,
+    ) -> PolarsResult<(HashMap<String, f64>, Vec<String>)> {
+        let n_users = user_ids.len();
+        let mut agg_res: HashMap<String, f64> = HashMap::new();
+        let mut conclusions: Vec<String> = Vec::new();
+
+        //  Explode neighbors into a flat dataframe
+        let repeated_users: Vec<i32> = user_ids.iter()
+            .flat_map(|&u| std::iter::repeat(u).take(top_k))
+            .collect();
+        let ranks: Vec<i32> = (0..n_users)
+            .flat_map(|_| 1..=top_k as i32)
+            .collect();
+
+        let retrieval_df = df!(
+            "user_id" => repeated_users,
+            "movie_id" => neighbors,
+            "rank" => ranks,
+        )?.lazy();
+
+        let mut joined_df = retrieval_df
+            .left_join(movie_tiers_df.clone(), col("movie_id"), col("movie_id"))
+            .left_join(user_tiers_df.clone(), col("user_id"), col("user_id"))
+            .collect()?;
+
+        // Evaluate catalog counts per tier once
+        let mt_collected = movie_tiers_df.clone().collect()?;
+        let mt_series = mt_collected.column("movie_tier")?.i32()?;
+        let mut cat_counts = vec![0.0; 3];
+        for t in 0..=2 {
+            cat_counts[t as usize] = mt_series.equal(t).sum().unwrap_or(0) as f64;
+        }
+
+        // --- COVERAGE CALCS ---
+        let total_unique = joined_df.column("movie_id")?.n_unique()? as f64;
+        agg_res.insert(format!("coverage_at_{}_full_{}", top_k, tag), total_unique / (catalog_size as f64));
+
+        for m_tier in 0..=2 {
+            let filtered = joined_df.filter(&joined_df.column("movie_tier")?.i32()?.equal(m_tier))?;
+            let count = filtered.column("movie_id")?.n_unique()? as f64;
+            let cat_count = cat_counts[m_tier as usize];
+            let cov = if cat_count > 0.0 { count / cat_count } else { 0.0 };
+            agg_res.insert(format!("coverage_at_{}_movie_tier_{}_{}", top_k, m_tier, tag), cov);
+        }
+
+        for u_tier in 0..=2 {
+            let u_filtered = joined_df.filter(&joined_df.column("user_tier")?.i32()?.equal(u_tier))?;
+            let count = u_filtered.column("movie_id")?.n_unique()? as f64;
+            agg_res.insert(format!("coverage_at_{}_user_tier_{}_{}", top_k, u_tier, tag), count / (catalog_size as f64));
+
+            for m_tier in 0..=2 {
+                let um_filtered = u_filtered.filter(&u_filtered.column("movie_tier")?.i32()?.equal(m_tier))?;
+                let um_count = um_filtered.column("movie_id")?.n_unique()? as f64;
+                let cat_count = cat_counts[m_tier as usize];
+                let cov = if cat_count > 0.0 { um_count / cat_count } else { 0.0 };
+                agg_res.insert(format!("coverage_at_{}_user_tier_{}_movie_tier_{}_{}", top_k, u_tier, m_tier, tag), cov);
+            }
+        }
+
+        // Export user retrievals
+        let retrieval_path = Path::new(parquet_output_dir).join(format!("user_coverage_top_{}_{}.parquet", top_k, tag));
+        let mut file = File::create(&retrieval_path)?;
+        ParquetWriter::new(&mut file).finish(&mut joined_df)?;
+
+        // --- GINI COEFFICIENT & LORENZ CURVE CALCS ---
+
+        // Create base item frequency frame against the FULL catalog
+        let mut freq_df = movie_tiers_df.clone()
+            .select([col("movie_id"), col("movie_tier")])
+            .left_join(
+                joined_df.clone().lazy().group_by([col("movie_id")]).agg([len().alias("retrieval_count")]),
+                col("movie_id"),
+                col("movie_id")
+            )
+            .with_columns([col("retrieval_count").fill_null(lit(0u32))])
+            .sort(["retrieval_count"], SortMultipleOptions::default().with_order_descending(false))
+            .collect()?;
+
+        let freq_path = Path::new(parquet_output_dir).join(format!("item_frequencies_top_{}_{}.parquet", top_k, tag));
+        let mut file = File::create(&freq_path)?;
+        ParquetWriter::new(&mut file).finish(&mut freq_df)?;
+
+        // Native Rust Closure for fast Gini Math & Lorenz extraction
+        let calc_gini_and_lorenz = |df: &DataFrame, count_col: &str, extract_lorenz: bool| -> PolarsResult<(f64, f64, f64, Vec<f64>)> {
+            let n = df.height() as f64;
+            if n == 0.0 { return Ok((0.0, 0.0, 0.0, vec![])); }
+
+            // Ensure sorted ascending
+            let sorted = df.sort([count_col], SortMultipleOptions::default().with_order_descending(false))?;
+
+            let counts = sorted.column(count_col)?.cast(&DataType::Float64)?;
+            let counts_ca = counts.f64()?; // Downcast to ChunkedArray first
+
+            // ChunkedArray::sum() returns an Option<f64>, making unwrap_or valid
+            let total_recs = counts_ca.sum().unwrap_or(0.0);
+
+            if total_recs == 0.0 { return Ok((0.0, 0.0, 0.0, vec![])); }
+
+            let mut sum_rank_count = 0.0;
+            let mut current_cum_sum = 0.0;
+            let mut bottom_80 = 0.0;
+            let mut top_10 = 0.0;
+            let mut lorenz_curve = vec![0.0; 100];
+
+            for (i, val_opt) in counts_ca.iter().enumerate() {
+                let val = val_opt.unwrap_or(0.0);
+                let rank = (i + 1) as f64;
+
+                sum_rank_count += rank * val;
+
+                if extract_lorenz {
+                    current_cum_sum += val;
+                    let cum_recs_pct = current_cum_sum / total_recs;
+                    let cum_items_pct = rank / n;
+
+                    if cum_items_pct <= 0.80 { bottom_80 = cum_recs_pct; }
+                    if cum_items_pct <= 0.90 { top_10 = 1.0 - cum_recs_pct; } // captures remaining 10%
+
+                    let percentile = (cum_items_pct * 100.0).ceil() as usize;
+                    if percentile > 0 && percentile <= 100 {
+                        lorenz_curve[percentile - 1] = cum_recs_pct;
+                    }
+                }
+            }
+
+            let gini = (2.0 * sum_rank_count) / (n * total_recs) - ((n + 1.0) / n);
+
+            if extract_lorenz {
+                // Fill forward missing percentile buckets
+                let mut last_val = 0.0;
+                for val in lorenz_curve.iter_mut() {
+                    if *val == 0.0 { *val = last_val; } else { last_val = *val; }
+                }
+            }
+
+            Ok((gini, bottom_80, top_10, lorenz_curve))
+        };
+
+        // Calculate Full Catalog Gini & Lorenz
+        let (full_gini, bottom_80_share, top_10_share, lorenz_curve)
+            = calc_gini_and_lorenz(&freq_df, "retrieval_count", true)?;
+
+        agg_res.insert(format!("gini_at_{}_full_{}", top_k, tag), full_gini);
+        agg_res.insert(format!("lorenz_at_{}_bottom_80_share_{}", top_k, tag), bottom_80_share);
+        agg_res.insert(format!("lorenz_at_{}_top_10_share_{}", top_k, tag), top_10_share);
+
+        // Write Lorenz curve to JSON for downstream Python plotting
+        if !lorenz_curve.is_empty() {
+            let lorenz_path = Path::new(summary_output_dir).join(format!("lorenz_curve_top_{}_{}.json", top_k, tag));
+            let lorenz_file = File::create(lorenz_path)?;
+            serde_json::to_writer_pretty(lorenz_file, &lorenz_curve).expect("Failed to write Lorenz JSON");
+        }
+
+        // Gini by Movie Tier
+        for m_tier in 0..=2 {
+            let m_tier_freq = freq_df.filter(&freq_df.column("movie_tier")?.i32()?.equal(m_tier))?;
+            let (tier_gini, _, _, _) = calc_gini_and_lorenz(&m_tier_freq, "retrieval_count", false)?;
+            agg_res.insert(format!("gini_at_{}_movie_tier_{}_{}", top_k, m_tier, tag), tier_gini);
+        }
+
+        // Gini by User Tier
+        for u_tier in 0..=2 {
+            let tier_retrievals = joined_df.filter(&joined_df.column("user_tier")?.i32()?.equal(u_tier))?;
+
+            let u_tier_freq = movie_tiers_df.clone().select([col("movie_id")])
+                .left_join(
+                    tier_retrievals.lazy().group_by([col("movie_id")]).agg([len().alias("u_retrieval_count")]),
+                    col("movie_id"),
+                    col("movie_id")
+                )
+                .with_columns([col("u_retrieval_count").fill_null(lit(0u32))])
+                .collect()?;
+
+            let (u_tier_gini, _, _, _) = calc_gini_and_lorenz(&u_tier_freq, "u_retrieval_count", false)?;
+            agg_res.insert(format!("gini_at_{}_user_tier_{}_{}", top_k, u_tier, tag), u_tier_gini);
+        }
+
+        // --- AUTOMATED INSIGHTS & CONCLUSIONS ---
+
+        let total_recs_series = freq_df.column("retrieval_count")?.cast(&DataType::Float64)?;
+        let total_recs = total_recs_series.f64()?.sum().unwrap_or(0.0);
+
+        if total_recs > 0.0 {
+            if full_gini > 0.90 {
+                conclusions.push(format!("SEVERE POPULARITY BIAS at_{} ({}): Gini is {:.2}. The model is acting as a popularity echo chamber, collapsing onto blockbuster items.", top_k, tag, full_gini));
+            } else if full_gini < 0.45 {
+                conclusions.push(format!("SUSPICIOUSLY UNIFORM at_{} ({}): Gini is {:.2}. The model may be overly random or popularity suppression is too aggressive.", top_k, tag, full_gini));
+            } else {
+                conclusions.push(format!("HEALTHY BIAS at_{} ({}): Gini is {:.2}. The model successfully balances mainstream relevance with catalog exploration.", top_k, tag, full_gini));
+            }
+
+            if bottom_80_share < 0.05 {
+                conclusions.push(format!("DEAD TAIL at_{} ({}): The bottom 80% of the catalog receives only {:.1}% of recommendations. Niche items are effectively invisible.", top_k, tag, bottom_80_share * 100.0));
+            } else if bottom_80_share > 0.15 {
+                conclusions.push(format!("STRONG TAIL at_{} ({}): The bottom 80% captures {:.1}% of traffic, indicating excellent long-tail surfacing capability.", top_k, tag, bottom_80_share * 100.0));
+            } else {
+                conclusions.push(format!("MODERATE TAIL at_{} ({}): The bottom 80% captures {:.1}% of traffic.", top_k, tag, bottom_80_share * 100.0));
+            }
+
+            if top_10_share > 0.75 {
+                conclusions.push(format!("HEAD HEAVY at_{} ({}): The top 10% of items consume {:.1}% of all recommendation slots.", top_k, tag, top_10_share * 100.0));
+            } else {
+                conclusions.push(format!("DIVERSE HEAD at_{} ({}): The top 10% consume {:.1}% of slots, leaving plenty of room for the torso/tail.", top_k, tag, top_10_share * 100.0));
+            }
+
+            let gini_power = *agg_res.get(&format!("gini_at_{}_user_tier_2_{}", top_k, tag)).unwrap_or(&1.0);
+            let gini_light = *agg_res.get(&format!("gini_at_{}_user_tier_0_{}", top_k, tag)).unwrap_or(&1.0);
+
+            if gini_power < gini_light - 0.02 {
+                conclusions.push(format!("USER PERSONALIZATION at_{} ({}): Power users exhibit lower Gini (more diverse slates) than light users, successfully leveraging rich interaction histories.", top_k, tag));
+            } else if gini_power > gini_light + 0.02 {
+                conclusions.push(format!("WARNING (COHORT COLLAPSE) at_{} ({}): Power users have higher concentration (Gini) than light users. The model may be pulling rich histories into dense popularity traps.", top_k, tag));
+            } else {
+                conclusions.push(format!("UNIFORM COHORTS at_{} ({}): Light and Power users experience roughly the same level of catalog concentration.", top_k, tag));
+            }
+        }
+
+        Ok((agg_res, conclusions))
+    }
+
+
     /// Evaluates Retrieval or Ranker output and returns a tuple of (Metrics Dictionary, Conclusions List)
-    pub fn metrics(
+    pub fn _metrics(
         top_k: usize,
         catalog_size: usize,
         pos_test_df: &LazyFrame,     // [user_id, movie_id, rating, timestamp]
