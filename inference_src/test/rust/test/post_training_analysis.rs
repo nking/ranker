@@ -324,6 +324,7 @@ mod post_training_analysis {
             ranker_movie_ids.extend(top_movie_ids);
         }
 
+        // =======================================================================================
         // ======= at this point we have all the retrievals and ranked movie ids for all test users ======
 
         //polars is already spinning up threads to use all cores available, so run these
@@ -334,10 +335,6 @@ mod post_training_analysis {
             &ranker_metadata,
             num_candidates,
             top_k,
-            ranker_metadata.num_catalog_movies,
-            &harness.pos_test_df,
-            &harness.movie_tiers_df,
-            &harness.user_tiers_df,
             &user_gt_counts,
             &user_ids,
             &candidate_movie_ids, //num_candidates
@@ -352,10 +349,6 @@ mod post_training_analysis {
             &ranker_metadata,
             num_candidates,
             top_k,
-            ranker_metadata.num_catalog_movies,
-            &harness.pos_test_df,
-            &harness.movie_tiers_df,
-            &harness.user_tiers_df,
             &user_gt_counts,
             &user_ids,
             &candidate_movie_ids, //num_candidates
@@ -366,9 +359,48 @@ mod post_training_analysis {
         ).await;
 
 
+        let _ = calc_and_write_popularity_bias(
+            &harness,
+            &ranker_metadata,
+            num_candidates,
+            top_k,
+            &user_gt_counts,
+            &user_ids,
+            &candidate_movie_ids, //num_candidates
+            &top_k_movie_ids, //top_k
+            &ranker_movie_ids,
+            &parquet_output_dir,
+            &summary_output_dir
+        ).await;
 
+        let _ = calc_and_write_inter_list_diversity(
+            &harness,
+            &ranker_metadata,
+            num_candidates,
+            top_k,
+            &user_gt_counts,
+            &user_ids,
+            &candidate_movie_ids, //num_candidates
+            &top_k_movie_ids, //top_k
+            &ranker_movie_ids,
+            &parquet_output_dir,
+            &summary_output_dir
+        ).await;
 
-        //TODO: intra-, inter- list diversities, coverage, popularity bias, gini coefficients
+        let _ = calc_and_write_intra_list_diversity(
+            &harness,
+            &ranker_metadata,
+            num_candidates,
+            top_k,
+            &user_gt_counts,
+            &user_ids,
+            &candidate_movie_ids, //num_candidates
+            &top_k_movie_ids, //top_k
+            &ranker_movie_ids,
+            &parquet_output_dir,
+            &summary_output_dir
+        ).await;
+
 
         //TODO:  analyze the funnel from num_candidates to top_k
         //TODO:  analyze whether the ranker ranking improves upon the retrieval for same top_k
@@ -381,17 +413,13 @@ mod post_training_analysis {
         ranker_metadata: &Arc<RankerModelMetadata>,
         num_candidates: usize,
         top_k: usize,
-        catalog_size: usize,
-        pos_test_df: &LazyFrame,     // [user_id, movie_id, rating, timestamp]
-        movie_tiers_df: &LazyFrame,  // [movie_id, movie_tier]
-        user_tiers_df: &LazyFrame,   // [user_id, user_tier]
         user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
         user_ids: &[i32],            // shape: (n_users)
         candidate_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
         top_k_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
         ranker_movie_ids: &[i32],         // shape: (n_users * top_k)
         parquet_output_dir: &str,
-        summary_output_dir: &str,
+        summary_output_dir: &str
         )-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         // =====================  Gini and coverage ======================
@@ -400,7 +428,6 @@ mod post_training_analysis {
             _coverage_and_gini(
                 num_candidates,
                 ranker_metadata.num_catalog_movies,
-                &harness.pos_test_df,
                 &harness.movie_tiers_df,
                 &harness.user_tiers_df,
                 &user_gt_counts,
@@ -420,7 +447,6 @@ mod post_training_analysis {
             _coverage_and_gini(
                 top_k,
                 ranker_metadata.num_catalog_movies,
-                &harness.pos_test_df,
                 &harness.movie_tiers_df,
                 &harness.user_tiers_df,
                 &user_gt_counts,
@@ -445,7 +471,6 @@ mod post_training_analysis {
             _coverage_and_gini(
                 top_k,
                 ranker_metadata.num_catalog_movies,
-                &harness.pos_test_df,
                 &harness.movie_tiers_df,
                 &harness.user_tiers_df,
                 &user_gt_counts,
@@ -492,10 +517,6 @@ mod post_training_analysis {
         ranker_metadata: &Arc<RankerModelMetadata>,
         num_candidates: usize,
         top_k: usize,
-        catalog_size: usize,
-        pos_test_df: &LazyFrame,     // [user_id, movie_id, rating, timestamp]
-        movie_tiers_df: &LazyFrame,  // [movie_id, movie_tier]
-        user_tiers_df: &LazyFrame,   // [user_id, user_tier]
         user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
         user_ids: &[i32],            // shape: (n_users)
         candidate_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
@@ -547,7 +568,7 @@ mod post_training_analysis {
 
         // =========== RANKER ===============================
 
-        let n_users = user_ids.len();
+        //let n_users = user_ids.len();
 
 
         let tag3 = format!("ranker_{}", top_k);
@@ -597,6 +618,71 @@ mod post_training_analysis {
         Ok(())
     }
 
+    async fn calc_and_write_popularity_bias(
+        harness: &TestHarness,
+        ranker_metadata: &Arc<RankerModelMetadata>,
+        num_candidates: usize,
+        top_k: usize,
+        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
+        user_ids: &[i32],            // shape: (n_users)
+        candidate_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        top_k_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        ranker_movie_ids: &[i32],         // shape: (n_users * top_k)
+        parquet_output_dir: &str,
+        summary_output_dir: &str,
+    )-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+
+
+    async fn calc_and_write_embedding_hubness(
+        harness: &TestHarness,
+        ranker_metadata: &Arc<RankerModelMetadata>,
+        num_candidates: usize,
+        top_k: usize,
+        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
+        user_ids: &[i32],            // shape: (n_users)
+        candidate_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        top_k_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        ranker_movie_ids: &[i32],         // shape: (n_users * top_k)
+        parquet_output_dir: &str,
+        summary_output_dir: &str,
+    )-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+
+    async fn calc_and_write_intra_list_diversity(
+        harness: &TestHarness,
+        ranker_metadata: &Arc<RankerModelMetadata>,
+        num_candidates: usize,
+        top_k: usize,
+        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
+        user_ids: &[i32],            // shape: (n_users)
+        candidate_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        top_k_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        ranker_movie_ids: &[i32],         // shape: (n_users * top_k)
+        parquet_output_dir: &str,
+        summary_output_dir: &str,
+    )-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+
+    async fn calc_and_write_inter_list_diversity(
+        harness: &TestHarness,
+        ranker_metadata: &Arc<RankerModelMetadata>,
+        num_candidates: usize,
+        top_k: usize,
+        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
+        user_ids: &[i32],            // shape: (n_users)
+        candidate_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        top_k_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
+        ranker_movie_ids: &[i32],         // shape: (n_users * top_k)
+        parquet_output_dir: &str,
+        summary_output_dir: &str,
+    )-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+
     /// calculate retrieval or ranking catalog coverage,
     /// gini, and lorenz curve where
     /// lorenz curve shows the discrete frequency distribution of items appearing in the
@@ -634,7 +720,6 @@ mod post_training_analysis {
     pub fn _coverage_and_gini(
         top_k: usize,
         catalog_size: usize,
-        pos_test_df: &LazyFrame,     // [user_id, movie_id, rating, timestamp]
         movie_tiers_df: &LazyFrame,  // [movie_id, movie_tier]
         user_tiers_df: &LazyFrame,   // [user_id, user_tier]
         user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
