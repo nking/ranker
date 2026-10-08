@@ -1532,6 +1532,7 @@ dependencies = [
  "prost",
  "prost-types",
  "rand 0.8.6",
+ "rayon",
  "rmp-serde",
  "rustc-hash",
  "safetensors",
