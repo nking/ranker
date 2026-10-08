@@ -28,6 +28,7 @@ struct TestHarness {
     movies_offset: usize,
     #[allow(dead_code)]
     num_catalog_movies: usize,
+    embed_len: usize,
     movie_tiers_df: LazyFrame,
     user_tiers_df: LazyFrame,
 }
@@ -114,12 +115,16 @@ impl TestHarness {
                 .expect("error fetching ranker metadata");
         let movies_offset = ranker_metadata.num_catalog_users + 1;
         let num_catalog_movies = ranker_metadata.num_catalog_movies;
+        let embed_len = ranker_metadata.embed_len;
 
         Self {
-            orchestrator: orchestrator, test_uris: test_ratings_uris, ratings_uris: ratings_uris,
+            orchestrator: orchestrator,
+            test_uris: test_ratings_uris,
+            ratings_uris: ratings_uris,
             movies_df: movies_df,
             movies_offset: movies_offset,
             num_catalog_movies: num_catalog_movies,
+            embed_len: embed_len,
             train_history_df: train_history_df,
             pos_test_df: pos_test_df,
             movie_tiers_df: movie_tiers_df,
@@ -211,8 +216,8 @@ mod post_training_analysis {
     }
 
     async fn calc_metrics_at_k(harness: &TestHarness, query_model_version:Option<VersionChoice>,
-        ranker_model_version:Option<VersionChoice>,
-        summary_output_dir: &str, parquet_output_dir: &str) ->  Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        ranker_model_version:Option<VersionChoice>, summary_output_dir: &str, parquet_output_dir: &str)
+        ->  Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         /*let ranker_version_num: i64 = match ranker_model_version {
             Some(VersionChoice::Version(v)) => v,
@@ -259,6 +264,8 @@ mod post_training_analysis {
         ).expect("error fetching user_ids and first timestamps");
 
         let n_users = user_ids.len();
+        println!("test n_unique_users={}", n_users);
+
 
         // =========== RETRIEVAL ===============================
 
@@ -331,7 +338,6 @@ mod post_training_analysis {
         //polars is already spinning up threads to use all cores available, so run these
         //   sequentially rather than in parallel.
 
-        /*
         let _ = calc_and_write(
             &harness,
             &ranker_metadata,
@@ -382,8 +388,6 @@ mod post_training_analysis {
             "popularity_bias".as_ref(),
             _popularity_bias
         ).await;
-
-         */
 
         let _ = calc_and_write(
             &harness,
@@ -803,13 +807,13 @@ mod post_training_analysis {
 
     pub fn _popularity_bias(
         k: usize,                // either num_candidates or top_k
-        catalog_size: usize,
+        _catalog_size: usize,
         harness: &TestHarness,
-        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
+        _user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
         user_ids: &[i32],            // shape: (n_users)
         neighbors: &[i32],           // shape: (n_users * k)   these are the retrieved or ranked movie_ids
         parquet_output_dir: &str,
-        summary_output_dir: &str,
+        _summary_output_dir: &str,
         tag: &str,
     ) -> PolarsResult<(HashMap<String, f64>, Vec<String>)> {
 
@@ -949,16 +953,187 @@ mod post_training_analysis {
     /// ```
     pub fn _diversity_metrics(
         k: usize,                    // either num_candidates or top_k
-        catalog_size: usize,
+        _catalog_size: usize,
         harness: &TestHarness,
-        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
+        _user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
         user_ids: &[i32],            // shape: (n_users)
         neighbors: &[i32],           // shape: (n_users * k)   these are the retrieved or ranked movie_ids
         parquet_output_dir: &str,
-        summary_output_dir: &str,
+        _summary_output_dir: &str,
         tag: &str,
     ) -> PolarsResult<(HashMap<String, f64>, Vec<String>)> {
-        Ok((HashMap::new(), Vec::new()))
+
+        let mut agg_res: HashMap<String, f64> = HashMap::new();
+        let mut conclusions: Vec<String> = Vec::new();
+        let n_users = user_ids.len();
+
+        let mut slates: Vec<Vec<i32>> = Vec::with_capacity(n_users);
+        for chunk in neighbors.chunks_exact(k) {
+            let mut slate = chunk.to_vec();
+            slate.sort_unstable();
+            slates.push(slate);
+        }
+
+        let ids_df = df!("user_id" => user_ids)?.lazy();
+        let aligned_tiers_df = ids_df
+            .left_join(harness.user_tiers_df.clone(), col("user_id"), col("user_id"))
+            .with_columns([col("user_tier").fill_null(lit(0i32))])
+            .collect()?;
+
+        let user_tiers: Vec<i32> = aligned_tiers_df
+            .column("user_tier")?
+            .i32()?
+            .iter()
+            .map(|opt| opt.unwrap_or(0))
+            .collect();
+
+        // =================================================================
+        // INTER-LIST DIVERSITY (Personalization)
+        // =================================================================
+        println!("Calculating Inter-list diversity (Statistically Sampled)...");
+
+        // OPTIMIZATION: Cap the inner loop to ~300 comparisons to prevent O(N^2) lockup.
+        //    in test positives there are 48_285 ratings for 5096 unique users.
+        let max_samples = 1_000;//300;
+        let step = (n_users / max_samples).max(1);
+        // inter-list is calculated for each user, but the comparison is to only max_samples now instead o
+
+        let interlist_diversity_scores: Vec<f64> = slates.par_iter().map(|slate_a| {
+            let mut total_jaccard = 0.0;
+            let mut valid_comparisons = 0.0;
+
+            for slate_b in slates.iter().step_by(step) {
+                let mut i = 0;
+                let mut j = 0;
+                let mut intersection = 0;
+
+                while i < k && j < k {
+                    if slate_a[i] == slate_b[j] {
+                        intersection += 1;
+                        i += 1;
+                        j += 1;
+                    } else if slate_a[i] < slate_b[j] {
+                        i += 1;
+                    } else {
+                        j += 1;
+                    }
+                }
+
+                // Skip identical slates (self-comparisons)
+                if intersection == k { continue; }
+
+                let union = (2 * k) - intersection;
+                total_jaccard += (intersection as f64) / (union as f64);
+                valid_comparisons += 1.0;
+            }
+
+            if valid_comparisons > 0.0 {
+                1.0 - (total_jaccard / valid_comparisons)
+            } else {
+                0.0
+            }
+        }).collect();
+
+        // =================================================================
+        // INTRA-LIST DIVERSITY (Breadth)
+        // =================================================================
+        println!("Calculating Intra-list diversity...");
+
+        let movie_embeddings: Vec<f32> = harness.orchestrator._get_movies_embedding_catalog();
+        let embed_len = harness.embed_len;
+        let movies_offset = harness.movies_offset;
+
+        let intralist_diversity_scores: Vec<f64> = slates.par_iter().map(|slate| {
+            let mut total_distance = 0.0;
+            let num_pairs = (k * (k - 1)) / 2;
+
+            for i in 0..k {
+                for j in (i+1)..k {
+                    let raw_a = slate[i] as usize;
+                    let raw_b = slate[j] as usize;
+
+                    // OPTIMIZATION: Safely remove the global ID offset so we don't index out of bounds
+                    let idx_a = if raw_a >= movies_offset { raw_a - movies_offset } else { raw_a };
+                    let idx_b = if raw_b >= movies_offset { raw_b - movies_offset } else { raw_b };
+
+                    let start_a = idx_a * embed_len;
+                    let start_b = idx_b * embed_len;
+
+                    let emb_a = &movie_embeddings[start_a..(start_a + embed_len)];
+                    let emb_b = &movie_embeddings[start_b..(start_b + embed_len)];
+
+                    let sim = cosine_similarity(emb_a, emb_b);
+                    total_distance += 1.0 - (sim as f64);
+                }
+            }
+
+            if num_pairs > 0 {
+                total_distance / (num_pairs as f64)
+            } else {
+                0.0
+            }
+        }).collect();
+
+        // =================================================================
+        // METRICS AGGREGATION & EXPORT
+        // =================================================================
+        let mut metrics_df = df!(
+            "user_id" => user_ids,
+            "user_tier" => user_tiers,
+            "interlist_diversity" => &interlist_diversity_scores,
+            "intralist_diversity" => &intralist_diversity_scores
+        )?;
+
+        let parquet_path = Path::new(parquet_output_dir).join(format!("diversity_metrics_k_{}_{}.parquet", k, tag));
+        let mut file = File::create(&parquet_path)?;
+        ParquetWriter::new(&mut file).finish(&mut metrics_df)?;
+
+        let extract_mean = |df: &DataFrame, c: &str| -> f64 {
+            df.column(c).ok()
+                .and_then(|col| col.cast(&DataType::Float64).ok())
+                .and_then(|col| col.f64().ok().map(|ca| ca.mean().unwrap_or(0.0)))
+                .unwrap_or(0.0)
+        };
+
+        let global_interlist = extract_mean(&metrics_df, "interlist_diversity");
+        let global_intralist = extract_mean(&metrics_df, "intralist_diversity");
+
+        agg_res.insert(format!("interlist_diversity_mean_k_{}_{}", k, tag), global_interlist);
+        agg_res.insert(format!("intralist_diversity_mean_k_{}_{}", k, tag), global_intralist);
+
+        for t in 0..=2 {
+            let mask = metrics_df.column("user_tier")?.as_materialized_series().i32()?.equal(t as i32);
+            let tier_df = metrics_df.filter(&mask)?;
+
+            let t_inter = extract_mean(&tier_df, "interlist_diversity");
+            let t_intra = extract_mean(&tier_df, "intralist_diversity");
+
+            agg_res.insert(format!("interlist_diversity_mean_k_{}_user_tier_{}_{}", k, t, tag), t_inter);
+            agg_res.insert(format!("intralist_diversity_mean_k_{}_user_tier_{}_{}", k, t, tag), t_intra);
+        }
+
+        if global_interlist > 0.90 {
+            conclusions.push(format!("HIGH PERSONALIZATION ({}): Global Inter-list Diversity is {:.2}%. The model successfully delivers highly unique slates customized to individual users.", tag, global_interlist * 100.0));
+        } else if global_interlist > 0.60 {
+            conclusions.push(format!("MODERATE PERSONALIZATION ({}): Inter-list Diversity is {:.2}%. Users receive a mix of personalized items and global blockbusters.", tag, global_interlist * 100.0));
+        } else {
+            conclusions.push(format!("LOW PERSONALIZATION WARNING ({}): Inter-list Diversity is only {:.2}%. The model is serving almost identical slates to everyone, indicating severe popularity bias or catastrophic forgetting.", tag, global_interlist * 100.0));
+        }
+
+        if global_intralist < 0.10 {
+            conclusions.push(format!("MONOTONOUS SLATES ({}): Global Intra-list Diversity is very low ({:.2}). The model is recommending walls of virtually identical items (e.g., 20 Marvel movies in a row).", tag, global_intralist));
+        } else if global_intralist > 0.35 {
+            conclusions.push(format!("HIGH BREADTH ({}): Intra-list Diversity is high ({:.2}), indicating slates feature a wide variety of semantic genres/topics.", tag, global_intralist));
+        }
+
+        let t2_inter = *agg_res.get(&format!("interlist_diversity_mean_k_{}_user_tier_2_{}", k, tag)).unwrap_or(&0.0);
+        let t0_inter = *agg_res.get(&format!("interlist_diversity_mean_k_{}_user_tier_0_{}", k, tag)).unwrap_or(&0.0);
+
+        if t2_inter > t0_inter + 0.05 {
+            conclusions.push(format!("TIERED PERSONALIZATION ({}): Power users receive significantly more personalized (diverse) slates ({:.2}%) than Light users ({:.2}%), effectively leveraging their rich interaction histories.", tag, t2_inter * 100.0, t0_inter * 100.0));
+        }
+
+        Ok((agg_res, conclusions))
     }
 
     /// Evaluates Retrieval or Ranker output and returns a tuple of (Metrics Dictionary, Conclusions List)
@@ -971,7 +1146,7 @@ mod post_training_analysis {
         neighbors: &[i32],           // shape: (n_users * k)
         parquet_output_dir: &str,
         #[allow(dead_code)]
-        summary_output_dir: &str,
+        _summary_output_dir: &str,
         tag: &str,
     ) -> PolarsResult<(HashMap<String, f64>, Vec<String>)> {
 
@@ -1250,5 +1425,30 @@ mod post_training_analysis {
             // std(1) calculates sample standard deviation (N-1) natively
             .and_then(|c| c.f64().map(|ca| ca.std(1).unwrap_or(0.0)))
             .unwrap_or(0.0)
+    }
+
+    /// Calculates the cosine similarity between two dense vectors.
+    /// Returns a value between -1.0 and 1.0 (or 0.0 if either vector is completely empty/zero).
+    #[inline]
+    pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+        debug_assert_eq!(a.len(), b.len(), "Vectors must be of the same length");
+
+        let mut dot_product = 0.0;
+        let mut norm_a_sq = 0.0;
+        let mut norm_b_sq = 0.0;
+
+        // Using .iter().zip() allows the Rust compiler (LLVM) to auto-vectorize
+        // this loop into SIMD instructions for massive performance gains.
+        for (&x, &y) in a.iter().zip(b.iter()) {
+            dot_product += x * y;
+            norm_a_sq += x * x;
+            norm_b_sq += y * y;
+        }
+
+        if norm_a_sq == 0.0 || norm_b_sq == 0.0 {
+            0.0
+        } else {
+            dot_product / (norm_a_sq.sqrt() * norm_b_sq.sqrt())
+        }
     }
 }

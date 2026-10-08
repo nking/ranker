@@ -1,3 +1,5 @@
+from typing import Union, Dict
+
 import jraphx
 import jraph
 from array_record.python import array_record_module
@@ -77,10 +79,20 @@ class GraphRanker(nnx.Module):
             kernel_init=nnx.initializers.lecun_normal(),
             rngs=rngs,
         )
-    
-    def __call__(self, graph: jraph.GraphsTuple) -> jnp.ndarray:
+
+    def __call__(self, graph: jraph.GraphsTuple,) -> jnp.ndarray:
         """
         always returns a static shape of (max_graphs * K)
+        :param graph:padded super graph of graphs from a batch.
+        :return: scores of shape (max_graphs * self.num_candidates)
+        """
+        res = self.run_model(graph)
+        return res['scores']
+
+    def run_model(self, graph: jraph.GraphsTuple) -> Dict[str, jnp.ndarray]:
+        """
+        method to return the scores and user and candidate embeddings so that a signature can be
+        made to use for contextual hubness of the embeddings.
         :param graph:padded super graph of graphs from a batch.
         :return: scores of shape (max_graphs * self.num_candidates)
         """
@@ -90,7 +102,7 @@ class GraphRanker(nnx.Module):
         
         # Convert edge ratings to integers (0-5)
         # Ensure they are int32 so the embedding layer can use them as indices
-        edge_indices = graph.edges["rating"].astype(jnp.int32)
+        edge_indices = graph.edges["rating"]
         
         edge_attr = self.rating_embed(edge_indices)
         
@@ -186,4 +198,8 @@ class GraphRanker(nnx.Module):
         # --- temperature SCALING ---
         scores = jnp.squeeze(scores, axis=-1) / self.temperature
 
-        return scores
+        return {
+            "scores": scores,          # (max_graphs, num_candidates)
+            "user_reprs": user_reprs,  # (max_graphs, embed_len)
+            "cand_reprs": cand_reprs,  # (max_graphs * num_candidates, embed_len)
+        }

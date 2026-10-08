@@ -1,7 +1,7 @@
 import json
 import os
 from typing import Dict, Union
-
+from functools import partial
 import jax
 from jax.experimental import jax2tf
 import jax.numpy as jnp
@@ -18,9 +18,12 @@ from movie_lens_ranker.util import calc_number_jax_graph_components
 
 import tensorflow as tf
 
-def create_serving_signature(max_nodes:int, max_edges:int, max_graphs:int, embed_len:int, signature_name:str) -> ServingConfig :
+def create_serving_signature(max_nodes:int, max_edges:int, max_graphs:int, embed_len:int, signature_name:str,
+                             method_key: str = "jax_module_default_method") -> ServingConfig :
+
     serving_config = export.ServingConfig(
         signature_key=signature_name,
+        method_key=method_key,
         input_signature=[
             {
                 # Nodes attributes
@@ -45,6 +48,30 @@ def create_serving_signature(max_nodes:int, max_edges:int, max_graphs:int, embed
         ])
     return serving_config
 
+def create_diagnostic_signature(
+        max_nodes: int,
+        max_edges: int,
+        max_graphs: int,
+        embed_len: int,
+        out_features: int,
+        signature_name: str
+) -> ServingConfig:
+
+    # We still use create_serving_signature for the inputs, which correctly uses embed_len
+    base_config = create_serving_signature(
+        max_nodes, max_edges, max_graphs, embed_len, signature_name,
+        method_key="diagnostic_apply"
+    )
+
+    # But we define the outputs using out_features
+    base_config.output_signature = {
+        "outputs": tf.TensorSpec(shape=(None, None), dtype=tf.float32, name="outputs"),
+        "user_reprs": tf.TensorSpec(shape=(max_graphs, out_features), dtype=tf.float32, name="user_reprs"),
+        "cand_reprs": tf.TensorSpec(shape=(None, out_features), dtype=tf.float32, name="cand_reprs"),
+    }
+
+    return base_config
+
 def save_metadata(output_file_uri:str, batch_size:int,
     max_nodes:int, max_edges:int, max_graphs:int,
     params:Dict[str, Union[str, int]],
@@ -60,20 +87,13 @@ def save_metadata(output_file_uri:str, batch_size:int,
     with open(output_file_uri, "w") as f:
         json.dump(metadata, f)
 
-def make_jax_module(trained_model: GraphRanker,  num_candidates:int) -> JaxModule :
+def make_jax_module(trained_model: GraphRanker, num_candidates: int, include_diagnostics: bool = True) -> JaxModule:
 
     # Split the NNX model into architecture (graphdef), weights (params), and everything else (rest).
-    # The '...' catches the key<fry> RNG states so they don't cause a non-exhaustive filter error.
     graphdef, params, rest = nnx.split(trained_model, nnx.Param, ...)
 
-    #params2 = params = nnx.state(trained_model, nnx.Param) #same as params
-
-    # Define the pure apply function inside the scope so it has access to `graphdef`
-    def pure_apply_fn(params, inputs):
-        # Reconstruct the model using the static blueprint + the weights
-        model = nnx.merge(graphdef, params, rest)
-        model.eval()
-        graph_batch = jraph.GraphsTuple(
+    def build_graph(inputs):
+        return jraph.GraphsTuple(
             nodes={
                 'candidate_mask': inputs["node_candidate_mask"],
                 'ids': inputs["node_ids"],
@@ -88,26 +108,55 @@ def make_jax_module(trained_model: GraphRanker,  num_candidates:int) -> JaxModul
             n_node=inputs["n_node"],
             n_edge=inputs["n_edge"]
         )
-        # Model returns a 1D array of shape (max_graphs * num_candidates,)
+
+    # The Standard Production Apply (Scores Only)
+    def standard_apply_fn(params, inputs):
+        model = nnx.merge(graphdef, params, rest)
+        model.eval()
+
+        graph_batch = build_graph(inputs)
         flat_scores = model(graph_batch)
 
-        # Dynamically determine max_graphs from the input shape
         max_graphs = inputs["n_node"].shape[0]
-
-        # Reshape to (max_graphs, num_candidates)
         predictions_array = jnp.reshape(flat_scores, (max_graphs, num_candidates))
 
-        #the dummy results should not be sliced out before returning in order to keep XLA from recompiling
         return {"outputs": predictions_array}
 
+    # The Diagnostic Apply (Scores + Vectors)
+    # Orbax requires ALL methods in the apply_fn map to accept (params, inputs)
+    def diagnostic_apply_fn(params, inputs):
+        model = nnx.merge(graphdef, params, rest)
+        model.eval()
+
+        graph_batch = build_graph(inputs)
+        result_dict = model.run_model(graph_batch)
+
+        max_graphs = inputs["n_node"].shape[0]
+        predictions_array = jnp.reshape(result_dict["scores"], (max_graphs, num_candidates))
+
+        return {
+            "outputs": predictions_array,
+            "user_reprs": result_dict["user_reprs"],
+            "cand_reprs": result_dict["cand_reprs"]
+        }
+
+    apply_fn_map = {
+        "jax_module_default_method": standard_apply_fn
+    }
+
+    if include_diagnostics:
+        apply_fn_map["diagnostic_apply"] = diagnostic_apply_fn
+
+    # Export the Module
     jax_module = export.JaxModule(
         params=params,
-        apply_fn=pure_apply_fn,
+        apply_fn=apply_fn_map,
         trainable=False,
         export_version=constants.ExportModelType.TF_SAVEDMODEL,
     )
 
     return jax_module
+
 
 def export_models(trained_model: GraphRanker, batch_size:int,
     model_dict: Dict[str, Union[str, int]], output_savedmodel_dir_uri:str,
@@ -167,9 +216,21 @@ def export_models(trained_model: GraphRanker, batch_size:int,
         embed_len=embed_len,
         signature_name="serving_batch")
 
+    out_features = model_dict['training_params']['out_dim']
+
+    diagnostic_serving_config = create_diagnostic_signature(
+        max_nodes=jax_graph_comp_dict_batch['max_nodes'],
+        max_edges=jax_graph_comp_dict_batch['max_edges'],
+        max_graphs=jax_graph_comp_dict_batch['max_graphs'],
+        embed_len=embed_len,
+        out_features=out_features,
+        signature_name="serving_diagnostics"
+    )
+
     jax_module = make_jax_module(trained_model,  num_candidates)
 
-    export_manager = export.ExportManager(jax_module, [single_serving_config, batch_serving_config])
+    export_manager = export.ExportManager(jax_module, [single_serving_config, batch_serving_config,
+                                                       diagnostic_serving_config])
     export_manager.save(output_savedmodel_dir_uri)
 
     assets_extra_dir = os.path.join(output_savedmodel_dir_uri, "assets.extra")
@@ -199,5 +260,146 @@ def export_models(trained_model: GraphRanker, batch_size:int,
     #NOTE: if the serving infra is not TFS, could further use tf2onnx to make an ONNX export here
     #  and then still use gRPC with a ONNX Runtime Server (ORTS) or NVIDIA Triton Inference Server
     #  Else, the TPUs and AWS neuron can run the trained jax AI stack model as is, restored from orbax checkpoint.
+
+def make_jax_module_old(trained_model: GraphRanker,  num_candidates:int) -> JaxModule :
+
+    # Split the NNX model into architecture (graphdef), weights (params), and everything else (rest).
+    # The '...' catches the key<fry> RNG states so they don't cause a non-exhaustive filter error.
+    graphdef, params, rest = nnx.split(trained_model, nnx.Param, ...)
+
+    #params2 = params = nnx.state(trained_model, nnx.Param) #same as params
+
+    # Define the pure apply function inside the scope so it has access to `graphdef`
+    def pure_apply_fn(params, inputs):
+        # Reconstruct the model using the static blueprint + the weights
+        model = nnx.merge(graphdef, params, rest)
+        model.eval()
+        graph_batch = jraph.GraphsTuple(
+            nodes={
+                'candidate_mask': inputs["node_candidate_mask"],
+                'ids': inputs["node_ids"],
+                'label': inputs["node_label"],
+                'type': inputs["node_type"],
+                "embeddings" : inputs["node_embeddings"]
+            },
+            edges={'rating': inputs["edge_features"]},
+            receivers=inputs["receivers"],
+            senders=inputs["senders"],
+            globals=None,
+            n_node=inputs["n_node"],
+            n_edge=inputs["n_edge"]
+        )
+        # Model returns a 1D array of shape (max_graphs * num_candidates,)
+        flat_scores = model(graph_batch)
+
+        # Dynamically determine max_graphs from the input shape
+        max_graphs = inputs["n_node"].shape[0]
+
+        # Reshape to (max_graphs, num_candidates)
+        predictions_array = jnp.reshape(flat_scores, (max_graphs, num_candidates))
+
+        #the dummy results should not be sliced out before returning in order to keep XLA from recompiling
+        return {"outputs": predictions_array}
+
+    jax_module = export.JaxModule(
+        params=params,
+        apply_fn=pure_apply_fn,
+        trainable=False,
+        export_version=constants.ExportModelType.TF_SAVEDMODEL,
+    )
+
+    return jax_module
+
+def export_models_old(trained_model: GraphRanker, batch_size:int,
+                  model_dict: Dict[str, Union[str, int]], output_savedmodel_dir_uri:str,
+                  n_local_devices:int=1):
+    """
+    export the model to TF SavedModel format along with a method to apply the model on the data.
+    makes an export with a signature for  single inference mode and a batch inference mode.
+    :param output_savedmodel_dir_uri: uri for the directory to save the model to.  Note that the
+        version number should already be included in the uri as the last part of the path.
+           e.g.  /absolute/path/to/your/model_export_dir/1
+    :exception
+    :param trained_model:
+    :param batch_size: batch_size used for model training
+    :param model_dict: dictionary with keys:
+       "inference_params" and "training_params".
+       "inference_params" keys are:
+            "max_history" : max length of user history used for model training
+            "num_candidates"  : the number of candidates to rank
+            "embed_len" : the lengths of the embeddings
+            "num_catalog_users" : number of users in the catalog of embeddings
+            "num_catalog_movies" : number of movies in the catalog of embeddings
+            "model_version" : version of the trained GraphRanker model
+            "trained_at_timestamp" : timestamp for the start of the model training
+            "git_commit_hash": optional, git commit hash for the training code.
+    Note that in recommendation_systems project
+          the user ids are renumbered if needed to be between 1 and num_users,
+          then the movie_ids are renumbered to be between num_users + 1 and num_users + 1 + num_movies.
+
+    :return:
+    """
+
+    params = model_dict['inference_params']
+    max_history = params['max_history']
+    num_candidates = params['num_candidates']
+    embed_len = params['embed_len']
+
+    jax_graph_comp_dict_batch = calc_number_jax_graph_components(batch_size,
+                                                                 max_history, num_candidates, n_local_devices=n_local_devices)
+
+    jax_graph_comp_dict_single = calc_number_jax_graph_components(1,
+                                                                  max_history, num_candidates, n_local_devices=n_local_devices)
+
+    print(f'jax_graph_comp_dict_single={jax_graph_comp_dict_single}', flush=True)
+    print(f'jax_graph_comp_dict_batch={jax_graph_comp_dict_batch}', flush=True)
+
+    single_serving_config = create_serving_signature(
+        max_nodes=jax_graph_comp_dict_single['max_nodes'],
+        max_edges=jax_graph_comp_dict_single['max_edges'],
+        max_graphs=jax_graph_comp_dict_single['max_graphs'],
+        embed_len=embed_len,
+        signature_name="serving_default")
+
+    batch_serving_config = create_serving_signature(
+        max_nodes=jax_graph_comp_dict_batch['max_nodes'],
+        max_edges=jax_graph_comp_dict_batch['max_edges'],
+        max_graphs=jax_graph_comp_dict_batch['max_graphs'],
+        embed_len=embed_len,
+        signature_name="serving_batch")
+
+    jax_module = make_jax_module(trained_model,  num_candidates)
+
+    export_manager = export.ExportManager(jax_module, [single_serving_config, batch_serving_config])
+    export_manager.save(output_savedmodel_dir_uri)
+
+    assets_extra_dir = os.path.join(output_savedmodel_dir_uri, "assets.extra")
+    os.makedirs(assets_extra_dir, exist_ok=True)
+
+    save_metadata(output_file_uri=os.path.join(assets_extra_dir, "metadata_single.json"),
+                  batch_size=1,
+                  params=params,
+                  max_nodes=jax_graph_comp_dict_single['max_nodes'],
+                  max_edges=jax_graph_comp_dict_single['max_edges'],
+                  max_graphs=jax_graph_comp_dict_single['max_graphs'],
+                  signature_name="serving_default")
+
+    save_metadata(output_file_uri=os.path.join(assets_extra_dir, "metadata_batch.json"),
+                  batch_size=batch_size,
+                  params=params,
+                  max_nodes=jax_graph_comp_dict_batch['max_nodes'],
+                  max_edges=jax_graph_comp_dict_batch['max_edges'],
+                  max_graphs=jax_graph_comp_dict_batch['max_graphs'],
+                  signature_name="serving_batch")
+
+    with open(os.path.join(assets_extra_dir, "training_hyperparameters.json"), "w") as f:
+        json.dump(model_dict['training_params'], f)
+
+    print(f"saved model and metadata to {output_savedmodel_dir_uri}")
+
+    #NOTE: if the serving infra is not TFS, could further use tf2onnx to make an ONNX export here
+    #  and then still use gRPC with a ONNX Runtime Server (ORTS) or NVIDIA Triton Inference Server
+    #  Else, the TPUs and AWS neuron can run the trained jax AI stack model as is, restored from orbax checkpoint.
+
 
 

@@ -16,8 +16,12 @@ class ExportTest(unittest.TestCase):
         checkpoint_uri = os.path.join(get_project_dir(),
                 "src/test/resources/checkpoint-bucket/best/kaggle-hpo/train_0/")
 
+        #temporary overwrite to point to latest trained model Orbax checkpoint bucket
         checkpoint_uri = os.path.join(get_project_dir(),
                                       "TMP19/checkpoint-bucket/best/kaggle-hpo/train_0/")
+
+        checkpoint_uri = os.path.join(get_project_dir(),
+            "tmp_mounts/fake-gcs-server/checkpoint-bucket/best/GraphRanker_tuning_unittest_best/train_1234567/")
         
         checkpoint_uri = os.path.abspath(checkpoint_uri)
         savedmodel_dir = os.path.join(get_bin_dir(), "savedmodels", "1")
@@ -124,7 +128,11 @@ class ExportTest(unittest.TestCase):
         expected_shape = (len(fake_batch.n_node), num_candidates)
         self.assertEqual( expected_shape, predictions_batch.shape)
 
-        jax_module = make_jax_module(restore_dict['model'],  restore_dict['config']['num_candidates'])
+        jax_module = make_jax_module(
+            restore_dict['model'],
+            restore_dict['config']['num_candidates'],
+            include_diagnostics=False
+        )
 
         jax_graph_comp_dict_single = calc_number_jax_graph_components(1,
                 restore_dict['config']['max_history'], restore_dict['config']['num_candidates'], n_local_devices=1)
@@ -190,6 +198,44 @@ class ExportTest(unittest.TestCase):
             json.dump(payload, f)
         #then use:
         #curl -X POST http://172.17.0.1:8511/v1/models/graph-ranker:predict -H "Content-Type: application/json" -d @bin/test_request.json
+
+        # =================================================================
+        # TEST DIAGNOSTIC SIGNATURE
+        # =================================================================
+        print("Testing serving_diagnostics signature...")
+
+        diagnostic_inference_sig = loaded_saved_model.signatures["serving_diagnostics"]
+
+        response_diag = diagnostic_inference_sig(
+            node_candidate_mask = fake_batch.nodes["candidate_mask"],
+            node_ids = fake_batch.nodes["ids"],
+            node_label = fake_batch.nodes["label"],
+            node_type = fake_batch.nodes["type"],
+            node_embeddings = fake_batch.nodes["embeddings"],
+            edge_features = fake_batch.edges["rating"],
+            receivers = fake_batch.receivers,
+            senders = fake_batch.senders,
+            n_node = fake_batch.n_node,
+            n_edge = fake_batch.n_edge,
+        )
+
+        diag_outputs = response_diag['outputs']
+        diag_user_reprs = response_diag['user_reprs']
+        diag_cand_reprs = response_diag['cand_reprs']
+
+        out_features = restore_dict['config']['out_dim']
+        max_graphs = len(fake_batch.n_node)
+
+        # Assert returned scores match expected batch shape
+        self.assertEqual((max_graphs, num_candidates), diag_outputs.shape)
+
+        # Assert user representations shape is (max_graphs, out_features)
+        self.assertEqual((max_graphs, out_features), diag_user_reprs.shape)
+
+        # Assert candidate representations shape is (max_graphs * num_candidates, out_features)
+        self.assertEqual((max_graphs * num_candidates, out_features), diag_cand_reprs.shape)
+
+        print("Diagnostic signature successfully executed and returned valid tensor shapes!")
 
 if __name__ == '__main__':
     unittest.main()

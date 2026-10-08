@@ -409,6 +409,11 @@ impl Orchestrator {
         }
     }
 
+    pub fn _get_movies_embedding_catalog(&self) -> Vec<f32> {
+        let searcher = self.searcher.load();
+        searcher.get_movies_embedding_catalog_ref().clone()
+    }
+
     async fn _predict(&self, req: Request<UsersRequest>) -> Result<Response<RankedMovies>, Status> {
 
         let user_reqs = req.into_inner();
