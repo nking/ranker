@@ -122,8 +122,8 @@ def get_vizier_for_hpo_tier(hpo_tier:int, embed_in_dim:int, top_k:int) -> Dict[s
             "num_layers" : 2,
             "hidden_dim" : 64,
             "num_heads" : 2,
-            "dropout_rate" : 0.1,
-            "learning_rate" : 1e-3,
+            "dropout_rate" : 0.2,
+            "learning_rate" : 1e-4,
             "weight_decay" : 1e-3,
             "out_dim" : embed_in_dim,
             "edge_embed_dim" : 8,
@@ -192,7 +192,7 @@ def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in
     root.add_discrete_param("use_focal_loss", feasible_values=[1])
     root.add_discrete_param("use_ipw", feasible_values=[1])
 
-    root.add_discrete_param("temperature", feasible_values=[0.25])
+    root.add_discrete_param("temperature", feasible_values=[0.15])
     #feasible_values=[0.07, 0.1, 0.25, 0.5])
     root.add_categorical_param("tier_weights", feasible_values=["[0.33, 0.33, 0.33]"])
 

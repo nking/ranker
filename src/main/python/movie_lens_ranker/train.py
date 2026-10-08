@@ -109,20 +109,34 @@ def convert_to_global(arr, mesh, sync:bool=True):
     
     return jax.make_array_from_callback(global_shape, global_sharding, data_callback)
 
-def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple):
-    # Forward Pass: returns ONLY candidate scores [num_total_graphs * model.num_candidates]
-    all_scores = model(padded_graph) #LinearizeTracer<float32[60]>
-    #jax.debug.print("all_scores={all_scores}", all_scores=all_scores, ordered=True)
-    num_total_graphs = padded_graph.n_node.shape[0]  # batch_size + padding
-    total_candidate_slots = num_total_graphs * model.num_candidates
+def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple,
+                            max_history: int = None,
+                            mask_false_negatives: bool = True):
+
     # Extract Candidate Data. length is model.num_candidates * num_total_graphs
     #node.type: 1=user_id, 2=real_history, 3=candidate or negative
     #node.label = 1 for target movie_id
+    # user_id is where node_types == 1
+    # target movie_id is where node_labels == 1
+    # candidate movies is where types==3
+    # candidate movies include the single positive and num_candidates-1 negatives for each user.
+
+    if max_history is None:
+        raise ValueError("max_history cannot be None")
+
+    # Forward Pass: candidate scores [num_total_graphs * model.num_candidates]
+    all_scores = model(padded_graph)
+    num_total_graphs = padded_graph.n_node.shape[0]
+    total_candidate_slots = num_total_graphs * model.num_candidates
+    total_history_slots = num_total_graphs * max_history
+
+    # Extract Candidate Slots (type == 3)
     cand_indices = jnp.where(
         padded_graph.nodes["type"] == 3,
         size=total_candidate_slots,
         fill_value=0
     )[0]
+
     #TODO: redundant information, so consider removing nodes["candidate_mask"]
     #cand_indices_2 = jnp.where(
     #    padded_graph.nodes["candidate_mask"],
@@ -134,23 +148,75 @@ def score_and_shape_results(model: GraphRanker, padded_graph: jraph.GraphsTuple)
     # lengths are K * num_total_graphs
     labels_flat = padded_graph.nodes["label"][cand_indices]
     cand_ids_flat = padded_graph.nodes["ids"][cand_indices]
+    cand_types_flat = padded_graph.nodes["type"][cand_indices]
 
-    # Reshape everything to [Batch, model.num_candidates]
     scores_2d = all_scores.reshape(num_total_graphs, model.num_candidates)
-    labels_2d = labels_flat.reshape((num_total_graphs, model.num_candidates))
-    cand_ids_2d = cand_ids_flat.reshape((num_total_graphs, model.num_candidates))
+    labels_2d = labels_flat.reshape(num_total_graphs, model.num_candidates)
+    cand_ids_2d = cand_ids_flat.reshape(num_total_graphs, model.num_candidates)
+    cand_types_2d = cand_types_flat.reshape(num_total_graphs, model.num_candidates)
 
+    # Base Mask: Real graphs AND real type == 3 candidate nodes
     is_real_graph = jraph.get_graph_padding_mask(padded_graph)
+    #base_mask shape is (num_total_graphs, model.num_candidates)
+    base_mask = jnp.broadcast_to(
+        is_real_graph[:, None], (num_total_graphs, model.num_candidates)
+    ) & (cand_types_2d == 3)  #these are the real candidate movie_ids
 
-    final_mask = jnp.broadcast_to(is_real_graph[:, None], (num_total_graphs, model.num_candidates))
+    if mask_false_negatives:
+        # Extract History Slots (type == 2)
+        hist_indices = jnp.where(
+            padded_graph.nodes["type"] == 2,
+            size=total_history_slots,
+            fill_value=0
+        )[0]
+        hist_ids_flat = padded_graph.nodes["ids"][hist_indices]
+        hist_ids_2d = hist_ids_flat.reshape(num_total_graphs, max_history)
+
+        # Check Target Collisions (candidate matches target but has label == 0).
+        # labels_2d > 0 is the single positive for each user.
+        # base_mask is the real candidate movie ids which includes the single positive and num_candidates-1 negatives.
+        # is positive shape is (num_total_graphs, model.num_candidates)
+        is_positive = (labels_2d > 0) & base_mask
+        # cand_ids_2d is shape (num_total_graphs, model.num_candidates)
+        # target_ids is shape (num_total_graphs, 1)
+        #      cand_ids_2d * is_positive is shape (num_total_graphs, model.num_candidates)
+        # target_ids picks up only the positive movies, 1 for each user.
+        target_ids = jnp.sum(cand_ids_2d * is_positive, axis=-1, keepdims=True)
+        #  (cand_ids_2d == target_ids) => target_ids last dimension is broadcast across model.num_candidates columns.
+        #                                 and so picks up any negative ids that are the same as the positive id
+        #       the first expression RHS finds candidate movies that are same as the positive for each user.
+        #       the second expression RHS filter that down to negative movies which match the positive id
+        #       the third expression (target_ids are broadcast over all columns and so dummy graphs are set to 0)
+        #          but this later 3rd expression is handled below with last wexpression in: final_mask = base_mask & (~is_false_negative)
+        is_target_collision = (cand_ids_2d == target_ids) & (~is_positive) & (target_ids > 0)
+
+        # Check History Overlaps (candidate matches any history item for this user)
+        # cand_ids_2d: [num_total_graphs, num_candidates, 1]
+        # hist_ids_2d: [num_total_graphs, 1, max_history]
+        history_match = (
+                (cand_ids_2d[:, :, None] == hist_ids_2d[:, None, :])
+                & (hist_ids_2d[:, None, :] > 0)
+        )
+        is_in_history = jnp.any(history_match, axis=-1) & (~is_positive)
+
+        # Flag any unlabelled candidate that is a true engagement
+        is_false_negative = is_target_collision | is_in_history
+
+        # Mask out false negatives so they are excluded from the loss
+        final_mask = base_mask & (~is_false_negative)
+    else:
+        final_mask = base_mask
 
     # We return cand_ids_2d so eval_step can easily find the target movie!
     return scores_2d, labels_2d, final_mask, cand_ids_2d
 
-@nnx.jit(static_argnames=["use_focal_loss", "use_ipw", "focal_loss_gamma", "movie_offset"])
+
+@nnx.jit(static_argnames=["use_focal_loss", "use_ipw", "focal_loss_gamma", "movie_offset", "max_history"])
 def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
                optimizer: nnx.Optimizer,
-               movie_tiers:np.ndarray, movie_offset:int = 6040+1,
+               movie_tiers:np.ndarray,
+               max_history:int,
+               movie_offset:int = 6040+1,
                tier_weights_config: Array = jnp.array([0.33, 0.33, 0.33]),
                use_focal_loss: int = 0,
                use_ipw: int = 0,
@@ -158,10 +224,13 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
                ) -> Array:
     """
     train step over a batch, where padded_graph contains super graph of the batch
+    :param max_history: the length of real history in a user's graph.
+    :param use_ipw: if 1, use focal loss in weighting of loss
+    :param use_focal_loss: if 1, use ipw in weightong of loss
     :param movie_offset:  offset from 0 of movie_ids
     :param movie_tiers: 0, 1, 2 for head, torso, tail respectively
     :param tier_weights_config: weights for each movie_tier.  will be normalized to sum to 1.
-    :param model: the GRaphRankr model to be trained
+    :param model: the GraphRankr model to be trained
     :param padded_graph: the input super padded graph of enriched user history and contrastive list of positive and hard negatives.
     :param optimizer: an algorithm that updates a model's internal trainable parameters (such as weights and biases)
     to minimize or maximize an objective function (such as a loss function).
@@ -169,77 +238,85 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     :return: the loss calculated as an in-batch softmax loss weighted by a muliplicative combaintion of focal loss and Inverse propensity weighting
     """
 
+    if max_history is None:
+        raise ValueError("max_history cannot be None")
+
     #debug_weight_before = jnp.linalg.norm(model.score_head.kernel.get_value())
 
     normalized_weights = tier_weights_config / jnp.sum(tier_weights_config)
-
     def loss_fn(model, padded_graph) -> Array:
-
         # adding focal loss and IPW (Inverse Propensity Weighting) to train, but not eval.
         # adding them to given more attention to rare tail elements.
 
         # labels_2d = 1 for target movie_id, else 0
         # shapes [Batch, model.num_candidates]
-        scores_2d, labels_2d, main_mask, cand_ids_2d = score_and_shape_results(model, padded_graph)
-        safe_scores = jnp.where(main_mask, scores_2d, -1e9)
+        scores_2d, labels_2d, main_mask, cand_ids_2d = score_and_shape_results(
+            model, padded_graph, max_history=max_history, mask_false_negatives=True
+        )
 
         batch_size = labels_2d.shape[0]
-        #shape (batch_size, 1)
-        combined_weights = jnp.ones((batch_size, 1))
+        labels_2d_float = labels_2d.astype(jnp.float32)
 
-        #shape (batch_size, 1)
-        row_valid = jnp.any(main_mask, axis=-1, keepdims=True)
+        # Identify valid rows
+        has_positive = jnp.any(main_mask & (labels_2d > 0), axis=-1, keepdims=True)
+        has_negative = jnp.any(main_mask & (labels_2d == 0), axis=-1, keepdims=True)
+        row_valid = has_positive & has_negative
+
+        #  MASKING FOR JAX
+        # For invalid rows, we feed rax safe dummy data so internal logs/exps never output NaN.
+        dummy_scores = jnp.zeros_like(scores_2d)
+        dummy_labels = jax.nn.one_hot(jnp.zeros(batch_size, dtype=jnp.int32), model.num_candidates)
+        dummy_mask = jnp.ones_like(main_mask)
+
+        safe_scores_2d = jnp.where(row_valid, scores_2d, dummy_scores)
+        safe_labels_2d = jnp.where(row_valid, labels_2d_float, dummy_labels)
+        safe_main_mask = jnp.where(row_valid, main_mask, dummy_mask)
+
+        # Apply final mask to scores (-1e9 for masked negatives, 0.0 for dummies)
+        safe_scores = jnp.where(safe_main_mask, safe_scores_2d, -1e9)
+
+        # Weights calculation (start with 1.0 for valid, 0.0 for invalid)
+        combined_weights = jnp.where(row_valid, 1.0, 0.0)
 
         if use_focal_loss:
-            # FOCAL WEIGHTING ---
-            # Calculate target probability p_t.
-            # scales gradient by hard/easy predictions)
-            #shape is (batch_size, model.num_candidates)
             probs = jax.nn.softmax(safe_scores, axis=-1)
             #shape (batch_size, 1)
-            target_probs = jnp.sum(probs * labels_2d, axis=-1, keepdims=True)
-
-            # Clamp base between 0.0 and 1.0 to prevent negative numbers
-            # from floating-point overshoots (which cause NaNs when powered).
-            #shape (batch_size, 1)
+            target_probs = jnp.sum(probs * safe_labels_2d, axis=-1, keepdims=True)
             focal_base = jnp.clip(1.0 - target_probs, 0.0, 1.0)
-            focal_weights = jnp.power(focal_base, focal_loss_gamma)
-
-            # Zero out weights for invalid/padded rows
             #shape (batch_size, 1)
-            focal_weights = jnp.where(row_valid, focal_weights, 0.0)
-            combined_weights = combined_weights * focal_weights
+            focal_weights = jnp.power(focal_base, focal_loss_gamma)
+            #shape (batch_size, 1)
+            combined_weights = combined_weights * jnp.where(row_valid, focal_weights, 0.0)
 
         if use_ipw:
-            # IPW TIER WEIGHTING
-            # Look up tier weight based on target item ID.
-            # scales gradient by catalog frequency tier
-            batch_target_ids = jnp.sum(cand_ids_2d * labels_2d, axis=1) - movie_offset
-            safe_target_ids = jnp.clip(batch_target_ids, 0, movie_tiers.shape[0] - 1)
+            batch_target_ids = jnp.sum(cand_ids_2d * safe_labels_2d, axis=1) - movie_offset
+            safe_target_ids = jnp.clip(batch_target_ids, 0, movie_tiers.shape[0] - 1).astype(jnp.int32)
             batch_target_tiers = movie_tiers[safe_target_ids]
             ipw_weights = normalized_weights[batch_target_tiers][:, None]
-
-            ipw_weights = jnp.where(row_valid, ipw_weights, 0.0)
-            combined_weights = combined_weights * ipw_weights
             #shape (batch_size, 1)
+            combined_weights = combined_weights * jnp.where(row_valid, ipw_weights, 0.0)
 
         if use_focal_loss or use_ipw:
-            # COMBINED LOSS
             valid_count = jnp.maximum(jnp.sum(row_valid), 1.0)
-            weight_sum = jnp.sum(jnp.where(row_valid, combined_weights, 0.0))
+            weight_sum = jnp.sum(combined_weights)
             weight_mean = (weight_sum / valid_count) + 1e-9
+            combined_weights = jnp.where(row_valid, combined_weights / weight_mean, 0.0)
 
-            combined_weights = combined_weights / weight_mean
-            # Ensure final combined weights for invalid rows are strictly zeroed out
-            combined_weights = jnp.where(row_valid, combined_weights, 0.0)
-
-        loss = rax.softmax_loss(
+        # Manual Loss Reduction to prevent Rax edge-case scaling
+        per_query_loss = rax.softmax_loss(
             scores=safe_scores,
-            labels=labels_2d,
-            where=main_mask,
-            weights=combined_weights,
-            reduce_fn=jnp.mean
+            labels=safe_labels_2d,
+            where=safe_main_mask,
+            reduce_fn=None  # We extract [Batch] sized array to handle reduction manually
         )
+
+        # Multiply by our combined weights (which guarantees exactly 0.0 for invalid rows)
+        weighted_loss = per_query_loss * jnp.squeeze(combined_weights)
+
+        # Take mean over VALID rows only
+        valid_count = jnp.maximum(jnp.sum(row_valid), 1.0)
+        loss = jnp.sum(weighted_loss) / valid_count
+
         return loss
 
     # the model and optimizer were created with a mesh context, so here in this jax.jit method
@@ -262,13 +339,17 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
 
     return loss
 
-@nnx.jit(static_argnames=["top_k", "movie_offset"])
+@nnx.jit(static_argnames=["top_k", "movie_offset", "max_history"])
 def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
-    movie_tiers:np.ndarray, movie_offset:int, top_k:int=20,
+    movie_tiers:np.ndarray,
+    max_history: int,
+    movie_offset:int,
+    top_k:int=20,
     tier_weights_config: Array = np.array([0.33, 0.33, 0.33]),
     ) -> dict[str, Array]:
     """
     train step over a batch, where padded_graph contains super graph of the batch
+    :param max_history:  the length of real history in a user's graph
     :param model:
     :param padded_graph:
     :param movie_tiers: array of movie tiers where indicies are movie_id-movie_offset and values are 0, 1, 2 for
@@ -289,6 +370,9 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         "logit_max"
     """
 
+    if max_history is None:
+        raise ValueError("max_history cannot be None")
+
     normalized_weights = tier_weights_config / jnp.sum(tier_weights_config)
     w_head:float= normalized_weights[0] # 0.33
     w_torso:float= normalized_weights[1] # 0.33
@@ -296,7 +380,7 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
 
     #shapes: (total number of graphs including dummy grpahs, model.num_candidates).
     # main_mask is True for real data and False for dummy graph data
-    scores_2d, labels_2d, main_mask, cand_ids_2d = score_and_shape_results(model, padded_graph)
+    scores_2d, labels_2d, main_mask, cand_ids_2d = score_and_shape_results(model, padded_graph, max_history)
     safe_scores = jnp.where(main_mask, scores_2d, -1e9)
 
     # Rax Ranking Loss & Metrics
@@ -383,8 +467,8 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     return metrics_dict
 
 def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterator,
-    movie_tiers:np.ndarray, movie_offset:int, top_k: int,
-                      tier_weights_config:Union[List, Array]) -> Tuple[Dict, Any]:
+    movie_tiers:np.ndarray, max_history:int, movie_offset:int, top_k: int,
+    tier_weights_config:Union[List, Array]) -> Tuple[Dict, Any]:
     """
     calc metrics for val dataset. Note, if this method consumes too much memory, use the
     _epoch_validation_chunked instead.   Note that the method uses SPMD paradigm.
@@ -422,7 +506,8 @@ def _epoch_validation(model: GraphRanker, val_dataloader_iter: DataLoaderIterato
         #each n_node in array is (1 + n_real_history + n_candidates)
         n_samples_tot += jnp.sum(padded_super_graph.n_node)
 
-        val_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, top_k, tier_weights_config)
+        val_metrics = eval_step(model, padded_super_graph, movie_tiers,
+            max_history, movie_offset, top_k, tier_weights_config)
         
         # val_metrics['ndcg_20'] is now an array of shape (Num_Batches,)
         local_avg_val_metrics = jax.tree.map(jnp.mean, val_metrics)
@@ -539,6 +624,7 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
 
     use_focal_loss = "use_focal_loss" in config_dict and config_dict["use_focal_loss"]
     use_ipw = "use_ipw" in config_dict and config_dict["use_ipw"]
+    max_history = config_dict["max_history"]
     
     rank = jax.process_index()
     n_local_devices = jax.local_device_count()
@@ -657,7 +743,9 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
         epoch = batch_idx // STEPS_PER_EPOCH_LOCAL
         last_epoch = epoch
 
-        loss = train_step(model, padded_super_graph, optimizer, movie_tiers=movie_tiers, movie_offset=movie_offset,
+        loss = train_step(model, padded_super_graph, optimizer, movie_tiers=movie_tiers,
+            max_history=max_history,
+            movie_offset=movie_offset,
             tier_weights_config=tier_weights,
             use_focal_loss=use_focal_loss, use_ipw=use_ipw, focal_loss_gamma=focal_loss_gamma)
         
@@ -676,12 +764,13 @@ def _train_fn(model, train_dataloader: grain.DataLoader,
             epoch_avg_train_loss.clear()
             
             model.eval()
-            train_metrics = eval_step(model, padded_super_graph, movie_tiers, movie_offset, top_k, tier_weights)
+            train_metrics = eval_step(model, padded_super_graph, movie_tiers,
+                max_history, movie_offset, top_k, tier_weights)
             
             # val_dataloader is also sharded, so don't isolate this to only shard 0.
             # Also, this is synced across all shards, so all shards have same conditional logic for global_avg_val_metrics below here
             global_avg_val_metrics, n_val_samples = _epoch_validation(model, iter(val_dataloader),
-                movie_tiers, movie_offset, top_k, tier_weights)
+                movie_tiers, max_history, movie_offset, top_k, tier_weights)
             model.train()
 
             global_avg_val_composite_ndcg : float = global_avg_val_metrics[f'composite_ndcg_{top_k}']
@@ -1297,7 +1386,7 @@ def run_test_phase(config: dict):
                 "test_dataloader sampler must be an instance of BatchSampler")
 
         global_test_metrics, n_val_samples = _epoch_validation(model, iter(test_dataloader),
-            movie_tiers, movie_offset, config['top_k'], tier_weights)
+            movie_tiers, max_history, movie_offset, config['top_k'], tier_weights)
     
         out_dict = {f"test_{key}" : value for key, value in global_test_metrics.items()}
         #to be consistent w/ train, change the loss label:
@@ -1416,15 +1505,17 @@ def _assert_checkpoints_restore(checkpoint_uri:str, model, val_data_loader, glob
     loader_restored = copy.deepcopy(val_data_loader)
 
     movie_tiers, movie_offset, num_catalog_movies = read_movie_tiers_uri(restore_dict['config']['movie_tiers_uri'])
+    max_history = restore_dict['config']['max_history']
+
     # iter(x) makes a new iterator state
     global_avg_val_metrics_current, n_val_samples_current = _epoch_validation(model, iter(loader_current),
-        movie_tiers, movie_offset, top_k, tier_weights_config)
+        movie_tiers, max_history, movie_offset, top_k, tier_weights_config)
     
     multihost_utils.sync_global_devices( "sync_barrier_for_model_validation")
 
 
     global_avg_val_metrics_restored, n_val_samples_restored = _epoch_validation(restored_model, iter(loader_restored),
-        movie_tiers, movie_offset, top_k, tier_weights_config)
+        movie_tiers, max_history, movie_offset, top_k, tier_weights_config)
     
     multihost_utils.sync_global_devices( "sync_barrier_for_restored_model_validation")
     

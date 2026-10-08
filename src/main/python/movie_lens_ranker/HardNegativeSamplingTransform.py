@@ -84,7 +84,8 @@ class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
             "history_movie_ids"  has shape (batch_size, max_history)
             "history_ratings"  has shape (batch_size, max_history)
             "history_length"  has shape (batch_size,)
-            "candidate_ids"  has shape (batch_size, num_candidates)
+            "candidate_ids"  has shape (batch_size, num_candidates).  it includes the single positive and num_candidates-1
+                 for each user in the batch.
             "labels"  has shape (batch_size, num_candidates)
         Note that candidate_ids is guaranteed to not have padding values, they're all real movie_ids'.
         The order of candidate_ds and labels has been shuffled so that the target positive movie_id is not always at index 0.
