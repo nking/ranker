@@ -122,9 +122,6 @@ impl RankerModelClient {
 
         let inner_response = response.into_inner();
 
-        //DEBUG
-        //println!("TFS Response for ranker model: {:#?}", inner_response);
-
         // 32-bit floats for the scores
         if let Some((_key, tensor_proto)) = inner_response.outputs.into_iter().next() {
             if !tensor_proto.float_val.is_empty() {
@@ -147,6 +144,66 @@ impl RankerModelClient {
             Err("Error: TFS response contained no outputs".into())
         }
     }
+
+    pub async fn get_candidate_diagnostics(
+        &self,
+        padded_super_graph: JraphGraph,
+        embed_len: usize,
+        ranker_model_version_choice: Option<VersionChoice>
+    ) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), Box<dyn Error>> {
+
+        let predict_req: PredictRequest = build_graph_ranker_diagnostics_proto_inputs(
+            padded_super_graph,
+            embed_len,
+            ranker_model_version_choice
+        );
+
+        // println!("Sending gRPC diagnostic request to TF Serving for GraphRanker...");
+
+        let response = self.client.clone().predict(predict_req).await?;
+        let mut inner_response = response.into_inner();
+
+        // DEBUG
+        // println!("TFS Response for ranker model: diagnostic  {:#?}", inner_response);
+
+        /*
+        diag_outputs = response_diag['outputs']   is shape (max_graphs, num_candidates)
+        diag_user_reprs = response_diag['user_reprs'] is shape (max_graphs, out_features)
+        diag_cand_reprs = response_diag['cand_reprs'] is shape (max_graphs * num_candidates, out_features)
+         */
+
+
+        // Helper closure to extract and parse a tensor by its exact key name
+        let extract_float_tensor = |tensor_map: &mut std::collections::HashMap<String, TensorProto>, key: &str| -> Result<Vec<f32>, Box<dyn Error>> {
+            let tensor_proto = tensor_map.remove(key)
+                .ok_or_else(|| format!("Error: TFS response missing expected key '{}'", key))?;
+
+            if !tensor_proto.float_val.is_empty() {
+                Ok(tensor_proto.float_val)
+            } else if !tensor_proto.tensor_content.is_empty() {
+                let raw_bytes = tensor_proto.tensor_content;
+                let mut vec = Vec::with_capacity(raw_bytes.len() / 4);
+
+                for chunk in raw_bytes.chunks_exact(4) {
+                    let val = f32::from_le_bytes(
+                        chunk.try_into().map_err(|_| format!("Failed to parse float bytes in '{}'", key))?
+                    );
+                    vec.push(val);
+                }
+                Ok(vec)
+            } else {
+                Err(format!("Error: Tensor '{}' contained neither float_val nor tensor_content", key).into())
+            }
+        };
+
+        // Extract the three distinct tensors requested by the diagnostic signature
+        let outputs = extract_float_tensor(&mut inner_response.outputs, "outputs")?;
+        let user_reprs = extract_float_tensor(&mut inner_response.outputs, "user_reprs")?;
+        let cand_reprs = extract_float_tensor(&mut inner_response.outputs, "cand_reprs")?;
+
+        Ok((outputs, user_reprs, cand_reprs))
+    }
+
 }
 
 ///
@@ -213,6 +270,57 @@ pub fn build_graph_ranker_proto_inputs(padded_super_graph: JraphGraph, embed_len
     } else {
         "serving_default"
     }.into();
+
+    // using the batch_size=1 default signature:
+    let model_spec = ModelSpec {
+        name: "graph-ranker".into(),
+        signature_name: signature_name,
+        version_choice: ranker_model_version_choice,
+        ..Default::default()
+    };
+
+    PredictRequest {
+        model_spec: Some(model_spec),
+        inputs,
+        output_filter: Vec::new(),
+        predict_streamed_options: None,
+        client_id: None,
+        request_options: None,
+    }
+}
+
+
+/// build the inputs for a ranker diagnostic request.  It uses the ranker batch format
+/// (e.g. batch_size=256).
+///
+/// # Arguments
+///
+/// * `padded_super_graph`:
+/// * `embed_len`:
+/// * `ranker_model_version_choice`:
+///
+/// returns: PredictRequest ``
+pub fn build_graph_ranker_diagnostics_proto_inputs(padded_super_graph: JraphGraph, embed_len : usize,
+    ranker_model_version_choice: Option<VersionChoice>) -> PredictRequest {
+
+    /*
+    //MAX_GRAPHS:
+    padded_super_graph.n_node
+    padded_super_graph.n_edge
+    //MAX_EDGES:
+    padded_super_graph.senders
+    padded_super_graph.receivers
+    padded_super_graph.edge_features
+    //MAX_NODES:
+    padded_super_graph.node_ids
+    padded_super_graph.node_labels
+    padded_super_graph.node_types
+    padded_super_graph.candidate_mask
+    */
+
+    let inputs : HashMap<String, TensorProto> = _build_graph_ranker_proto_inputs(padded_super_graph, embed_len);
+
+    let signature_name = "serving_diagnostics".into();
 
     // using the batch_size=1 default signature:
     let model_spec = ModelSpec {

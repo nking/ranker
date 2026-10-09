@@ -639,7 +639,7 @@ mod calc_metrics_2_tests {
         recommended_set_ref: &mut HashSet<i32>,
     ) -> Result<(), Box<dyn std::error::Error>> {
 
-        let k = ranked_movies_ref.num_candidates as usize;
+        let k = ranked_movies_ref.k as usize;
         let catalog_size = movie_tiers_ref.len() as f64;
 
         // make 1 hashset for each movie_tier.
@@ -734,7 +734,7 @@ mod calc_metrics_2_tests {
         catalog_size : usize
     ) -> Result<(), Box<dyn std::error::Error>> {
 
-        let k = ranked_movies_ref.num_candidates as usize;
+        let k = ranked_movies_ref.k as usize;
 
         // make 1 hashset for each user_tier.
        let user_tier_sets: Vec<HashSet<i32>> = (0..3)

@@ -18,7 +18,7 @@ class ExportTest(unittest.TestCase):
 
         #temporary overwrite to point to latest trained model Orbax checkpoint bucket
         checkpoint_uri = os.path.join(get_project_dir(),
-                                      "TMP19/checkpoint-bucket/best/kaggle-hpo/train_0/")
+            "TMP19/checkpoint-bucket/best/kaggle-hpo/train_0/")
 
         checkpoint_uri = os.path.join(get_project_dir(),
             "tmp_mounts/fake-gcs-server/checkpoint-bucket/best/GraphRanker_tuning_unittest_best/train_1234567/")

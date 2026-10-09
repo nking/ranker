@@ -82,7 +82,7 @@ mod client_tests {
 
         let ranker_metadata = RankerModelMetadata::load_from_file(&single_uri).unwrap();
 
-        let client = RankerModelClient::new(config.ranker_uri, ranker_metadata.clone()).await;
+        let client = RankerModelClient::new(config.ranker_uri.clone(), ranker_metadata.clone()).await;
 
         let _top_k = config.top_k;
         let _user_db_path: PathBuf = config.user_db_path.clone();
@@ -124,13 +124,41 @@ mod client_tests {
         // If the docker container isn't running, or the model isn't loaded,
         // this will fail and print the gRPC status error.
         let result : Result<Vec<f32>, Box<dyn Error>> = client.get_candidate_ranks(
-            padded_super_graph, embed_len as usize, query_model_version).await;
+            padded_super_graph, embed_len as usize, query_model_version.clone()).await;
 
         assert!(result.is_ok(), "Failed to get ranks: {:?}", result.err());
 
         let ranks: Vec<f32> = result.unwrap();
-        // the batch_size * num_candidates are the scored values, all else are dummy scores
+        // the batch_size * num_candidates are the scored values, all else are dummy scores, piled up at end
         let _ranks : &[f32] = &ranks[0..batch_size * num_candidates];
+        assert_eq!(_ranks.len(), batch_size * num_candidates);
+
+        // ============================================================================================
+        // switch to a batch client to test diagnostics
+        let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri).unwrap();
+        let client = RankerModelClient::new(config.ranker_uri, ranker_metadata.clone()).await;
+        let ranker_batch_size : usize = client.metadata.batch_size;
+        let out_features = ranker_metadata.out_features;
+
+        let padded_super_graph : JraphGraph  = create_fake_padded_super_batch(
+            batch_size,
+            ranker_batch_size,
+            max_history, num_candidates, user_id_range,
+            movie_id_range, n_local_devices,
+            &user_embeddings_uri, &movie_embeddings_uri
+        );
+
+        // this will fail until latest trained models are placed in src/test/resources/  cross-encoder directories
+        // make the diagnostic request
+        let result = client.get_candidate_diagnostics(
+            padded_super_graph, embed_len as usize, query_model_version.clone()).await;
+        assert!(result.is_ok(), "Failed to get ranks: {:?}", result.err());
+        let (mut outputs, mut user_reprs, mut cand_reprs) = result
+            .expect("error with request or response for ranker diagnostics");
+
+        outputs.truncate(batch_size * num_candidates);
+        user_reprs.truncate(batch_size * out_features);
+        cand_reprs.truncate(batch_size * num_candidates * out_features);
 
         Ok(())
 

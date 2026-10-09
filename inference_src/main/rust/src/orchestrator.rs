@@ -1,5 +1,6 @@
 ﻿use std::cmp::min;
 use std::collections::{HashMap, HashSet};
+use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use arc_swap::ArcSwap;
@@ -8,7 +9,7 @@ use crate::embeddings_ann::Searcher;
 use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
 use crate::user_history::{build_user_history, UserHistory};
 
-use crate::pb::{UsersRequest, UsersRankOnlyRequest, RankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse};
+use crate::pb::{UsersRequest, UsersRankOnlyRequest, RankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse, RankedMoviesAndRepr};
 use tonic::{Request, Response, Status};
 use usearch::ffi::Matches;
 use crate::model_client::tf_serving::model_spec::VersionChoice;
@@ -16,7 +17,7 @@ use crate::pb::recommender_service_server::RecommenderService;
 use crate::query_model_metadata::QueryModelMetadata;
 use crate::ranker_model_metadata::RankerModelMetadata;
 use crate::user_db::UserDb;
-use crate::util::{get_top_k_desc_scores};
+use crate::util::{get_top_k_desc_diagnostic, get_top_k_desc_scores};
 
 // the number of local_devices attached to the ranker TFS.  e.g. = 2 for the kaggle T4x2 GPUs
 // max_history, num_candidates are hyper-parameters of the ranker_model
@@ -400,11 +401,107 @@ impl Orchestrator {
                     user_ids: user_ids.to_vec(),
                     movie_ids: candidate_ids.to_vec(),
                     scores: ranks,
-                    num_candidates: ranker_metadata.num_candidates as u32
+                    k: ranker_metadata.num_candidates as u32
                 })
             },
             Err(e) => {
                 Err(Status::internal(format!("ranking request failed: {}", e)))
+            }
+        }
+    }
+
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// * `user_ids`:
+    /// * `timestamps`:
+    /// * `user_embeddings`:
+    /// * `candidate_ids`:
+    /// * `ranker_model_version_choice`:
+    ///
+    /// returns: Result<<RankedMoviesAndRepr>, Status>
+    /// scores shape is (n_users * num_candidates);
+    ///  user_reprs shape is (n_users * out_features);
+    ///  cand_reprs shape is (n_users * num_candidates * out_features);
+    pub async fn _make_ranker_diagnostic_request(
+        &self,
+        user_ids: &[i32],               // Changed to slice
+        timestamps: &[i64],             // Changed to slice
+        user_embeddings: &[f32],        // Changed to slice
+        candidate_ids: &[i32],          // Changed to slice
+        ranker_model_version_choice: Option<VersionChoice>
+    ) -> Result<RankedMoviesAndRepr, Status> {
+
+        let n_users = user_ids.len();
+
+        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .map_err(|e| {
+                eprintln!("Failed to fetch ranker metadata: {}", e);
+                Status::internal(format!("Internal metadata error: {}", e))
+            })?;
+
+        if n_users > ranker_metadata.batch_size {
+            return Err(Status::invalid_argument(format!(
+                "n_users {} must be <= batch_size {}",
+                n_users, ranker_metadata.batch_size
+            )));
+        }
+
+        let searcher = self.searcher.load();
+
+        let labels: Vec<i32> = vec![1; candidate_ids.len()];
+
+        //println!("about to create input graph arrays for ranker request");
+
+        // Note: We removed the `&` prefixes here because the arguments are ALREADY references (slices)
+        let padded_super_graph_arrays: JraphGraph = build_enriched_padded_supergraph(
+            ranker_metadata.batch_size,
+            user_ids,                 // Was &user_ids
+            timestamps,               // Was &timestamps
+            candidate_ids,            // Was &candidate_ids
+            &labels,                  // Still needs & because we created it as a Vec locally
+            &self.user_history,
+            ranker_metadata.max_history,
+            ranker_metadata.num_catalog_users,
+            searcher.get_num_catalog_movies(),
+            searcher.get_embed_len(),
+            searcher.get_movies_embedding_catalog_ref(),
+            user_embeddings,          // Was &user_embeddings
+            self.ranker_n_local_devices
+        );
+
+        let final_response :  Result<(Vec<f32>, Vec<f32>, Vec<f32>), Box<dyn Error>> = self.ranker_model.get_candidate_diagnostics(
+            padded_super_graph_arrays, searcher.get_embed_len(), ranker_model_version_choice).await;
+
+        /*
+        // scores is shape (max_graphs * num_candidates) with padding piled up at end
+        // user_reprs is shape (max_graphs * out_features) with padding piled up at end
+        // cand_reprs is shape (max_graphs * num_candidates * out_features) with padding piled up at end
+         */
+        let num_candidates = candidate_ids.len();
+        let out_features = ranker_metadata.out_features;
+
+        match final_response {
+            Ok((mut scores, mut user_reprs, mut cand_reprs)) => {
+
+                scores.truncate(n_users * num_candidates);
+                user_reprs.truncate(n_users * out_features);
+                cand_reprs.truncate(n_users * num_candidates * out_features);
+
+                Ok(RankedMoviesAndRepr {
+                    // Convert slices back to owned Vecs ONLY when we absolutely have to
+                    // for the protobuf struct payload
+                    user_ids: user_ids.to_vec(),
+                    movie_ids: candidate_ids.to_vec(),
+                    scores: scores,
+                    user_reprs : user_reprs,
+                    cand_reprs: cand_reprs,
+                    k: ranker_metadata.num_candidates as u32
+                })
+            },
+            Err(e) => {
+                Err(Status::internal(format!("ranking diagnostic request failed: {}", e)))
             }
         }
     }
@@ -456,7 +553,57 @@ impl Orchestrator {
             user_ids: user_ids,
             movie_ids: top_movie_ids,
             scores: top_scores,
-            num_candidates: self.top_k as u32,
+            k: self.top_k as u32,
+        }))
+    }
+
+    async fn _predict_diagnostic(&self, req: Request<UsersRequest>) -> Result<Response<RankedMoviesAndRepr>, Status> {
+
+        let user_reqs = req.into_inner();
+
+        let ann_reqs = Request::new(user_reqs.clone());
+        let ann_res: ApproxNearestNeighborsResponse = self._approx_nearest_neighbors(ann_reqs).await?.into_inner();
+
+        // Extract the generated fields from the new protobuf response message
+        let user_ids = ann_res.user_ids;
+        // length: n_users * embed_len
+        let user_embeddings = ann_res.user_embeddings;
+        // length: n_users * num_candidates
+        let ann_movie_ids = ann_res.candidate_ids;
+
+        let ranker_model_version_choice = Some(VersionChoice::Version(user_reqs.ranker_model_version));
+
+        // scores shape is (n_users * num_candidates);
+        // movie_ids is shape (n_users * num_candidates)
+        // user_reprs shape is (n_users * out_features);
+        // cand_reprs shape is (n_users * num_candidates * out_features);
+        let mut ranked_movies_and_reprs = self._make_ranker_diagnostic_request(
+            &user_ids, &user_reqs.timestamps, &user_embeddings, &ann_movie_ids, ranker_model_version_choice.clone()).await?;
+
+        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .map_err(|e| {
+                // Optional: log it so you can see the error in your server console
+                eprintln!("Failed to fetch ranker metadata: {}", e);
+                // Convert to a gRPC Status
+                Status::internal(format!("Internal metadata error: {}", e))
+            })?;
+
+        let num_candidates = ranker_metadata.num_candidates;
+        let out_features = ranker_metadata.out_features;
+
+        let (top_movie_ids, top_scores, top_cand_repr) = get_top_k_desc_diagnostic(
+            & mut ranked_movies_and_reprs.movie_ids, &mut ranked_movies_and_reprs.scores,
+            & mut ranked_movies_and_reprs.cand_reprs,
+            num_candidates, self.top_k, out_features
+        );
+
+        Ok(Response::new( RankedMoviesAndRepr {
+            user_ids: user_ids,
+            movie_ids: top_movie_ids,
+            scores: top_scores,
+            user_reprs: ranked_movies_and_reprs.user_reprs,
+            cand_reprs: top_cand_repr,
+            k: self.top_k as u32,
         }))
     }
 
@@ -581,7 +728,7 @@ impl RecommenderService for Orchestrator {
     ///
     /// * `req`:
     ///
-    /// returns: Result<Response<RankedMovies>, Status>
+    /// returns: Result<Response<AppriximateNearestNeighborResponse>, Status>
     ///
     /// # Examples
     ///
@@ -660,7 +807,73 @@ impl RecommenderService for Orchestrator {
             user_ids: user_reqs.user_ids,
             movie_ids: final_candidate_ids,
             scores: final_scores,
-            num_candidates: self.top_k as u32
+            k: self.top_k as u32
+        }))
+    }
+
+    async fn predict_diagnostic(&self, req: Request<UsersRequest>) -> Result<Response<RankedMoviesAndRepr>, Status> {
+
+        let user_reqs = req.into_inner();
+
+        let n_users = user_reqs.user_ids.len();
+
+        let ranker_model_version_choice = Some(VersionChoice::Version(user_reqs.ranker_model_version));
+
+        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .map_err(|e| {
+                // Optional: log it so you can see the error in your server console
+                eprintln!("Failed to fetch ranker metadata: {}", e);
+                // Convert to a gRPC Status
+                Status::internal(format!("Internal metadata error: {}", e))
+            })?;
+
+        let batch_size : usize = ranker_metadata.batch_size;
+
+        //println!("batch_size={}, n_users={}", batch_size, n_users);
+
+        if n_users == batch_size {
+            return self._predict_diagnostic(Request::new(user_reqs.clone())).await;
+        }
+
+        // reserve response arrays:
+        let mut final_candidate_ids: Vec<i32> = Vec::with_capacity(n_users * ranker_metadata.num_candidates);
+        let mut final_scores: Vec<f32> = Vec::with_capacity(n_users * ranker_metadata.num_candidates);
+        let mut final_user_repr: Vec<f32> = Vec::with_capacity(n_users * ranker_metadata.out_features);
+        let mut final_cand_repr: Vec<f32> = Vec::with_capacity(n_users * ranker_metadata.num_candidates * ranker_metadata.out_features);
+
+        for i0 in (0..n_users).step_by(batch_size) {
+
+            let i1 = std::cmp::min(i0 + batch_size, n_users);
+
+            // make a new UsersRequest from the user data from i0 to i1
+            let req_i = UsersRequest {
+                user_ids : user_reqs.user_ids[i0..i1].to_vec(),
+                genders : user_reqs.genders[i0..i1].to_vec(),
+                occupations : user_reqs.occupations[i0..i1].to_vec(),
+                ages : user_reqs.ages[i0..i1].to_vec(),
+                timestamps : user_reqs.timestamps[i0..i1].to_vec(),
+                n_users : (i1 - i0) as u32,
+                k : None, // defaults to num_candidates of ranker model.  could set it to query model k_retrieval
+                query_model_version: user_reqs.query_model_version,
+                ranker_model_version: user_reqs.ranker_model_version
+            };
+
+            let resp_i = self._predict_diagnostic(Request::new(req_i)).await?;
+            let ranked_movies_i = resp_i.into_inner();
+
+            final_candidate_ids.extend(ranked_movies_i.movie_ids);
+            final_scores.extend(ranked_movies_i.scores);
+            final_user_repr.extend(ranked_movies_i.user_reprs);
+            final_cand_repr.extend(ranked_movies_i.cand_reprs);
+        }
+
+        Ok(Response::new( RankedMoviesAndRepr {
+            user_ids: user_reqs.user_ids,
+            movie_ids: final_candidate_ids,
+            scores: final_scores,
+            user_reprs: final_user_repr,
+            cand_reprs: final_cand_repr,
+            k: self.top_k as u32
         }))
     }
 

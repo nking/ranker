@@ -202,9 +202,9 @@ mod post_training_analysis {
         let ranker_model_version = Some(VersionChoice::Version(1));
         let output_base_dir = get_bin_dir().unwrap().to_string_lossy().into_owned();
         let summary_output_dir = format!("{}/post_training_analysis", output_base_dir.trim_end_matches('/'));
-        let _ = recreate_directory(summary_output_dir.as_str()).unwrap();
+        let _ = recreate_directory(summary_output_dir.as_str())?;
         let parquet_output_dir = format!("{}/parquet_metrics",  output_base_dir.trim_end_matches('/'));
-        let _ = recreate_directory(parquet_output_dir.as_str()).unwrap();
+        let _ = recreate_directory(parquet_output_dir.as_str())?;
 
 
         // calculate @k metrics for retrieval and ranking for given model versions
@@ -345,6 +345,7 @@ mod post_training_analysis {
             top_k,
             &user_gt_counts,
             &user_ids,
+            &ann_res.user_embeddings,
             &candidate_movie_ids, //num_candidates
             &top_k_movie_ids, //top_k
             &ranker_movie_ids,
@@ -362,6 +363,7 @@ mod post_training_analysis {
             top_k,
             &user_gt_counts,
             &user_ids,
+            &ann_res.user_embeddings,
             &candidate_movie_ids, //num_candidates
             &top_k_movie_ids, //top_k
             &ranker_movie_ids,
@@ -379,6 +381,7 @@ mod post_training_analysis {
             top_k,
             &user_gt_counts,
             &user_ids,
+            &ann_res.user_embeddings,
             &candidate_movie_ids, //num_candidates
             &top_k_movie_ids, //top_k
             &ranker_movie_ids,
@@ -396,6 +399,7 @@ mod post_training_analysis {
             top_k,
             &user_gt_counts,
             &user_ids,
+            &ann_res.user_embeddings,
             &candidate_movie_ids, //num_candidates
             &top_k_movie_ids, //top_k
             &ranker_movie_ids,
@@ -415,6 +419,7 @@ mod post_training_analysis {
             top_k,
             &user_gt_counts,
             &user_ids,
+            &ann_res.user_embeddings,
             &candidate_movie_ids, //num_candidates
             &top_k_movie_ids, //top_k
             &ranker_movie_ids,
@@ -439,6 +444,7 @@ mod post_training_analysis {
         top_k: usize,
         user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
         user_ids: &[i32],            // shape: (n_users)
+        user_embeddings: &[f32],     // shape (n_users * embed_len)
         candidate_movie_ids: &[i32],    // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
         top_k_movie_ids: &[i32],           // shape: (n_users * top_k)   these are the retrieved or ranked movie_ids
         ranker_movie_ids: &[i32],         // shape: (n_users * top_k)
@@ -446,7 +452,7 @@ mod post_training_analysis {
         summary_output_dir: &str,
         output_json_file_name: &str,
         keyword: &str,
-        metric_func: impl Fn(usize, usize, &TestHarness, &LazyFrame, &[i32],
+        metric_func: impl Fn(usize, usize, &TestHarness, &LazyFrame, &[i32], &[f32],
             &[i32],  &str, &str, &str) -> PolarsResult<(HashMap<String, f64>, Vec<String>)>
        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
@@ -456,11 +462,12 @@ mod post_training_analysis {
                 num_candidates,
                 ranker_metadata.num_catalog_movies,
                 harness,
-                &user_gt_counts,
-                &user_ids,
-                &candidate_movie_ids,
-                &parquet_output_dir,
-                &summary_output_dir,
+                user_gt_counts,
+                user_ids,
+                user_embeddings,
+                candidate_movie_ids,
+                parquet_output_dir,
+                summary_output_dir,
                 &tag1
             );
         //}).await.expect("Spawn blocking panicked")?;
@@ -475,11 +482,12 @@ mod post_training_analysis {
                 top_k,
                 ranker_metadata.num_catalog_movies,
                 harness,
-                &user_gt_counts,
-                &user_ids,
-                &top_k_movie_ids,
-                &parquet_output_dir,
-                &summary_output_dir,
+                user_gt_counts,
+                user_ids,
+                user_embeddings,
+                top_k_movie_ids,
+                parquet_output_dir,
+                summary_output_dir,
                 &tag2
             );
         //}).await.expect("Spawn blocking panicked")?;
@@ -501,11 +509,12 @@ mod post_training_analysis {
                 top_k,
                 ranker_metadata.num_catalog_movies,
                 harness,
-                &user_gt_counts,
-                &user_ids,
-                &ranker_movie_ids,
-                &parquet_output_dir,
-                &summary_output_dir,
+                user_gt_counts,
+                user_ids,
+                user_embeddings,
+                ranker_movie_ids,
+                parquet_output_dir,
+                summary_output_dir,
                 &tag3
             );
         //}).await.expect("Spawn blocking panicked")?;
@@ -582,6 +591,7 @@ mod post_training_analysis {
         harness: &TestHarness,
         _user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
         user_ids: &[i32],            // shape: (n_users)
+        _user_embeddings: &[f32],     // shape (n_users * embed_len)
         neighbors: &[i32],           // shape: (n_users * ks)   these are the retrieved or ranked movie_ids
         parquet_output_dir: &str,
         summary_output_dir: &str,
@@ -811,6 +821,7 @@ mod post_training_analysis {
         harness: &TestHarness,
         _user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
         user_ids: &[i32],            // shape: (n_users)
+        _user_embeddings: &[f32],     // shape (n_users * embed_len)
         neighbors: &[i32],           // shape: (n_users * k)   these are the retrieved or ranked movie_ids
         parquet_output_dir: &str,
         _summary_output_dir: &str,
@@ -886,7 +897,7 @@ mod post_training_analysis {
 
         // Aggregate Stratified Statistics by User Tier
         for t in 0..=2 {
-            let mask = user_bias_df.column("user_tier")?.as_materialized_series().i32()?.equal(t as i32);
+            let mask = user_bias_df.column("user_tier")?.as_materialized_series().i32()?.equal(t);
             let tier_df = user_bias_df.filter(&mask)?;
 
             let t_rec = extract_mean(&tier_df, "rec_mean_pop");
@@ -957,6 +968,7 @@ mod post_training_analysis {
         harness: &TestHarness,
         _user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...] for tier being movie_tiers 0, 1, 2
         user_ids: &[i32],            // shape: (n_users)
+        _user_embeddings: &[f32],     // shape (n_users * embed_len)
         neighbors: &[i32],           // shape: (n_users * k)   these are the retrieved or ranked movie_ids
         parquet_output_dir: &str,
         _summary_output_dir: &str,
@@ -1136,6 +1148,260 @@ mod post_training_analysis {
         Ok((agg_res, conclusions))
     }
 
+    fn _embedding_hubness(
+        k: usize,                    // either num_candidates or top_k
+        catalog_size: usize,
+        harness: &TestHarness,
+        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...]
+        user_ids: &[i32],            // shape: (n_users)
+        user_embeddings: &[f32],     // shape (n_users * embed_len)
+        neighbors: &[i32],           // shape: (n_users * k)
+        parquet_output_dir: &str,
+        #[allow(dead_code)]
+        _summary_output_dir: &str,
+        tag: &str,
+    ) -> PolarsResult<(HashMap<String, f64>, Vec<String>)> {
+
+        /*
+        TwoTower embeddings:
+           - relevant pairs should have good alignment, measured by coine sim or dot product
+           - as a whole, all embeddings should be well distributed over the latent space.
+             if the embeddings are normalized, the latent space is a hypersphere and the
+             embeddings are on the surface of it.  negative pairs should have good separation
+             and positive pairs should proximally close.
+           - stratified partitions of the embeddings for movies by popularity or user by popularity
+             should all be co-spatial too, that is, they share the same natural semantic clusters.
+             The differences in spatial mappings on the hyper-sphere are from the latent
+             meaning of the features (e.g. genre, occupation, city).
+             - an error in popularity stratification can be seen as popular items being centrally
+               clusters on the hypersphere with medium popular items a little further away and
+               least popular items even further away from the central popular items.
+               - to correct for such an error:
+                  - log Q correction
+                  - hard negative sampling
+                  - temperature scaling
+        Hubness:
+           - an error in filling the embedding space where one sees that a small number of
+             vector embeddings (hubs) are the nearest neighbors to the rest of the embeddings.
+             This cone-like appearance should be avoided:
+                - apply more regularization to avoid popularity bias, etc.
+         */
+
+        let mut agg_res: HashMap<String, f64> = HashMap::new();
+        let mut conclusions: Vec<String> = Vec::new();
+        let n_users = user_ids.len();
+
+        let movie_embeddings: Vec<f32> = harness.orchestrator._get_movies_embedding_catalog();
+        let embed_len = harness.embed_len;
+        let movies_offset = harness.movies_offset;
+
+        // =================================================================
+        // CALCULATE GLOBAL USER CENTROID
+        // =================================================================
+        let mut user_centroid = vec![0.0f32; embed_len];
+        for chunk in user_embeddings.chunks_exact(embed_len) {
+            for (i, &val) in chunk.iter().enumerate() {
+                user_centroid[i] += val;
+            }
+        }
+        for val in user_centroid.iter_mut() {
+            *val /= n_users as f32;
+        }
+
+        // =================================================================
+        //ITEM-LEVEL HUBNESS (N_k & Centroid Proximity)
+        // =================================================================
+
+        let item_pop_lf = df!("movie_id" => neighbors)?.lazy()
+            .group_by([col("movie_id")])
+            .agg([len().alias("retrieval_count")]);
+
+        let mut full_item_df = harness.movie_tiers_df.clone()
+            .select([col("movie_id"), col("movie_tier")])
+            .left_join(item_pop_lf, col("movie_id"), col("movie_id"))
+            .with_columns([col("retrieval_count").fill_null(lit(0u32))])
+            .collect()?;
+
+        let movie_ids_series = full_item_df.column("movie_id")?.i32()?;
+        let mut similarities = Vec::with_capacity(movie_ids_series.len());
+
+        for opt_id in movie_ids_series.iter() {
+            let sim = if let Some(id) = opt_id {
+                let raw_id = id as usize;
+                let idx = if raw_id >= movies_offset { raw_id - movies_offset } else { raw_id };
+                let start = idx * embed_len;
+
+                if start + embed_len <= movie_embeddings.len() {
+                    cosine_similarity(&movie_embeddings[start..(start + embed_len)], &user_centroid)
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
+            similarities.push(sim as f64);
+        }
+
+        full_item_df.with_column(Column::from(Series::new("sim_to_user_centroid".into(), similarities)))?;
+
+        // Export Item-Level stats to Parquet
+        let item_parquet_path = Path::new(parquet_output_dir).join(format!("hubness_item_stats_k_{}_{}.parquet", k, tag));
+        let mut file = File::create(&item_parquet_path)?;
+        ParquetWriter::new(&mut file).finish(&mut full_item_df)?;
+
+        // Delegate statistical math to the helper
+        let counts_series = full_item_df.column("retrieval_count")?.cast(&DataType::Float64)?;
+        let counts_ca = counts_series.f64()?;
+        let sims_ca = full_item_df.column("sim_to_user_centroid")?.f64()?;
+
+        let (skewness, max_nk, _mean_sim, pearson_r) = _calculate_hubness_stats(counts_ca, sims_ca);
+
+        agg_res.insert(format!("hubness_skewness_k_{}_{}", k, tag), skewness);
+        agg_res.insert(format!("hubness_max_nk_k_{}_{}", k, tag), max_nk);
+        agg_res.insert(format!("hubness_centroid_corr_k_{}_{}", k, tag), pearson_r);
+
+        // =================================================================
+        // USER-LEVEL HUB EXPOSURE
+        // =================================================================
+
+        let repeated_users: Vec<i32> = user_ids.iter().flat_map(|&u| std::iter::repeat(u).take(k)).collect();
+        let retrieval_df = df!(
+            "user_id" => repeated_users,
+            "movie_id" => neighbors
+        )?.lazy();
+
+        let mut user_hub_df = retrieval_df
+            .left_join(full_item_df.clone().lazy(), col("movie_id"), col("movie_id"))
+            .group_by([col("user_id")])
+            .agg([
+                col("retrieval_count").cast(DataType::Float64).mean().alias("avg_slate_nk"),
+                col("sim_to_user_centroid").mean().alias("avg_slate_sim_to_centroid")
+            ])
+            .left_join(harness.user_tiers_df.clone(), col("user_id"), col("user_id"))
+            .collect()?;
+
+        // Export User-Level stats to Parquet
+        let user_parquet_path = Path::new(parquet_output_dir).join(format!("hubness_user_stats_k_{}_{}.parquet", k, tag));
+        let mut file2 = File::create(&user_parquet_path)?;
+        ParquetWriter::new(&mut file2).finish(&mut user_hub_df)?;
+
+        // Stratify User-Level Metrics
+        let extract_mean = |df: &DataFrame, c: &str| -> f64 {
+            df.column(c).ok().and_then(|col| col.cast(&DataType::Float64).ok()).and_then(|col| col.f64().ok().map(|ca| ca.mean().unwrap_or(0.0))).unwrap_or(0.0)
+        };
+
+        agg_res.insert(format!("hub_exposure_mean_nk_k_{}_{}", k, tag), extract_mean(&user_hub_df, "avg_slate_nk"));
+        agg_res.insert(format!("hub_exposure_mean_sim_k_{}_{}", k, tag), extract_mean(&user_hub_df, "avg_slate_sim_to_centroid"));
+
+        for t in 0..=2 {
+            let mask = user_hub_df.column("user_tier")?.as_materialized_series().i32()?.equal(t as i32);
+            let tier_df = user_hub_df.filter(&mask)?;
+            agg_res.insert(format!("hub_exposure_mean_nk_k_{}_user_tier_{}_{}", k, t, tag), extract_mean(&tier_df, "avg_slate_nk"));
+        }
+
+        // =================================================================
+        // AUTOMATED CONCLUSIONS
+        // =================================================================
+
+        let max_nk_pct = (max_nk / n_users as f64) * 100.0;
+
+        if skewness > 5.0 && pearson_r > 0.5 {
+            conclusions.push(format!("SEVERE GEOMETRIC HUBNESS ({}): The retrieval distribution is highly skewed (Skewness: {:.1}), and retrieval frequency heavily correlates (r={:.2}) with proximity to the global user centroid. The space has collapsed into a few universal attractors.", tag, skewness, pearson_r));
+        } else if skewness > 3.0 {
+            conclusions.push(format!("MODERATE HUBNESS ({}): The retrieval distribution is moderately right-skewed (Skewness: {:.1}). A handful of items are dominating slates, but they are not strictly tied to the global user centroid (r={:.2}).", tag, skewness, pearson_r));
+        } else {
+            conclusions.push(format!("HEALTHY LATENT SPACE ({}): Skewness is low ({:.1}), indicating recommendation volume is naturally distributed without geometric black holes.", tag, skewness));
+        }
+
+        if max_nk_pct > 50.0 {
+            conclusions.push(format!("CRITICAL HUB ALERT ({}): A single item was recommended to {:.1}% of all users. Review item embeddings for missing normalization or excessive popularity biases.", tag, max_nk_pct));
+        }
+
+        let t2_exposure = *agg_res.get(&format!("hub_exposure_mean_nk_k_{}_user_tier_2_{}", k, tag)).unwrap_or(&0.0);
+        let t0_exposure = *agg_res.get(&format!("hub_exposure_mean_nk_k_{}_user_tier_0_{}", k, tag)).unwrap_or(&0.0);
+
+        if t2_exposure > t0_exposure * 1.5 {
+            conclusions.push(format!("TIERED HUB VULNERABILITY ({}): Power users are being aggressively funneled into hub items (Avg N_k: {:.0}) far more than Light users (Avg N_k: {:.0}). The dense history of Power users is pulling them into the center of the latent space.", tag, t2_exposure, t0_exposure));
+        }
+
+        Ok((agg_res, conclusions))
+    }
+
+    fn _contextual_hubness(
+        k: usize,                    // either num_candidates or top_k
+        catalog_size: usize,
+        harness: &TestHarness,
+        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...]
+        user_ids: &[i32],            // shape: (n_users)
+        user_embeddings: &[f32],     // shape (n_users * embed_len)
+        neighbors: &[i32],           // shape: (n_users * k)
+        parquet_output_dir: &str,
+        #[allow(dead_code)]
+        _summary_output_dir: &str,
+        tag: &str,
+    ) -> PolarsResult<(HashMap<String, f64>, Vec<String>)> {
+
+        let mut agg_res: HashMap<String, f64> = HashMap::new();
+        let mut conclusions: Vec<String> = Vec::new();
+        let n_users = user_ids.len();
+
+        let movie_embeddings: Vec<f32> = harness.orchestrator._get_movies_embedding_catalog();
+        let embed_len = harness.embed_len;
+        let movies_offset = harness.movies_offset;
+
+        Ok((HashMap::new(), Vec::new()))
+    }
+
+    /// Calculates the Hubness statistics for a given distribution of retrieval counts
+    /// and their associated geometric risk (e.g., distance to centroid or anisotropy score).
+    ///
+    /// Returns: (skewness, max_nk, mean_geometric_risk, pearson_correlation)
+    pub fn _calculate_hubness_stats(
+        counts_ca: &Float64Chunked,
+        risk_ca: &Float64Chunked,
+    ) -> (f64, f64, f64, f64) {
+
+        let mean_nk = counts_ca.mean().unwrap_or(0.0);
+        let std_nk = counts_ca.std(1).unwrap_or(0.0);
+        let max_nk = counts_ca.max().unwrap_or(0.0);
+
+        let mean_risk = risk_ca.mean().unwrap_or(0.0);
+        let std_risk = risk_ca.std(1).unwrap_or(0.0);
+
+        let mut skewness = 0.0;
+        let mut covariance = 0.0;
+        let mut n_valid = 0.0;
+
+        // Iterate through both chunked arrays to compute skewness and covariance
+        for (opt_nk, opt_risk) in counts_ca.iter().zip(risk_ca.iter()) {
+            if let (Some(nk), Some(risk)) = (opt_nk, opt_risk) {
+
+                // Calculate 3rd standardized moment (Skewness)
+                if std_nk > 0.0 {
+                    let z = (nk - mean_nk) / std_nk;
+                    skewness += z * z * z;
+                }
+
+                covariance += (nk - mean_nk) * (risk - mean_risk);
+                n_valid += 1.0;
+            }
+        }
+
+        let final_skewness = if std_nk > 0.0 && n_valid > 0.0 {
+            skewness / n_valid
+        } else {
+            0.0
+        };
+
+        let pearson_r = if std_nk > 0.0 && std_risk > 0.0 && n_valid > 1.0 {
+            (covariance / (n_valid - 1.0)) / (std_nk * std_risk)
+        } else {
+            0.0
+        };
+
+        (final_skewness, max_nk, mean_risk, pearson_r)
+    }
+
     /// Evaluates Retrieval or Ranker output and returns a tuple of (Metrics Dictionary, Conclusions List)
     fn _metrics(
         k: usize,                    // either num_candidates or top_k
@@ -1143,6 +1409,7 @@ mod post_training_analysis {
         harness: &TestHarness,
         user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...]
         user_ids: &[i32],            // shape: (n_users)
+        _user_embeddings: &[f32],     // shape (n_users * embed_len)
         neighbors: &[i32],           // shape: (n_users * k)
         parquet_output_dir: &str,
         #[allow(dead_code)]

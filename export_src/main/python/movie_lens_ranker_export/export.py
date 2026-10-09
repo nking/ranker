@@ -192,6 +192,8 @@ def export_models(trained_model: GraphRanker, batch_size:int,
     max_history = params['max_history']
     num_candidates = params['num_candidates']
     embed_len = params['embed_len']
+    out_features = model_dict['training_params']['out_dim']
+    params['out_features'] = out_features
 
     jax_graph_comp_dict_batch = calc_number_jax_graph_components(batch_size,
         max_history, num_candidates, n_local_devices=n_local_devices)
@@ -216,8 +218,7 @@ def export_models(trained_model: GraphRanker, batch_size:int,
         embed_len=embed_len,
         signature_name="serving_batch")
 
-    out_features = model_dict['training_params']['out_dim']
-
+    #build with batch size configuration
     diagnostic_serving_config = create_diagnostic_signature(
         max_nodes=jax_graph_comp_dict_batch['max_nodes'],
         max_edges=jax_graph_comp_dict_batch['max_edges'],
@@ -344,6 +345,9 @@ def export_models_old(trained_model: GraphRanker, batch_size:int,
     max_history = params['max_history']
     num_candidates = params['num_candidates']
     embed_len = params['embed_len']
+
+    # add some of the training params needed for model analysis
+    params['out_dim'] = model_dict['training_params']['out_dim']
 
     jax_graph_comp_dict_batch = calc_number_jax_graph_components(batch_size,
                                                                  max_history, num_candidates, n_local_devices=n_local_devices)

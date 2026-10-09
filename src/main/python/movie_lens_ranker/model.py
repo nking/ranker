@@ -33,6 +33,9 @@ class GraphRanker(nnx.Module):
         #self.embed_in_dim = user_movie_embeds.shape[1]
         self.embed_in_dim = emb_in_dim
 
+        #length of the embeddings output from GATV2
+        self.out_features = out_features
+
         self.num_candidates = num_candidates
         self.temperature = temperature
 
@@ -179,7 +182,7 @@ class GraphRanker(nnx.Module):
         ## Concatenate into a Lean Matching Vector [U, C, U*C, |U-C|]
         matching_vector = jnp.concatenate([user_expanded, cand_norm, dot_product, abs_diff], axis=-1)
 
-        ## the following was used for linear interaction for a 2 * out_features improvement in rumtime.
+        ## the following was used for linear interaction for a 2 * out_features improvement in runtime.
         ## the savings during training is nearly negigible though if the T4x2 GPUs are used because the bottleneck is loading data onto the GPUs
         ## and then the math is done extremely quickly.
         ## so commenting out this linear interaction to add a non-linear interaction using 1 2 layer MLP
@@ -200,6 +203,6 @@ class GraphRanker(nnx.Module):
 
         return {
             "scores": scores,          # (max_graphs, num_candidates)
-            "user_reprs": user_reprs,  # (max_graphs, embed_len)
-            "cand_reprs": cand_reprs,  # (max_graphs * num_candidates, embed_len)
+            "user_reprs": user_reprs,  # (max_graphs, out_features)
+            "cand_reprs": cand_reprs,  # (max_graphs * num_candidates, out_features)
         }

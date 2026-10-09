@@ -113,7 +113,7 @@ fn build_graph_arrays(
     )
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 // A struct to hold final GraphTuple
 pub struct JraphGraph {
     pub n_node: Vec<i32>,

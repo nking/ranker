@@ -192,6 +192,90 @@ pub fn get_top_k_desc_scores(
     (out_movie_ids, out_scores)
 }
 
+/// Extracts the top K candidates per user, sorting their scores, movie IDs,
+/// and candidate representations in descending order of score.
+/// runtime complexity is O(n_users * top_k * log(top_k))
+///
+/// # Arguments
+/// * `movie_ids` - Shape: (n_users * num_candidates)
+/// * `scores` - Shape: (n_users * num_candidates)
+/// * `cand_reprs` - Shape: (n_users * num_candidates * out_features)
+/// * `num_candidates` - Original number of candidates per user
+/// * `top_k` - Number of candidates to keep (top_k < num_candidates)
+/// * `out_features` - The embedding dimension of the candidate representations
+///
+/// Returns: (top_movie_ids, top_scores, top_cand_reprs)
+pub fn get_top_k_desc_diagnostic(
+    movie_ids: &[i32],
+    scores: &[f32],
+    cand_reprs: &[f32],
+    num_candidates: usize,
+    top_k: usize,
+    out_features: usize,
+) -> (Vec<i32>, Vec<f32>, Vec<f32>) {
+
+    let safe_top_k = top_k.min(num_candidates);
+    let n_users = scores.len() / num_candidates;
+
+    let mut out_movie_ids = Vec::with_capacity(n_users * safe_top_k);
+    let mut out_scores = Vec::with_capacity(n_users * safe_top_k);
+    let mut out_cand_reprs = Vec::with_capacity(n_users * safe_top_k * out_features);
+
+    // Pre-allocate a single index buffer to avoid allocating memory inside the loop
+    let mut indices: Vec<usize> = (0..num_candidates).collect();
+
+    // Process user by user
+    for u in 0..n_users {
+        // Isolate the slices belonging to this specific user
+        let i0 = u * num_candidates;
+        let i1 = i0 + num_candidates;
+        let score_chunk = &scores[i0..i1];
+        let movie_chunk = &movie_ids[i0..i1];
+        let cand_chunk = &cand_reprs[i0 * out_features..i1 * out_features];
+
+        // Reset the index buffer for the current user
+        for i in 0..num_candidates {
+            indices[i] = i;
+        }
+
+        if safe_top_k < num_candidates {
+            // O(N) Partitioning: Moves the top `safe_top_k` indices to the front of the array.
+            // These are NOT fully sorted yet, just partitioned.
+            let (top_slice, _, _) = indices.select_nth_unstable_by(safe_top_k - 1, |&a, &b| {
+                score_chunk[b].total_cmp(&score_chunk[a]) // Descending order
+            });
+
+            // O(K log K): Sort ONLY the tiny top K slice
+            top_slice.sort_unstable_by(|&a, &b| {
+                score_chunk[b].total_cmp(&score_chunk[a])
+            });
+
+            // Extract the sorted elements into the flat output vectors
+            for &idx in top_slice.iter() {
+                out_scores.push(score_chunk[idx]);
+                out_movie_ids.push(movie_chunk[idx]);
+
+                // Copy the full feature vector for this candidate using highly optimized slice copying
+                let cand_start = idx * out_features;
+                out_cand_reprs.extend_from_slice(&cand_chunk[cand_start..cand_start + out_features]);
+            }
+        } else {
+            // Fallback if top_k == num_candidates
+            indices.sort_unstable_by(|&a, &b| score_chunk[b].total_cmp(&score_chunk[a]));
+
+            for &idx in indices.iter() {
+                out_scores.push(score_chunk[idx]);
+                out_movie_ids.push(movie_chunk[idx]);
+
+                let cand_start = idx * out_features;
+                out_cand_reprs.extend_from_slice(&cand_chunk[cand_start..cand_start + out_features]);
+            }
+        }
+    }
+
+    (out_movie_ids, out_scores, out_cand_reprs)
+}
+
 /// get timestamp in seconds for "now".  timestamp is the number of seconds since
 /// January 1st, 1970 at UTC.
 ///

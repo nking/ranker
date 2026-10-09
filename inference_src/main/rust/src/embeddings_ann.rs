@@ -94,17 +94,15 @@ impl Searcher {
     }
 
     pub fn restore(&self) -> Result<Index, Box<dyn std::error::Error>> {
-        // 1. Check existence first
         if !self.persisted_index_path.exists() {
             return Err(Box::from("File does not exist."));
         }
 
-        // 2. Convert to string safely (handle non-UTF-8 paths)
         let path_str = self.persisted_index_path
             .to_str()
             .ok_or("Path contains invalid UTF-8 characters")?;
 
-        // 3. Restore and propagate errors with '?'
+        // Restore and propagate errors with '?'
         Ok(Index::restore(path_str)?)
     }
 

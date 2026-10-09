@@ -40,6 +40,9 @@ pub struct RankerModelMetadata {
     #[arg(long, env = "NUM_CATALOG_MOVIES",  default_value_t = 3883)]
     pub num_catalog_movies : usize,
 
+    #[arg(long, env = "OUT_FEATURES")]
+    pub out_features : usize,
+
     /// git commit hash for code used to train the model
     #[arg(long, env = "GIT_COMMIT_HASH")]
     pub git_commit_hash : String

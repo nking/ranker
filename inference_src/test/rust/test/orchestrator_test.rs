@@ -147,7 +147,7 @@ mod orchestrator_tests {
         assert!(results.is_ok(), "Prediction failed: {:?}", results.err());
         let ranked_movies = results.unwrap().into_inner();
 
-        assert_eq!(ranked_movies.num_candidates as usize, top_k);
+        assert_eq!(ranked_movies.k as usize, top_k);
         assert_eq!(ranked_movies.user_ids.len(), n_users);
         assert_eq!(ranked_movies.scores.len(), n_users * top_k);
         assert_eq!(ranked_movies.movie_ids.len(), n_users * top_k);
@@ -181,7 +181,7 @@ mod orchestrator_tests {
         let ranked_movies_res : RankedMovies = results.unwrap().into_inner();
         assert_eq!(ranked_movies_res.user_ids.len(), n_users);
         assert_eq!(ranked_movies_res.scores.len(), n_users * num_candidates);
-        assert_eq!(ranked_movies_res.num_candidates as usize, num_candidates);
+        assert_eq!(ranked_movies_res.k as usize, num_candidates);
 
         Ok(())
     }
@@ -239,7 +239,7 @@ mod orchestrator_tests {
         assert!(results.is_ok(), "Prediction failed: {:?}", results.err());
         let ranked_movies = results.unwrap().into_inner();
 
-        assert_eq!(harness.orchestrator.top_k as u32, ranked_movies.num_candidates);
+        assert_eq!(harness.orchestrator.top_k as u32, ranked_movies.k);
         assert_eq!(ranked_movies.user_ids.len(), 1);
         assert_eq!(ranked_movies.scores.len(), 1 * harness.orchestrator.top_k);
         assert_eq!(ranked_movies.movie_ids.len(), 1 * harness.orchestrator.top_k);
@@ -269,7 +269,7 @@ mod orchestrator_tests {
         assert!(results.is_ok(), "Prediction failed: {:?}", results.err());
         let ranked_movies = results.unwrap().into_inner();
 
-        assert_eq!(harness.orchestrator.top_k as u32, ranked_movies.num_candidates);
+        assert_eq!(harness.orchestrator.top_k as u32, ranked_movies.k);
         assert_eq!(ranked_movies.user_ids.len(), user_ids.len());
         assert_eq!(ranked_movies.scores.len(), user_ids.len() * harness.orchestrator.top_k);
         assert_eq!(ranked_movies.movie_ids.len(), user_ids.len() * harness.orchestrator.top_k);

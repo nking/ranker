@@ -25,13 +25,26 @@ message UsersRequest {
 //NOTE: default gRPC max message size is 4MB.  For 100,000 user_ids, thie object is about 40MB,
 // so configure the Rust tonic server and the calling client to accept larger payloads using
 // .max_decoding_message_size() and .max_encoding_message_size().
+// in some contexts k is num_candidates and in others it is top_k.
 message RankedMovies {
   repeated int32 user_ids = 1;
   repeated int32 movie_ids = 2; // "repeated" means it's a Vec in Rust
   repeated float scores = 3;
-  uint32 num_candidates = 4;
+  uint32 k = 4;
   // if choose to pass titles back, use a map of unique ids to title to reduce space:
   //map<int32, string> unique_movie_titles = 5;
+}
+
+message RankedMoviesAndRepr {
+  repeated int32 user_ids = 1;
+  repeated int32 movie_ids = 2; // "repeated" means it's a Vec in Rust
+  repeated float scores = 3;
+  repeated float user_reprs = 4;
+  repeated float cand_reprs = 5;
+  uint32 k = 6;
+  // scores is shape (n_users * k) with padding piled up at end
+  // user_reprs is shape (n_users * k) with padding piled up at end
+  // cand_reprs is shape (n_users * k * out_features) with padding piled up at end
 }
 
 // input request to return scored candidate_ids.  candidate_ids is currently a flat vector
@@ -69,4 +82,6 @@ service RecommenderService {
   rpc RankOnlyReturnAll(RankOnlyRequest) returns (RankedMovies);
   // request to return return nearest neighbors of user embedding
   rpc ApproxNearestNeighbors(UsersRequest) returns (ApproxNearestNeighborsResponse);
+
+  rpc PredictDiagnostic (UsersRequest) returns (RankedMoviesAndRepr);
 }
