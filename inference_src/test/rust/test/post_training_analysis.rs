@@ -186,7 +186,7 @@ mod post_training_analysis {
     use super::*;
 
     use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
-    use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMovies, RankedMoviesAndRepr, UsersRequest};
+    use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMoviesAndRepr, UsersRequest};
     use inference_engine::pb::recommender_service_server::RecommenderService;
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
     use inference_engine::util::{get_top_k_desc_scores};
@@ -339,7 +339,7 @@ mod post_training_analysis {
         //polars is already spinning up threads to use all cores available, so run these
         //   sequentially rather than in parallel.
 
-        let _ = calc_and_write(
+        let base_metrics = calc_and_write(
             harness,
             &ranker_metadata,
             num_candidates,
@@ -357,7 +357,7 @@ mod post_training_analysis {
             _metrics
         ).await;
 
-        let _ = calc_and_write(
+        let coverage = calc_and_write(
             harness,
             &ranker_metadata,
             num_candidates,
@@ -375,7 +375,7 @@ mod post_training_analysis {
             _coverage_and_gini
         ).await;
 
-        let _ = calc_and_write(
+        let pop_bias = calc_and_write(
             harness,
             &ranker_metadata,
             num_candidates,
@@ -393,7 +393,7 @@ mod post_training_analysis {
             _popularity_bias
         ).await;
 
-        let _ = calc_and_write(
+        let diversity = calc_and_write(
             harness,
             &ranker_metadata,
             num_candidates,
@@ -411,7 +411,25 @@ mod post_training_analysis {
             _diversity_metrics
         ).await;
 
-        let _ = contextual_hubness(
+        let emb_hubness = calc_and_write(
+            harness,
+            &ranker_metadata,
+            num_candidates,
+            top_k,
+            &user_gt_counts,
+            &user_ids,
+            &ann_res.user_embeddings,
+            &candidate_movie_ids, //num_candidates
+            &top_k_movie_ids, //top_k
+            &ranker_movie_ids,
+            &parquet_output_dir,
+            &summary_output_dir,
+            "embedding_hubness.json".as_ref(),
+            "embedding_hubness".as_ref(),
+            _embedding_hubness
+        ).await;
+
+        let ctx_hubness= contextual_hubness(
             harness,
             query_model_version.clone(),
             ranker_model_version.clone(),
@@ -426,6 +444,11 @@ mod post_training_analysis {
 
         //TODO:  analyze the funnel from num_candidates to top_k
         //TODO:  analyze whether the ranker ranking improves upon the retrieval for same top_k
+        // TODO: cross metric analysis such as root cause with gini and embedding hubness
+        let _ = cross_metric_analysis(
+            &base_metrics, &coverage, &pop_bias, &diversity, &emb_hubness, &ctx_hubness,
+            num_candidates, top_k, summary_output_dir
+        ).await?;
 
         Ok(())
     }
@@ -440,7 +463,7 @@ mod post_training_analysis {
         user_ids: &[i32],
         timestamps: &[i64],
         parquet_output_dir: &str,
-        summary_output_dir: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        summary_output_dir: &str) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
 
         let n_users = user_ids.len();
         let mut agg_res: HashMap<String, f64> = HashMap::new();
@@ -526,7 +549,8 @@ mod post_training_analysis {
         let counts_ca = counts_series.f64()?;
         let sims_ca = full_item_df.column("avg_sim_to_user")?.f64()?;
 
-        let (skewness, max_nk, mean_global_sim, pearson_r) = crate::helper::calculate_hubness_stats(counts_ca, sims_ca);
+        let (skewness, max_nk, mean_global_sim, pearson_r) =
+            _calculate_hubness_stats(counts_ca, sims_ca);
 
         agg_res.insert(format!("ctx_hubness_skewness_{}", tag), skewness);
         agg_res.insert(format!("ctx_hubness_max_nk_{}", tag), max_nk);
@@ -605,7 +629,7 @@ mod post_training_analysis {
 
         println!("Wrote contextual hubness metrics to {:?}", summary_path);
 
-        Ok(())
+        Ok(summary_payload)
     }
 
     async fn calc_and_write(
@@ -625,7 +649,7 @@ mod post_training_analysis {
         keyword: &str,
         metric_func: impl Fn(usize, usize, &TestHarness, &LazyFrame, &[i32], &[f32],
             &[i32],  &str, &str, &str) -> PolarsResult<(HashMap<String, f64>, Vec<String>)>
-       ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+       ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
 
         let tag1 = format!("retrieval_ann_{}", num_candidates);
         let result1 = //tokio::task::spawn_blocking(move || {
@@ -719,7 +743,7 @@ mod post_training_analysis {
 
         println!("{}", format!("wrote to {:?}", output_file_path));
 
-        Ok(())
+        Ok((agg_res))
     }
 
     /// calculate retrieval or ranking catalog coverage,
@@ -1863,5 +1887,113 @@ mod post_training_analysis {
         } else {
             dot_product / (norm_a_sq.sqrt() * norm_b_sq.sqrt())
         }
+    }
+
+    async fn cross_metric_analysis(
+        base_metrics: &serde_json::Value,
+        coverage: &serde_json::Value,
+        _pop_bias: &serde_json::Value,
+        diversity: &serde_json::Value,
+        emb_hubness: &serde_json::Value,
+        ctx_hubness: &serde_json::Value,
+        num_candidates: usize,
+        top_k: usize,
+        summary_output_dir: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
+        let tag1 = format!("retrieval_ann_{}", num_candidates);
+        let tag2 = format!("retrieval_ann_{}", top_k);
+        let tag3 = format!("ranker_{}", top_k);
+
+        // Helper to safely extract a f64 from the nested JSON tree
+        let extract = |json: &serde_json::Value, tag: &str, metric: &str| -> f64 {
+            json.get(tag)
+                .and_then(|t| t.get("metrics"))
+                .and_then(|m| m.get(metric))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0)
+        };
+
+        let mut conclusions = Vec::new();
+
+        // =================================================================
+        // 1. FUNNEL ANALYSIS (Retriever @ 100 vs Retriever @ 20)
+        // =================================================================
+        let recall_100 = extract(base_metrics, &tag1, &format!("recall_at_{}_mean", num_candidates));
+        let recall_20 = extract(base_metrics, &tag2, &format!("recall_at_{}_mean", top_k));
+
+        if recall_20 > 0.0 && recall_100 > 0.0 {
+            let retention = (recall_20 / recall_100) * 100.0;
+            conclusions.push(format!(
+                "FUNNEL RETENTION: Shrinking the candidate pool from {} to {} retains {:.1}% of the recall (Recall drops from {:.2}% to {:.2}%).",
+                num_candidates, top_k, retention, recall_100 * 100.0, recall_20 * 100.0
+            ));
+        }
+
+        // =================================================================
+        // 2. RANKER VS RETRIEVER LIFT (Ranker @ 20 vs Retriever @ 20)
+        // =================================================================
+        let ndcg_ret_20 = extract(base_metrics, &tag2, &format!("ndcg_at_{}_mean", top_k));
+        let ndcg_rnk_20 = extract(base_metrics, &tag3, &format!("ndcg_at_{}_mean", top_k));
+
+        if ndcg_ret_20 > 0.0 {
+            let ndcg_lift = ((ndcg_rnk_20 - ndcg_ret_20) / ndcg_ret_20) * 100.0;
+            if ndcg_lift > 5.0 {
+                conclusions.push(format!("RANKER LIFT: The Ranker improved NDCG@{} by {:.1}% over pure retrieval. The Cross-Encoder is successfully refining the candidate slates.", top_k, ndcg_lift));
+            } else if ndcg_lift < -2.0 {
+                conclusions.push(format!("RANKER DEGRADATION: The Ranker degraded NDCG@{} by {:.1}%. The Cross-Encoder is miscalibrated and is burying the true positives retrieved by the ANN.", top_k, ndcg_lift.abs()));
+            } else {
+                conclusions.push(format!("RANKER NEUTRAL: The Ranker provided negligible NDCG lift ({:.1}%) over pure retrieval.", ndcg_lift));
+            }
+        }
+
+        let cov_ret_20 = extract(coverage, &tag2, &format!("coverage_at_{}_full_{}", top_k, tag2));
+        let cov_rnk_20 = extract(coverage, &tag3, &format!("coverage_at_{}_full_{}", top_k, tag3));
+
+        if cov_ret_20 > 0.0 {
+            let cov_cost = ((cov_rnk_20 - cov_ret_20) / cov_ret_20) * 100.0;
+            if cov_cost < -15.0 {
+                conclusions.push(format!("RANKER COVERAGE COLLAPSE: To achieve its ranking, the Ranker sacrificed {:.1}% of the Retriever's catalog coverage. It is behaving much more conservatively than the ANN.", cov_cost.abs()));
+            }
+        }
+
+        // =================================================================
+        // 3. ROOT CAUSE CORRELATIONS (Gini vs. Hubness)
+        // =================================================================
+        let gini_rnk_20 = extract(coverage, &tag3, &format!("gini_at_{}_full_{}", top_k, tag3));
+        let div_rnk_20 = extract(diversity, &tag3, &format!("interlist_diversity_mean_k_{}_{}", top_k, tag3));
+
+        // Contextual hubness JSON is not wrapped in tag blocks, so we extract directly from "metrics"
+        let ctx_hub_corr = ctx_hubness.get("metrics")
+            .and_then(|m| m.get(format!("ctx_hubness_centroid_corr_ranker_contextual_k_{}", top_k)))
+            .and_then(|v| v.as_f64()).unwrap_or(0.0);
+
+        let emb_hub_corr = extract(emb_hubness, &tag1, &format!("hubness_centroid_corr_k_{}_{}", num_candidates, tag1));
+
+        if gini_rnk_20 > 0.80 {
+            if ctx_hub_corr > 0.40 {
+                conclusions.push(format!("RANKER DIAGNOSIS (STRUCTURAL BIAS): The Ranker's severe popularity bias (Gini: {:.2}) is structurally driven by contextual hubness (r={:.2}). The GATv2 layers are oversmoothing candidate embeddings.", gini_rnk_20, ctx_hub_corr));
+            } else {
+                conclusions.push(format!("RANKER DIAGNOSIS (ORGANIC BIAS): The Ranker exhibits high popularity bias (Gini: {:.2}), but it is NOT driven by geometric hubness (r={:.2}). The model is intentionally favoring popular items based on interaction data.", gini_rnk_20, ctx_hub_corr));
+            }
+        }
+
+        if div_rnk_20 < 0.50 && emb_hub_corr > 0.40 {
+            conclusions.push(format!("RETRIEVER DIAGNOSIS (POISONED POOL): The Ranker's poor inter-list diversity ({:.1}%) is likely inherited from the Retriever. The Retriever's latent space is dominated by universal geometric hubs (r={:.2}), poisoning the candidate pool before ranking even occurs.", div_rnk_20 * 100.0, emb_hub_corr));
+        }
+
+        // =================================================================
+        // EXPORT
+        // =================================================================
+        let payload = serde_json::json!({
+            "cross_metric_conclusions": conclusions
+        });
+
+        let out_path = std::path::Path::new(summary_output_dir).join("cross_metric_analysis.json");
+        let file = std::fs::File::create(&out_path)?;
+        serde_json::to_writer_pretty(file, &payload)?;
+        println!("Wrote cross-metric analysis to {:?}", out_path);
+
+        Ok(())
     }
 }
