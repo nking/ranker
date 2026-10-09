@@ -1622,16 +1622,20 @@ mod post_training_analysis {
         // Construct Aggregation Expressions
         let is_hit = col("rating").is_not_null();
         let dcg_expr = lit(1.0) / (col("rank").cast(DataType::Float64) + lit(1.0)).log(lit(2.0));
+        let rr_expr = lit(1.0) / col("rank").cast(DataType::Float64);
 
         let mut agg_exprs = vec![
             is_hit.clone().sum().alias("hits_global"),
             dcg_expr.clone().filter(is_hit.clone()).sum().alias("dcg_global"),
+            rr_expr.clone().filter(is_hit.clone()).first().alias("rr_global"), // <-- ADD THIS
         ];
 
         for t in 0..=2 {
             let tier_hit = is_hit.clone().and(col("movie_tier").eq(lit(t)));
             agg_exprs.push(tier_hit.clone().sum().alias(&format!("hits_tier_{}", t)));
-            agg_exprs.push(dcg_expr.clone().filter(tier_hit).sum().alias(&format!("dcg_tier_{}", t)));
+            agg_exprs.push(dcg_expr.clone().filter(tier_hit.clone()).sum().alias(&format!("dcg_tier_{}", t)));
+            // Extract the RR for the first hit belonging to this specific movie tier
+            agg_exprs.push(rr_expr.clone().filter(tier_hit).first().alias(&format!("rr_tier_{}", t)));
         }
 
         // Group by User ID and Apply Metrics
@@ -1745,6 +1749,12 @@ mod post_training_analysis {
         agg_res.insert(format!("ndcg_at_{}_mean", k), get_col_mean(&metrics_df, "ndcg_global"));
         agg_res.insert(format!("ndcg_at_{}_std", k), get_col_std(&metrics_df, "ndcg_global"));
 
+        let mrr_global = metrics_df.column("rr_global").unwrap().fill_null(FillNullStrategy::Zero).unwrap();
+        let mrr_mean = mrr_global.f64().unwrap().mean().unwrap_or(0.0);
+        let mrr_std = mrr_global.f64().unwrap().std(1).unwrap_or(0.0);
+        agg_res.insert(format!("mrr_at_{}_mean", k), mrr_mean);
+        agg_res.insert(format!("mrr_at_{}_std", k), mrr_std);
+
         agg_res.insert(format!("recall_at_{}_mean_random", k), get_col_mean(&metrics_df, "expected_random_recall"));
         agg_res.insert(format!("precision_at_{}_mean_random", k), get_col_mean(&metrics_df, "expected_random_precision"));
         agg_res.insert(format!("ndcg_at_{}_mean_random", k), get_col_mean(&metrics_df, "expected_random_ndcg"));
@@ -1767,6 +1777,10 @@ mod post_training_analysis {
             agg_res.insert(format!("ndcg_at_{}_mean_user_tier_{}", k, t), get_col_mean(&filtered_df, "ndcg_global"));
             agg_res.insert(format!("ndcg_at_{}_std_user_tier_{}", k, t), get_col_std(&filtered_df, "ndcg_global"));
 
+            let u_mrr = filtered_df.column("rr_global").unwrap().fill_null(FillNullStrategy::Zero).unwrap();
+            agg_res.insert(format!("mrr_at_{}_mean_user_tier_{}", k, t), u_mrr.f64().unwrap().mean().unwrap_or(0.0));
+            agg_res.insert(format!("mrr_at_{}_std_user_tier_{}", k, t), u_mrr.f64().unwrap().std(1).unwrap_or(0.0));
+
             // Movie Tier Extractions (using non-null valid data rows)
             let recall_col = format!("recall_tier_{}", t);
             let n_movie_samples = metrics_df.column(&recall_col)?.is_not_null().sum().unwrap_or(0);
@@ -1775,6 +1789,9 @@ mod post_training_analysis {
             agg_res.insert(format!("recall_at_{}_mean_movie_tier_{}", k, t), get_col_mean(&metrics_df, &recall_col));
             agg_res.insert(format!("precision_at_{}_mean_movie_tier_{}", k, t), get_col_mean(&metrics_df, &format!("precision_tier_{}", t)));
             agg_res.insert(format!("ndcg_at_{}_mean_movie_tier_{}", k, t), get_col_mean(&metrics_df, &format!("ndcg_tier_{}", t)));
+
+            let m_mrr = metrics_df.column(&format!("rr_tier_{}", t)).unwrap().fill_null(FillNullStrategy::Zero).unwrap();
+            agg_res.insert(format!("mrr_at_{}_mean_movie_tier_{}", k, t), m_mrr.f64().unwrap().mean().unwrap_or(0.0));
         }
 
         //  Generate Automated Conclusions
@@ -1799,6 +1816,15 @@ mod post_training_analysis {
             conclusions.push(format!("MODERATE PRECISION LIFT: Global Precision@{} ({:.2}%) is better than random ({:.2}%), suggesting basic relevance filtering is functioning.", k, global_precision * 100.0, random_precision * 100.0));
         } else {
             conclusions.push("PRECISION FAILURE: The model retrieves slates with the same or worse precision than a completely random draw.".to_string());
+        }
+
+        let global_mrr = *agg_res.get(&format!("mrr_at_{}_mean", k)).unwrap_or(&0.0);
+        if global_mrr > 0.50 {
+            conclusions.push(format!("EXCELLENT SURFACING SPEED: Global MRR@{} is {:.2}, meaning the first relevant recommendation appears, on average, within the top 2 slots.", k, global_mrr));
+        } else if global_mrr > 0.20 {
+            conclusions.push(format!("MODERATE SURFACING SPEED: Global MRR@{} is {:.2}, meaning the first relevant recommendation typically appears within the top 5 slots.", k, global_mrr));
+        } else {
+            conclusions.push(format!("SLOW SURFACING WARNING: Global MRR@{} is heavily degraded ({:.2}), indicating users must scroll significantly to find the first relevant item.", k, global_mrr));
         }
 
         let recall_t0 = *agg_res.get(&format!("recall_at_{}_mean_user_tier_0", k)).unwrap_or(&0.0);
@@ -1933,6 +1959,30 @@ mod post_training_analysis {
         // =================================================================
         // 2. RANKER VS RETRIEVER LIFT (Ranker @ 20 vs Retriever @ 20)
         // =================================================================
+        let mrr_ret_20 = extract(base_metrics, &tag2, &format!("mrr_at_{}_mean", top_k));
+        let mrr_rnk_20 = extract(base_metrics, &tag3, &format!("mrr_at_{}_mean", top_k));
+
+        if mrr_ret_20 > 0.0 {
+            let mrr_lift = ((mrr_rnk_20 - mrr_ret_20) / mrr_ret_20) * 100.0;
+
+            if mrr_lift > 5.0 {
+                conclusions.push(format!(
+                    "SURFACING SPEED LIFT: The Ranker improved MRR@{} by {:.1}% (from {:.2} to {:.2}). The Cross-Encoder successfully pushes the first relevant item much closer to rank 1.",
+                    top_k, mrr_lift, mrr_ret_20, mrr_rnk_20
+                ));
+            } else if mrr_lift < -2.0 {
+                conclusions.push(format!(
+                    "SURFACING SPEED DEGRADATION: The Ranker degraded MRR@{} by {:.1}% (from {:.2} to {:.2}). It forces the user to scroll further to find their first hit compared to raw retrieval.",
+                    top_k, mrr_lift.abs(), mrr_ret_20, mrr_rnk_20
+                ));
+            } else {
+                conclusions.push(format!(
+                    "SURFACING SPEED NEUTRAL: The Ranker's MRR@{} ({:.2}) is practically identical to the Retriever's ({:.2}).",
+                    top_k, mrr_rnk_20, mrr_ret_20
+                ));
+            }
+        }
+
         let ndcg_ret_20 = extract(base_metrics, &tag2, &format!("ndcg_at_{}_mean", top_k));
         let ndcg_rnk_20 = extract(base_metrics, &tag3, &format!("ndcg_at_{}_mean", top_k));
 
