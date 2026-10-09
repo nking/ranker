@@ -181,12 +181,13 @@ mod post_training_analysis {
     use polars::df;
     use polars::prelude::*;
     use rayon::prelude::*; // Required for parallel slate comparisons in _diversity_metrics
-    use tonic::Request;
+    use tonic::{Request, Response};
     // Bring everything from the outer scope (TestHarness, helper functions, etc.) into the test module
     use super::*;
 
     use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
-    use inference_engine::pb::{ApproxNearestNeighborsResponse, UsersRequest};
+    use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMovies, RankedMoviesAndRepr, UsersRequest};
+    use inference_engine::pb::recommender_service_server::RecommenderService;
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
     use inference_engine::util::{get_top_k_desc_scores};
     use crate::helper::get_unique_user_and_first_timestamp;
@@ -339,7 +340,7 @@ mod post_training_analysis {
         //   sequentially rather than in parallel.
 
         let _ = calc_and_write(
-            &harness,
+            harness,
             &ranker_metadata,
             num_candidates,
             top_k,
@@ -357,7 +358,7 @@ mod post_training_analysis {
         ).await;
 
         let _ = calc_and_write(
-            &harness,
+            harness,
             &ranker_metadata,
             num_candidates,
             top_k,
@@ -375,7 +376,7 @@ mod post_training_analysis {
         ).await;
 
         let _ = calc_and_write(
-            &harness,
+            harness,
             &ranker_metadata,
             num_candidates,
             top_k,
@@ -393,7 +394,7 @@ mod post_training_analysis {
         ).await;
 
         let _ = calc_and_write(
-            &harness,
+            harness,
             &ranker_metadata,
             num_candidates,
             top_k,
@@ -410,29 +411,199 @@ mod post_training_analysis {
             _diversity_metrics
         ).await;
 
-        /*
-        // only relevant for retrieval, but might be nice to have it here too along with umpa and tsne plots
-        let _ = calc_and_write(
-            &harness,
+        let _ = contextual_hubness(
+            harness,
+            query_model_version.clone(),
+            ranker_model_version.clone(),
             &ranker_metadata,
             num_candidates,
             top_k,
-            &user_gt_counts,
             &user_ids,
-            &ann_res.user_embeddings,
-            &candidate_movie_ids, //num_candidates
-            &top_k_movie_ids, //top_k
-            &ranker_movie_ids,
+            &timestamps,
             &parquet_output_dir,
             &summary_output_dir,
-            "embedding_hubness.json".as_ref(),
-            "embedding_hubness".as_ref(),
-            _embedding_hubness
         ).await;
-        */
 
         //TODO:  analyze the funnel from num_candidates to top_k
         //TODO:  analyze whether the ranker ranking improves upon the retrieval for same top_k
+
+        Ok(())
+    }
+
+    async fn contextual_hubness(
+        harness: &TestHarness,
+        query_model_version:Option<VersionChoice>,
+        ranker_model_version:Option<VersionChoice>,
+        ranker_metadata: &Arc<RankerModelMetadata>,
+        num_candidates: usize,
+        top_k: usize,
+        user_ids: &[i32],
+        timestamps: &[i64],
+        parquet_output_dir: &str,
+        summary_output_dir: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
+        let n_users = user_ids.len();
+        let mut agg_res: HashMap<String, f64> = HashMap::new();
+        let mut conclusions: Vec<String> = Vec::new();
+
+        // Execute the Diagnostic gRPC Request
+        let tonic_req: Request<UsersRequest> = harness.orchestrator.get_users_request(
+            &user_ids,
+            &timestamps,
+            query_model_version.clone(),
+            ranker_model_version.clone()
+        ).await?;
+
+        let results: Result<Response<RankedMoviesAndRepr>, tonic::Status> =
+            harness.orchestrator.predict_diagnostic(tonic_req).await;
+
+        let response_inner = results?.into_inner();
+
+        // The gRPC server has already truncated the padding, returning exactly `k` (top_k) items per user
+        let returned_k = response_inner.k as usize;
+        let out_features = ranker_metadata.out_features;
+        let tag = format!("ranker_contextual_k_{}", returned_k);
+
+        // =================================================================
+        // CALCULATE CONTEXTUAL GEOMETRIC RISK (Anisotropy / Oversmoothing)
+        // Compare the extracted user representation to the actual candidates
+        // evaluated in their specific multi-hop sub-graph.
+        // =================================================================
+
+        let mut similarities = Vec::with_capacity(n_users * returned_k);
+
+        for u in 0..n_users {
+            let u_start = u * out_features;
+            // user_reprs shape is (n_users * out_features)
+            let user_vec = &response_inner.user_reprs[u_start .. (u_start + out_features)];
+
+            for c in 0..returned_k {
+                let c_start = (u * returned_k + c) * out_features;
+                // cand_reprs shape is (n_users * returned_k * out_features)
+                let cand_vec = &response_inner.cand_reprs[c_start .. (c_start + out_features)];
+
+                let sim = cosine_similarity(user_vec, cand_vec);
+                similarities.push(sim as f64);
+            }
+        }
+
+        let repeated_users: Vec<i32> = user_ids.iter()
+            .flat_map(|&u| std::iter::repeat(u).take(returned_k))
+            .collect();
+
+        let base_df = df!(
+            "user_id" => repeated_users,
+            "movie_id" => response_inner.movie_ids,
+            "similarity_to_user" => similarities
+        )?.lazy();
+
+        // =================================================================
+        // ITEM-LEVEL CONTEXTUAL HUBNESS
+        // =================================================================
+
+        let item_pop_lf = base_df.clone()
+            .group_by([col("movie_id")])
+            .agg([
+                len().alias("retrieval_count"),
+                col("similarity_to_user").mean().alias("avg_sim_to_user") // Contextual Geometric Risk
+            ]);
+
+        let mut full_item_df = harness.movie_tiers_df.clone()
+            .select([col("movie_id"), col("movie_tier")])
+            .left_join(item_pop_lf, col("movie_id"), col("movie_id"))
+            .with_columns([
+                col("retrieval_count").fill_null(lit(0u32)),
+                col("avg_sim_to_user").fill_null(lit(0.0f64))
+            ])
+            .collect()?;
+
+        // Export Item-Level Contextual Stats to Parquet
+        let item_parquet_path = Path::new(parquet_output_dir).join(format!("contextual_hubness_item_stats_k_{}_{}.parquet", returned_k, tag));
+        let mut file1 = File::create(&item_parquet_path)?;
+        ParquetWriter::new(&mut file1).finish(&mut full_item_df)?;
+
+        let counts_series = full_item_df.column("retrieval_count")?.cast(&DataType::Float64)?;
+        let counts_ca = counts_series.f64()?;
+        let sims_ca = full_item_df.column("avg_sim_to_user")?.f64()?;
+
+        let (skewness, max_nk, mean_global_sim, pearson_r) = crate::helper::calculate_hubness_stats(counts_ca, sims_ca);
+
+        agg_res.insert(format!("ctx_hubness_skewness_{}", tag), skewness);
+        agg_res.insert(format!("ctx_hubness_max_nk_{}", tag), max_nk);
+        agg_res.insert(format!("ctx_hubness_mean_sim_{}", tag), mean_global_sim);
+        agg_res.insert(format!("ctx_hubness_centroid_corr_{}", tag), pearson_r);
+
+        // =================================================================
+        // USER-LEVEL CONTEXTUAL EXPOSURE
+        // =================================================================
+
+        let mut user_hub_df = base_df.clone()
+            .left_join(full_item_df.clone().lazy(), col("movie_id"), col("movie_id"))
+            .group_by([col("user_id")])
+            .agg([
+                col("retrieval_count").cast(DataType::Float64).mean().alias("avg_slate_nk"),
+                col("similarity_to_user").mean().alias("avg_slate_anisotropy")
+            ])
+            .left_join(harness.user_tiers_df.clone(), col("user_id"), col("user_id"))
+            .collect()?;
+
+        // Export User-Level Contextual Stats to Parquet
+        let user_parquet_path = Path::new(parquet_output_dir).join(format!("contextual_hubness_user_stats_k_{}_{}.parquet", returned_k, tag));
+        let mut file2 = File::create(&user_parquet_path)?;
+        ParquetWriter::new(&mut file2).finish(&mut user_hub_df)?;
+
+        let extract_mean = |df: &DataFrame, c: &str| -> f64 {
+            df.column(c).ok().and_then(|col| col.cast(&DataType::Float64).ok()).and_then(|col| col.f64().ok().map(|ca| ca.mean().unwrap_or(0.0))).unwrap_or(0.0)
+        };
+
+        agg_res.insert(format!("ctx_exposure_mean_nk_{}", tag), extract_mean(&user_hub_df, "avg_slate_nk"));
+        agg_res.insert(format!("ctx_exposure_mean_anisotropy_{}", tag), extract_mean(&user_hub_df, "avg_slate_anisotropy"));
+
+        for t in 0..=2 {
+            let mask = user_hub_df.column("user_tier")?.as_materialized_series().i32()?.equal(t as i32);
+            let tier_df = user_hub_df.filter(&mask)?;
+
+            agg_res.insert(format!("ctx_exposure_mean_nk_user_tier_{}_{}", t, tag), extract_mean(&tier_df, "avg_slate_nk"));
+            agg_res.insert(format!("ctx_exposure_mean_anisotropy_user_tier_{}_{}", t, tag), extract_mean(&tier_df, "avg_slate_anisotropy"));
+        }
+
+        // =================================================================
+        // AUTOMATED CONCLUSIONS (Anisotropy & Oversmoothing specific)
+        // =================================================================
+
+        if mean_global_sim > 0.90 {
+            conclusions.push(format!("SEVERE OVERSMOOTHING ({}): The global mean cosine similarity between users and their recommended candidates is {:.2}. The GNN message passing has likely suffered from catastrophic anisotropy (the cone effect), collapsing all vectors into near-identical representations.", tag, mean_global_sim));
+        } else if mean_global_sim > 0.70 {
+            conclusions.push(format!("MODERATE ANISOTROPY ({}): The representations exhibit high contextual similarity ({:.2}), indicating a narrowing of the latent space, but maintaining some angular diversity.", tag, mean_global_sim));
+        } else {
+            conclusions.push(format!("HEALTHY EXPRESSIVITY ({}): The mean contextual similarity is {:.2}. The GATv2 layers are successfully preserving geometric breadth between users and candidates.", tag, mean_global_sim));
+        }
+
+        if pearson_r > 0.5 {
+            conclusions.push(format!("CONTEXTUAL HUBNESS ({}): Recommendation frequency strongly correlates with representation collapse (r={:.2}). The model defaults to predicting high scores for items whose embeddings degenerate closest to the user's vector.", tag, pearson_r));
+        }
+
+        let t2_anisotropy = *agg_res.get(&format!("ctx_exposure_mean_anisotropy_user_tier_2_{}", tag)).unwrap_or(&0.0);
+        let t0_anisotropy = *agg_res.get(&format!("ctx_exposure_mean_anisotropy_user_tier_0_{}", tag)).unwrap_or(&0.0);
+
+        if t2_anisotropy > t0_anisotropy + 0.05 {
+            conclusions.push(format!("COHORT COLLAPSE WARNING ({}): Power users experience significantly higher oversmoothing (Anisotropy: {:.2}) than Light users ({:.2}). The dense historical graphs of power users are overwhelming the message-passing layers and washing out their embeddings.", tag, t2_anisotropy, t0_anisotropy));
+        }
+
+        // =================================================================
+        // JSON EXPORT
+        // =================================================================
+
+        let summary_payload = serde_json::json!({
+            "metrics": agg_res,
+            "automated_conclusions": conclusions
+        });
+
+        let summary_path = Path::new(summary_output_dir).join(format!("contextual_hubness_k_{}.json", returned_k));
+        let summary_file = File::create(&summary_path)?;
+        serde_json::to_writer_pretty(summary_file, &summary_payload)?;
+
+        println!("Wrote contextual hubness metrics to {:?}", summary_path);
 
         Ok(())
     }
@@ -1325,31 +1496,6 @@ mod post_training_analysis {
         }
 
         Ok((agg_res, conclusions))
-    }
-
-    fn _contextual_hubness(
-        k: usize,                    // either num_candidates or top_k
-        catalog_size: usize,
-        harness: &TestHarness,
-        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...]
-        user_ids: &[i32],            // shape: (n_users)
-        user_embeddings: &[f32],     // shape (n_users * embed_len)
-        neighbors: &[i32],           // shape: (n_users * k)
-        parquet_output_dir: &str,
-        #[allow(dead_code)]
-        _summary_output_dir: &str,
-        tag: &str,
-    ) -> PolarsResult<(HashMap<String, f64>, Vec<String>)> {
-
-        let mut agg_res: HashMap<String, f64> = HashMap::new();
-        let mut conclusions: Vec<String> = Vec::new();
-        let n_users = user_ids.len();
-
-        let movie_embeddings: Vec<f32> = harness.orchestrator._get_movies_embedding_catalog();
-        let embed_len = harness.embed_len;
-        let movies_offset = harness.movies_offset;
-
-        Ok((HashMap::new(), Vec::new()))
     }
 
     /// Calculates the Hubness statistics for a given distribution of retrieval counts
