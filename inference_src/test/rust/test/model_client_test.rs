@@ -148,8 +148,7 @@ mod client_tests {
             &user_embeddings_uri, &movie_embeddings_uri
         );
 
-        // this will fail until latest trained models are placed in src/test/resources/  cross-encoder directories
-        // make the diagnostic request
+
         let result = client.get_candidate_diagnostics(
             padded_super_graph, embed_len as usize, query_model_version.clone()).await;
         assert!(result.is_ok(), "Failed to get ranks: {:?}", result.err());
