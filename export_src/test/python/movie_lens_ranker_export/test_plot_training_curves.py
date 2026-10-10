@@ -26,8 +26,8 @@ class PlotTrainingTest(unittest.TestCase):
         #saved_model_dir = os.path.join(get_bin_dir(), "src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1")
         #hyperparams_dict = self.get_hyperparams_dict_from_saved_model(saved_model_dir)
 
-        logdir = os.path.join(get_project_dir(), "TMP22/hpo-results-bucket/kaggle-tune-train-test/kaggle-hpo/")
-        hyperparams_path = os.path.join(get_project_dir(), "TMP22/hpo-results-bucket/kaggle-tune-train-test/kaggle-hpo/tune/hparams.json")
+        logdir = os.path.join(get_project_dir(), "TMP23/hpo-results-bucket/kaggle-tune-train-test/kaggle-hpo/")
+        hyperparams_path = os.path.join(get_project_dir(), "TMP23/hpo-results-bucket/kaggle-tune-train-test/kaggle-hpo/tune/hparams.json")
         hyperparams_dict = self.get_hyperparams_dict(hyperparams_path)
 
         outdir = os.path.join(get_bin_dir(), "training_metrics_pngs")

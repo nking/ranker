@@ -123,7 +123,7 @@ def get_vizier_for_hpo_tier(hpo_tier:int, embed_in_dim:int, top_k:int) -> Dict[s
             "hidden_dim" : 64,
             "num_heads" : 2,
             "dropout_rate" : 0.2,
-            "learning_rate" : 1e-4,
+            "learning_rate" : 5e-4,
             "weight_decay" : 1e-3,
             "out_dim" : embed_in_dim,
             "edge_embed_dim" : 8,

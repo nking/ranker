@@ -50,7 +50,7 @@ class GraphRanker(nnx.Module):
             num_layers=num_layers,
             out_features=out_features,
             heads=heads,
-            act=nnx.softplus,#nnx.gelu,
+            act=nnx.gelu, #don't use softplus for contrastive learning
             act_first=False,
             v2=True,  # Use GATv2 if True
             dropout_rate=dropout_rate,
