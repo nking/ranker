@@ -206,6 +206,7 @@ pub fn get_top_k_desc_scores(
 ///
 /// Returns: (top_movie_ids, top_scores, top_cand_reprs)
 pub fn get_top_k_desc_diagnostic(
+    n_users: usize,
     movie_ids: &[i32],
     scores: &[f32],
     cand_reprs: &[f32],
@@ -214,9 +215,14 @@ pub fn get_top_k_desc_diagnostic(
     out_features: usize,
 ) -> (Vec<i32>, Vec<f32>, Vec<f32>) {
 
-    let safe_top_k = top_k.min(num_candidates);
-    let n_users = scores.len() / num_candidates;
+    // Safety check for empty inputs
+    if num_candidates == 0 || top_k == 0 || n_users == 0 {
+        return (Vec::new(), Vec::new(), Vec::new());
+    }
 
+    let safe_top_k = top_k.min(num_candidates);
+
+    // Pre-allocate exact capacities
     let mut out_movie_ids = Vec::with_capacity(n_users * safe_top_k);
     let mut out_scores = Vec::with_capacity(n_users * safe_top_k);
     let mut out_cand_reprs = Vec::with_capacity(n_users * safe_top_k * out_features);
@@ -224,52 +230,55 @@ pub fn get_top_k_desc_diagnostic(
     // Pre-allocate a single index buffer to avoid allocating memory inside the loop
     let mut indices: Vec<usize> = (0..num_candidates).collect();
 
-    // Process user by user
     for u in 0..n_users {
         // Isolate the slices belonging to this specific user
-        let i0 = u * num_candidates;
-        let i1 = i0 + num_candidates;
-        let score_chunk = &scores[i0..i1];
-        let movie_chunk = &movie_ids[i0..i1];
-        let cand_chunk = &cand_reprs[i0 * out_features..i1 * out_features];
+        let start = u * num_candidates;
+        let end = start + num_candidates;
+
+        let score_chunk = &scores[start..end];
+        let movie_chunk = &movie_ids[start..end];
+
+        // Isolate candidate representations for this user
+        let c_start = start * out_features;
+        let c_end = end * out_features;
+        let cand_chunk = &cand_reprs[c_start..c_end];
 
         // Reset the index buffer for the current user
         for i in 0..num_candidates {
             indices[i] = i;
         }
 
-        if safe_top_k < num_candidates {
-            // O(N) Partitioning: Moves the top `safe_top_k` indices to the front of the array.
-            // These are NOT fully sorted yet, just partitioned.
-            let (top_slice, _, _) = indices.select_nth_unstable_by(safe_top_k - 1, |&a, &b| {
+        // Determine which slice of indices to iterate over
+        let slice_to_iterate = if safe_top_k < num_candidates {
+            // O(N) Partitioning: Mutates `indices` so the top elements are at the front
+            indices.select_nth_unstable_by(safe_top_k - 1, |&a, &b| {
                 score_chunk[b].total_cmp(&score_chunk[a]) // Descending order
             });
 
+            // Capture the full top K slice (which includes both the left_slice AND the pivot)
+            let top_k_indices = &mut indices[0..safe_top_k];
+
             // O(K log K): Sort ONLY the tiny top K slice
-            top_slice.sort_unstable_by(|&a, &b| {
+            top_k_indices.sort_unstable_by(|&a, &b| {
                 score_chunk[b].total_cmp(&score_chunk[a])
             });
-
-            // Extract the sorted elements into the flat output vectors
-            for &idx in top_slice.iter() {
-                out_scores.push(score_chunk[idx]);
-                out_movie_ids.push(movie_chunk[idx]);
-
-                // Copy the full feature vector for this candidate using highly optimized slice copying
-                let cand_start = idx * out_features;
-                out_cand_reprs.extend_from_slice(&cand_chunk[cand_start..cand_start + out_features]);
-            }
+            top_k_indices
         } else {
-            // Fallback if top_k == num_candidates
-            indices.sort_unstable_by(|&a, &b| score_chunk[b].total_cmp(&score_chunk[a]));
+            // Fallback: If top_k == num_candidates, sort the entire array
+            indices.sort_unstable_by(|&a, &b| {
+                score_chunk[b].total_cmp(&score_chunk[a])
+            });
+            &mut indices[..]
+        };
 
-            for &idx in indices.iter() {
-                out_scores.push(score_chunk[idx]);
-                out_movie_ids.push(movie_chunk[idx]);
+        // Extract the sorted elements into the flat output vectors
+        for &idx in slice_to_iterate.iter() {
+            out_scores.push(score_chunk[idx]);
+            out_movie_ids.push(movie_chunk[idx]);
 
-                let cand_start = idx * out_features;
-                out_cand_reprs.extend_from_slice(&cand_chunk[cand_start..cand_start + out_features]);
-            }
+            // Copy the full feature vector for this candidate using fast slice copying
+            let cand_start = idx * out_features;
+            out_cand_reprs.extend_from_slice(&cand_chunk[cand_start .. cand_start + out_features]);
         }
     }
 

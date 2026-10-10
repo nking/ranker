@@ -426,10 +426,10 @@ impl Orchestrator {
     ///  cand_reprs shape is (n_users * num_candidates * out_features);
     pub async fn _make_ranker_diagnostic_request(
         &self,
-        user_ids: &[i32],               // Changed to slice
-        timestamps: &[i64],             // Changed to slice
-        user_embeddings: &[f32],        // Changed to slice
-        candidate_ids: &[i32],          // Changed to slice
+        user_ids: &[i32],
+        timestamps: &[i64],
+        user_embeddings: &[f32],
+        candidate_ids: &[i32],
         ranker_model_version_choice: Option<VersionChoice>
     ) -> Result<RankedMoviesAndRepr, Status> {
 
@@ -457,17 +457,17 @@ impl Orchestrator {
         // Note: We removed the `&` prefixes here because the arguments are ALREADY references (slices)
         let padded_super_graph_arrays: JraphGraph = build_enriched_padded_supergraph(
             ranker_metadata.batch_size,
-            user_ids,                 // Was &user_ids
-            timestamps,               // Was &timestamps
-            candidate_ids,            // Was &candidate_ids
-            &labels,                  // Still needs & because we created it as a Vec locally
+            user_ids,
+            timestamps,
+            candidate_ids,
+            &labels,
             &self.user_history,
             ranker_metadata.max_history,
             ranker_metadata.num_catalog_users,
             searcher.get_num_catalog_movies(),
             searcher.get_embed_len(),
             searcher.get_movies_embedding_catalog_ref(),
-            user_embeddings,          // Was &user_embeddings
+            user_embeddings,
             self.ranker_n_local_devices
         );
 
@@ -479,7 +479,7 @@ impl Orchestrator {
         // user_reprs is shape (max_graphs * out_features) with padding piled up at end
         // cand_reprs is shape (max_graphs * num_candidates * out_features) with padding piled up at end
          */
-        let num_candidates = candidate_ids.len();
+        let num_candidates = ranker_metadata.num_candidates;
         let out_features = ranker_metadata.out_features;
 
         match final_response {
@@ -557,6 +557,20 @@ impl Orchestrator {
         }))
     }
 
+    /// returns user cand repre and cand repre and movies where the later 2 are sorted and trimmed to
+    /// keep only self.top_k defined in orchestrator
+    ///
+    /// # Arguments
+    ///
+    /// * `req`:
+    ///
+    /// returns: Result<Response<RankedMoviesAndRepr>, Status>
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
     async fn _predict_diagnostic(&self, req: Request<UsersRequest>) -> Result<Response<RankedMoviesAndRepr>, Status> {
 
         let user_reqs = req.into_inner();
@@ -573,7 +587,7 @@ impl Orchestrator {
 
         let ranker_model_version_choice = Some(VersionChoice::Version(user_reqs.ranker_model_version));
 
-        // scores shape is (n_users * num_candidates);
+        // scores shape is    (n_users * num_candidates);
         // movie_ids is shape (n_users * num_candidates)
         // user_reprs shape is (n_users * out_features);
         // cand_reprs shape is (n_users * num_candidates * out_features);
@@ -591,11 +605,25 @@ impl Orchestrator {
         let num_candidates = ranker_metadata.num_candidates;
         let out_features = ranker_metadata.out_features;
 
+        let n_users = user_ids.len();
+
+        debug_assert_eq!(ranked_movies_and_reprs.movie_ids.len(),  n_users * num_candidates);
+        debug_assert_eq!(ranked_movies_and_reprs.scores.len(), n_users * num_candidates);
+        debug_assert_eq!(ranked_movies_and_reprs.cand_reprs.len(), n_users * num_candidates * out_features);
+        debug_assert_eq!(ranked_movies_and_reprs.user_reprs.len(), n_users  * out_features);
+
         let (top_movie_ids, top_scores, top_cand_repr) = get_top_k_desc_diagnostic(
+            n_users,
             & mut ranked_movies_and_reprs.movie_ids, &mut ranked_movies_and_reprs.scores,
             & mut ranked_movies_and_reprs.cand_reprs,
             num_candidates, self.top_k, out_features
         );
+
+        debug_assert_eq!(user_ids.len(), n_users);
+        debug_assert_eq!(top_movie_ids.len(), self.top_k * n_users);
+        debug_assert_eq!(top_scores.len(), self.top_k * n_users);
+        debug_assert_eq!(top_cand_repr.len(), self.top_k * n_users * out_features);
+        debug_assert_eq!(ranked_movies_and_reprs.user_reprs.len(), n_users  * out_features);
 
         Ok(Response::new( RankedMoviesAndRepr {
             user_ids: user_ids,
@@ -811,6 +839,16 @@ impl RecommenderService for Orchestrator {
         }))
     }
 
+    ///  returns top_k scores, movies and the GatV2 user and cand representations.
+    /// scores shape is    (n_users * top_k);
+    //   movie_ids is shape (n_users * top_k)
+    //    user_reprs shape is (n_users * top_k);
+    //     cand_reprs shape is (n_users * top_k * out_features);
+    /// # Arguments
+    ///
+    /// * `req`:
+    ///
+    /// returns: Result<Response<RankedMoviesAndRepr>, Status>
     async fn predict_diagnostic(&self, req: Request<UsersRequest>) -> Result<Response<RankedMoviesAndRepr>, Status> {
 
         let user_reqs = req.into_inner();
@@ -835,15 +873,20 @@ impl RecommenderService for Orchestrator {
             return self._predict_diagnostic(Request::new(user_reqs.clone())).await;
         }
 
-        // reserve response arrays:
-        let mut final_candidate_ids: Vec<i32> = Vec::with_capacity(n_users * ranker_metadata.num_candidates);
-        let mut final_scores: Vec<f32> = Vec::with_capacity(n_users * ranker_metadata.num_candidates);
-        let mut final_user_repr: Vec<f32> = Vec::with_capacity(n_users * ranker_metadata.out_features);
-        let mut final_cand_repr: Vec<f32> = Vec::with_capacity(n_users * ranker_metadata.num_candidates * ranker_metadata.out_features);
+        let top_k = self.top_k;
 
+        // reserve response arrays:
+        let mut final_candidate_ids: Vec<i32> = Vec::with_capacity(n_users * top_k);
+        let mut final_scores: Vec<f32> = Vec::with_capacity(n_users * top_k);
+        let mut final_user_repr: Vec<f32> = Vec::with_capacity(n_users * ranker_metadata.out_features);
+        let mut final_cand_repr: Vec<f32> = Vec::with_capacity(n_users * top_k * ranker_metadata.out_features);
+
+        let mut _n_users_total = 0;
         for i0 in (0..n_users).step_by(batch_size) {
 
             let i1 = std::cmp::min(i0 + batch_size, n_users);
+
+            let _n_users = i1 - i0;
 
             // make a new UsersRequest from the user data from i0 to i1
             let req_i = UsersRequest {
@@ -858,14 +901,27 @@ impl RecommenderService for Orchestrator {
                 ranker_model_version: user_reqs.ranker_model_version
             };
 
+            // top_k results + diagnostic reprs
             let resp_i = self._predict_diagnostic(Request::new(req_i)).await?;
             let ranked_movies_i = resp_i.into_inner();
+
+            debug_assert_eq!(ranked_movies_i.k as usize, self.top_k);
+            debug_assert_eq!(ranked_movies_i.movie_ids.len(), _n_users * self.top_k);
 
             final_candidate_ids.extend(ranked_movies_i.movie_ids);
             final_scores.extend(ranked_movies_i.scores);
             final_user_repr.extend(ranked_movies_i.user_reprs);
             final_cand_repr.extend(ranked_movies_i.cand_reprs);
+
+            _n_users_total = _n_users_total + _n_users;
         }
+
+        debug_assert_eq!(n_users, _n_users_total);
+
+        debug_assert_eq!(final_candidate_ids.len(), n_users * top_k);
+        debug_assert_eq!(final_scores.len(), n_users * top_k);
+        debug_assert_eq!(final_user_repr.len(), n_users * ranker_metadata.out_features);
+        debug_assert_eq!(final_cand_repr.len(), n_users * top_k * ranker_metadata.out_features);
 
         Ok(Response::new( RankedMoviesAndRepr {
             user_ids: user_reqs.user_ids,
@@ -873,7 +929,7 @@ impl RecommenderService for Orchestrator {
             scores: final_scores,
             user_reprs: final_user_repr,
             cand_reprs: final_cand_repr,
-            k: self.top_k as u32
+            k: top_k as u32
         }))
     }
 

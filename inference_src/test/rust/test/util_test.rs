@@ -2,7 +2,7 @@
 mod util_tests {
     use std::collections::HashSet;
     //use std::error::Error;
-    use inference_engine::util::{calc_number_jax_graph_components, ceiling_search, sort_in_place_by_desc_scores};
+    use inference_engine::util::{calc_number_jax_graph_components, ceiling_search, get_top_k_desc_diagnostic, sort_in_place_by_desc_scores};
     use crate::util_tests::helper::assert_slices_nearly_equal;
 
     //use super::*;
@@ -82,5 +82,60 @@ mod util_tests {
             let idx = ceiling_search(&ids, srchs[i]);
             assert_eq!(expected[i], idx);
         }
+    }
+
+    #[test]
+    fn test_get_top_k_desc_diagnostic() {
+        let n_users = 2;
+        let num_candidates = 3;
+        let top_k = 2;
+        let out_features = 2;
+
+        // User 0 has candidates: 10, 20, 30
+        // User 1 has candidates: 40, 50, 60
+        let mut movie_ids = vec![
+            10, 20, 30, // User 0
+            40, 50, 60, // User 1
+        ];
+
+        // User 0 scores: [0.1, 0.9, 0.5] -> Top 2 are: 20 (0.9), 30 (0.5)
+        // User 1 scores: [0.8, 0.2, 0.6] -> Top 2 are: 40 (0.8), 60 (0.6)
+        let mut scores = vec![
+            0.1, 0.9, 0.5, // User 0
+            0.8, 0.2, 0.6, // User 1
+        ];
+
+        // features per candidate
+        let mut cand_reprs = vec![
+            1.1, 1.1,   2.2, 2.2,   3.3, 3.3, // User 0 candidates
+            4.4, 4.4,   5.5, 5.5,   6.6, 6.6, // User 1 candidates
+        ];
+
+        let (top_movie_ids, top_scores, top_cand_repr) = get_top_k_desc_diagnostic(
+            n_users,
+            &mut movie_ids,
+            &mut scores,
+            &mut cand_reprs,
+            num_candidates,
+            top_k,
+            out_features,
+        );
+
+        // Assert Output Shapes (Matching your provided debug_asserts)
+        assert_eq!(top_movie_ids.len(), top_k * n_users);
+        assert_eq!(top_scores.len(), top_k * n_users);
+        assert_eq!(top_cand_repr.len(), top_k * n_users * out_features);
+
+        // Assert Data Correctness (Descending order per user)
+        assert_eq!(top_movie_ids, vec![20, 30, 40, 60]);
+        assert_eq!(top_scores, vec![0.9, 0.5, 0.8, 0.6]);
+
+        // Assert Candidate Representations match the sorted movies
+        assert_eq!(top_cand_repr, vec![
+            2.2, 2.2, // User 0, Rank 1 (Movie 20)
+            3.3, 3.3, // User 0, Rank 2 (Movie 30)
+            4.4, 4.4, // User 1, Rank 1 (Movie 40)
+            6.6, 6.6, // User 1, Rank 2 (Movie 60)
+        ]);
     }
 }

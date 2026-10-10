@@ -355,7 +355,7 @@ mod post_training_analysis {
             "stratified_metrics.json".as_ref(),
             "metrics".as_ref(),
             _metrics
-        ).await;
+        ).await?;
 
         let coverage = calc_and_write(
             harness,
@@ -373,7 +373,7 @@ mod post_training_analysis {
             "coverage.json".as_ref(),
             "coverage".as_ref(),
             _coverage_and_gini
-        ).await;
+        ).await?;
 
         let pop_bias = calc_and_write(
             harness,
@@ -391,7 +391,7 @@ mod post_training_analysis {
             "popularity_bias.json".as_ref(),
             "popularity_bias".as_ref(),
             _popularity_bias
-        ).await;
+        ).await?;
 
         let diversity = calc_and_write(
             harness,
@@ -409,7 +409,7 @@ mod post_training_analysis {
             "diversity_metrics.json".as_ref(),
             "diversity_metrics".as_ref(),
             _diversity_metrics
-        ).await;
+        ).await?;
 
         let emb_hubness = calc_and_write(
             harness,
@@ -427,7 +427,7 @@ mod post_training_analysis {
             "embedding_hubness.json".as_ref(),
             "embedding_hubness".as_ref(),
             _embedding_hubness
-        ).await;
+        ).await?;
 
         let ctx_hubness= contextual_hubness(
             harness,
@@ -440,7 +440,7 @@ mod post_training_analysis {
             &timestamps,
             &parquet_output_dir,
             &summary_output_dir,
-        ).await;
+        ).await?;
 
         let rank_agreement = rank_agreement_and_churn(
             top_k,
@@ -465,8 +465,8 @@ mod post_training_analysis {
         query_model_version:Option<VersionChoice>,
         ranker_model_version:Option<VersionChoice>,
         ranker_metadata: &Arc<RankerModelMetadata>,
-        num_candidates: usize,
-        top_k: usize,
+        _num_candidates: usize,
+        _top_k: usize,
         user_ids: &[i32],
         timestamps: &[i64],
         parquet_output_dir: &str,
@@ -484,15 +484,20 @@ mod post_training_analysis {
             ranker_model_version.clone()
         ).await?;
 
+        // returns harness.orchestrator.top_k results:
         let results: Result<Response<RankedMoviesAndRepr>, tonic::Status> =
             harness.orchestrator.predict_diagnostic(tonic_req).await;
 
         let response_inner = results?.into_inner();
 
-        // The gRPC server has already truncated the padding, returning exactly `k` (top_k) items per user
+        //  `k` (top_k) items per user
         let returned_k = response_inner.k as usize;
         let out_features = ranker_metadata.out_features;
         let tag = format!("ranker_contextual_k_{}", returned_k);
+
+        assert_eq!(response_inner.user_reprs.len(), out_features * n_users);
+        assert_eq!(response_inner.cand_reprs.len(), out_features * n_users * returned_k,
+           "out_features={}, n_users={}, returned_k={}", out_features, n_users, returned_k);
 
         // =================================================================
         // CALCULATE CONTEXTUAL GEOMETRIC RISK (Anisotropy / Oversmoothing)
@@ -505,11 +510,13 @@ mod post_training_analysis {
         for u in 0..n_users {
             let u_start = u * out_features;
             // user_reprs shape is (n_users * out_features)
+            // cand_reprs shape is (n_users * out_features * top_k)
             let user_vec = &response_inner.user_reprs[u_start .. (u_start + out_features)];
 
+            let i0 = u_start * returned_k;
+            //extract each out_features slice starting from i0
             for c in 0..returned_k {
-                let c_start = (u * returned_k + c) * out_features;
-                // cand_reprs shape is (n_users * returned_k * out_features)
+                let c_start = i0 + (out_features * c);
                 let cand_vec = &response_inner.cand_reprs[c_start .. (c_start + out_features)];
 
                 let sim = cosine_similarity(user_vec, cand_vec);
@@ -750,7 +757,7 @@ mod post_training_analysis {
 
         println!("{}", format!("wrote to {:?}", output_file_path));
 
-        Ok((agg_res))
+        Ok(agg_res)
     }
 
     /// calculate retrieval or ranking catalog coverage,
@@ -1352,9 +1359,9 @@ mod post_training_analysis {
 
     fn _embedding_hubness(
         k: usize,                    // either num_candidates or top_k
-        catalog_size: usize,
+        _catalog_size: usize,
         harness: &TestHarness,
-        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...]
+        _user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...]
         user_ids: &[i32],            // shape: (n_users)
         user_embeddings: &[f32],     // shape (n_users * embed_len)
         neighbors: &[i32],           // shape: (n_users * k)
@@ -1419,15 +1426,16 @@ mod post_training_analysis {
             .agg([len().alias("retrieval_count")]);
 
         let mut full_item_df = harness.movie_tiers_df.clone()
-            .select([col("movie_id"), col("movie_tier")])
+            .select([col("movie_id").cast(DataType::Int32), col("movie_tier")])
             .left_join(item_pop_lf, col("movie_id"), col("movie_id"))
             .with_columns([col("retrieval_count").fill_null(lit(0u32))])
             .collect()?;
 
-        let movie_ids_series = full_item_df.column("movie_id")?.i32()?;
-        let mut similarities = Vec::with_capacity(movie_ids_series.len());
+        let movie_ids_series = full_item_df.column("movie_id")?.cast(&DataType::Int32)?;
+        let movie_ids_ca = movie_ids_series.i32()?;
+        let mut similarities = Vec::with_capacity(movie_ids_ca.len());
 
-        for opt_id in movie_ids_series.iter() {
+        for opt_id in movie_ids_ca.iter() {
             let sim = if let Some(id) = opt_id {
                 let raw_id = id as usize;
                 let idx = if raw_id >= movies_offset { raw_id - movies_offset } else { raw_id };
