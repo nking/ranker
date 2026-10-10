@@ -442,11 +442,18 @@ mod post_training_analysis {
             &summary_output_dir,
         ).await;
 
-        //TODO:  analyze the funnel from num_candidates to top_k
-        //TODO:  analyze whether the ranker ranking improves upon the retrieval for same top_k
-        // TODO: cross metric analysis such as root cause with gini and embedding hubness
+        let rank_agreement = rank_agreement_and_churn(
+            top_k,
+            &user_ids,
+            &top_k_movie_ids,  // Retriever's Top 20
+            &ranker_movie_ids, // Ranker's Top 20
+            parquet_output_dir,
+            summary_output_dir
+        ).await?;
+
+
         let _ = cross_metric_analysis(
-            &base_metrics, &coverage, &pop_bias, &diversity, &emb_hubness, &ctx_hubness,
+            &base_metrics, &coverage, &pop_bias, &diversity, &emb_hubness, &ctx_hubness, &rank_agreement,
             num_candidates, top_k, summary_output_dir
         ).await?;
 
@@ -1922,6 +1929,7 @@ mod post_training_analysis {
         diversity: &serde_json::Value,
         emb_hubness: &serde_json::Value,
         ctx_hubness: &serde_json::Value,
+        rank_agreement : &serde_json::Value,
         num_candidates: usize,
         top_k: usize,
         summary_output_dir: &str,
@@ -1943,7 +1951,7 @@ mod post_training_analysis {
         let mut conclusions = Vec::new();
 
         // =================================================================
-        // 1. FUNNEL ANALYSIS (Retriever @ 100 vs Retriever @ 20)
+        //  FUNNEL ANALYSIS (Retriever @ 100 vs Retriever @ 20)
         // =================================================================
         let recall_100 = extract(base_metrics, &tag1, &format!("recall_at_{}_mean", num_candidates));
         let recall_20 = extract(base_metrics, &tag2, &format!("recall_at_{}_mean", top_k));
@@ -1957,7 +1965,7 @@ mod post_training_analysis {
         }
 
         // =================================================================
-        // 2. RANKER VS RETRIEVER LIFT (Ranker @ 20 vs Retriever @ 20)
+        //  RANKER VS RETRIEVER LIFT (Ranker @ 20 vs Retriever @ 20)
         // =================================================================
         let mrr_ret_20 = extract(base_metrics, &tag2, &format!("mrr_at_{}_mean", top_k));
         let mrr_rnk_20 = extract(base_metrics, &tag3, &format!("mrr_at_{}_mean", top_k));
@@ -1986,8 +1994,9 @@ mod post_training_analysis {
         let ndcg_ret_20 = extract(base_metrics, &tag2, &format!("ndcg_at_{}_mean", top_k));
         let ndcg_rnk_20 = extract(base_metrics, &tag3, &format!("ndcg_at_{}_mean", top_k));
 
+        let mut ndcg_lift = 0.0;
         if ndcg_ret_20 > 0.0 {
-            let ndcg_lift = ((ndcg_rnk_20 - ndcg_ret_20) / ndcg_ret_20) * 100.0;
+            ndcg_lift = ((ndcg_rnk_20 - ndcg_ret_20) / ndcg_ret_20) * 100.0;
             if ndcg_lift > 5.0 {
                 conclusions.push(format!("RANKER LIFT: The Ranker improved NDCG@{} by {:.1}% over pure retrieval. The Cross-Encoder is successfully refining the candidate slates.", top_k, ndcg_lift));
             } else if ndcg_lift < -2.0 {
@@ -1995,6 +2004,23 @@ mod post_training_analysis {
             } else {
                 conclusions.push(format!("RANKER NEUTRAL: The Ranker provided negligible NDCG lift ({:.1}%) over pure retrieval.", ndcg_lift));
             }
+        }
+
+        // =================================================================
+        // RANKER CHURN CORRELATION
+        // =================================================================
+        let overlap = extract(rank_agreement, "metrics", &format!("mean_overlap_at_{}", top_k));
+
+        if overlap > 0.0 && ndcg_lift < 0.0 {
+            conclusions.push(format!(
+                "CHURN VS LIFT DEGRADATION: The Ranker is aggressively replacing items (only retaining {:.1}% of the Retriever's slate), but doing so hurts overall performance (NDCG lift: {:.1}%). The ranking model is introducing noise rather than signal.",
+                overlap * 100.0, ndcg_lift
+            ));
+        } else if overlap < 0.40 && ndcg_lift > 5.0 {
+            conclusions.push(format!(
+                "SUCCESSFUL FILTERING: The Ranker aggressively filtered out {:.1}% of the Retriever's items, resulting in a positive NDCG lift of {:.1}%. It successfully separated the signal from the ANN's noise.",
+                (1.0 - overlap) * 100.0, ndcg_lift
+            ));
         }
 
         let cov_ret_20 = extract(coverage, &tag2, &format!("coverage_at_{}_full_{}", top_k, tag2));
@@ -2008,7 +2034,7 @@ mod post_training_analysis {
         }
 
         // =================================================================
-        // 3. ROOT CAUSE CORRELATIONS (Gini vs. Hubness)
+        // ROOT CAUSE CORRELATIONS (Gini vs. Hubness)
         // =================================================================
         let gini_rnk_20 = extract(coverage, &tag3, &format!("gini_at_{}_full_{}", top_k, tag3));
         let div_rnk_20 = extract(diversity, &tag3, &format!("interlist_diversity_mean_k_{}_{}", top_k, tag3));
@@ -2045,5 +2071,133 @@ mod post_training_analysis {
         println!("Wrote cross-metric analysis to {:?}", out_path);
 
         Ok(())
+    }
+
+    pub async fn rank_agreement_and_churn(
+        top_k: usize,
+        user_ids: &[i32],
+        retriever_movie_ids: &[i32], // shape: n_users * top_k
+        ranker_movie_ids: &[i32],    // shape: n_users * top_k
+        parquet_output_dir: &str,
+        summary_output_dir: &str,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+
+        let n_users = user_ids.len();
+
+        let mut total_overlap = 0.0;
+        let mut total_spearman = 0.0;
+        let mut valid_spearman_users = 0.0;
+
+        let mut overlaps = Vec::with_capacity(n_users);
+        let mut spearmans = Vec::with_capacity(n_users);
+
+        for u in 0..n_users {
+            let start = u * top_k;
+            let end = start + top_k;
+            let ret_slate = &retriever_movie_ids[start..end];
+            let rnk_slate = &ranker_movie_ids[start..end];
+
+            // Map the retriever's slate items to their original rank
+            let mut ret_map = std::collections::HashMap::new();
+            for (i, &item) in ret_slate.iter().enumerate() {
+                ret_map.insert(item, i);
+            }
+
+            // Find the intersection (items that survived the Ranker)
+            let mut intersection = Vec::new();
+            for (j, &item) in rnk_slate.iter().enumerate() {
+                if let Some(&i) = ret_map.get(&item) {
+                    intersection.push((item, i, j)); // (movie_id, ret_rank_raw, rnk_rank_raw)
+                }
+            }
+
+            // Calculate Overlap
+            let overlap_ratio = intersection.len() as f64 / top_k as f64;
+            total_overlap += overlap_ratio;
+            overlaps.push(overlap_ratio);
+
+            // Calculate Spearman's Rank Correlation on the intersection
+            let n = intersection.len() as f64;
+            let spearman = if n > 1.0 {
+
+                // Sort by ret_rank_raw to assign relative ranks 1..N
+                intersection.sort_by_key(|k| k.1);
+                let mut ret_rel_ranks = std::collections::HashMap::new();
+                for (rel_rank, tuple) in intersection.iter().enumerate() {
+                    ret_rel_ranks.insert(tuple.0, rel_rank as f64 + 1.0);
+                }
+
+                // Sort by rnk_rank_raw to assign relative ranks 1..N
+                intersection.sort_by_key(|k| k.2);
+                let mut d_sq_sum = 0.0;
+                for (rel_rank, tuple) in intersection.iter().enumerate() {
+                    let rnk_rel_rank = rel_rank as f64 + 1.0;
+                    let ret_rel_rank = *ret_rel_ranks.get(&tuple.0).unwrap();
+                    let d = ret_rel_rank - rnk_rel_rank;
+                    d_sq_sum += d * d;
+                }
+
+                let rho = 1.0 - ((6.0 * d_sq_sum) / (n * (n * n - 1.0)));
+                valid_spearman_users += 1.0;
+                total_spearman += rho;
+                rho
+            } else {
+                // If 0 or 1 items overlap, correlation is effectively 0
+                0.0
+            };
+            spearmans.push(spearman);
+        }
+
+        let mean_overlap = total_overlap / n_users as f64;
+        let mean_spearman = if valid_spearman_users > 0.0 {
+            total_spearman / valid_spearman_users
+        } else {
+            0.0
+        };
+
+        // Export metrics to Parquet
+        let mut df = df!(
+            "user_id" => user_ids,
+            "overlap_at_k" => overlaps,
+            "spearman_rho" => spearmans
+        )?;
+        let parquet_path = Path::new(parquet_output_dir).join(format!("rank_agreement_k_{}.parquet", top_k));
+        let mut file = File::create(&parquet_path)?;
+        ParquetWriter::new(&mut file).finish(&mut df)?;
+
+        // Aggregate Results
+        let mut agg_res = HashMap::new();
+        agg_res.insert(format!("mean_overlap_at_{}", top_k), mean_overlap);
+        agg_res.insert(format!("mean_spearman_rho_at_{}", top_k), mean_spearman);
+
+        // Automated Conclusions
+        let mut conclusions = Vec::new();
+        if mean_overlap < 0.20 {
+            conclusions.push(format!("MASSIVE CHURN: The Ranker completely discards and replaces over {:.0}% of the Retriever's top items (Overlap: {:.1}%). It is acting as an extremely aggressive filter.", (1.0 - mean_overlap)*100.0, mean_overlap*100.0));
+        } else if mean_overlap > 0.80 {
+            conclusions.push(format!("LOW CHURN: The Ranker retains {:.1}% of the Retriever's top items. It primarily functions to fine-tune the existing slate rather than filter it.", mean_overlap*100.0));
+        } else {
+            conclusions.push(format!("MODERATE CHURN: The Ranker retains {:.1}% of the Retriever's top items.", mean_overlap*100.0));
+        }
+
+        if mean_spearman > 0.80 {
+            conclusions.push(format!("HIGH RANK AGREEMENT: For items that survive into the final slate, the Ranker heavily agrees with the Retriever's ordering (Spearman ρ = {:.2}).", mean_spearman));
+        } else if mean_spearman < 0.30 {
+            conclusions.push(format!("AGGRESSIVE RE-RANKING: The Ranker drastically scrambles the relative ordering of retrieved items (Spearman ρ = {:.2}), proving it scores candidate items very differently than the ANN space.", mean_spearman));
+        } else {
+            conclusions.push(format!("MODERATE RE-RANKING: The Ranker adjusts the relative ordering of retrieved items moderately (Spearman ρ = {:.2}).", mean_spearman));
+        }
+
+        let summary_payload = serde_json::json!({
+            "metrics": agg_res,
+            "automated_conclusions": conclusions
+        });
+
+        let summary_path = Path::new(summary_output_dir).join(format!("rank_agreement_k_{}.json", top_k));
+        let summary_file = File::create(&summary_path)?;
+        serde_json::to_writer_pretty(summary_file, &summary_payload)?;
+        println!("Wrote rank agreement metrics to {:?}", summary_path);
+
+        Ok(summary_payload)
     }
 }
