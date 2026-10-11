@@ -232,9 +232,6 @@ mod post_training_analysis {
         let num_candidates = ranker_metadata.num_candidates;
 
         // calculate top_k=20 for retrieval then ranker
-
-        let ranker_metadata =
-            harness.orchestrator.get_or_fetch_ranker_metadata(ranker_model_version.clone())?;
         let top_k = harness.orchestrator.top_k;
         let embed_len = ranker_metadata.embed_len;
 
@@ -451,6 +448,37 @@ mod post_training_analysis {
             summary_output_dir
         ).await?;
 
+        let cold_start_users = cale_cold_start_user_metrics(
+            harness,
+            &ranker_metadata,
+            num_candidates,
+            top_k,
+            &user_ids,
+            &timestamps,
+            &candidate_movie_ids, //num_candidates
+            &top_k_movie_ids, //top_k
+            &ranker_movie_ids,
+            parquet_output_dir,
+            summary_output_dir,
+        ).await?;
+
+        /*
+        let emb_hubness = cale_cold_start_movie_metrics(
+            harness,
+            &ranker_metadata,
+            num_candidates,
+            top_k,
+            &user_gt_counts,
+            &user_ids,
+            &ann_res.user_embeddings,
+            &candidate_movie_ids, //num_candidates
+            &top_k_movie_ids, //top_k
+            &ranker_movie_ids,
+            &parquet_output_dir,
+            &summary_output_dir,
+            _embedding_hubness
+        ).await?;
+        */
 
         let _ = cross_metric_analysis(
             &base_metrics, &coverage, &pop_bias, &diversity, &emb_hubness, &ctx_hubness, &rank_agreement,
@@ -458,6 +486,24 @@ mod post_training_analysis {
         ).await?;
 
         Ok(())
+    }
+
+    async fn cale_cold_start_user_metrics(
+        harness: &TestHarness,
+        ranker_model_metadata: &Arc<RankerModelMetadata>,
+        num_candidates: usize,
+        top_k: usize,
+        user_ids: &Vec<i32>,
+        timestamps: &Vec<i64>,
+        candidate_movie_ids: &Vec<i32>,
+        top_k_movie_ids: &Vec<i32>,
+        ranker_movie_ids: &Vec<i32>,
+        parquet_output_dir: &str,
+        summary_output_dir: &str) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+
+        //select 167 randomly from each (user_tier=0, 1, and 2) of test dataset
+
+        todo!()
     }
 
     async fn contextual_hubness(

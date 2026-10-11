@@ -323,30 +323,35 @@ impl Orchestrator {
         Ok(ranker_metadata.batch_size)
     }
 
-    ///
-    ///
-    /// # Arguments
-    ///
-    /// * `user_ids`:
-    /// * `timestamps`:
-    /// * `user_embeddings`:
-    /// * `candidate_ids`:
-    /// * `ranker_model_version_choice`:
-    ///
-    /// returns: Result<RankedMovies, Status>   the number of scored restuls returned per sued is num_candidates
-    /// and has not been truncated to top_k
-    ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// ```
     pub async fn _make_ranker_request(
         &self,
-        user_ids: &[i32],               // Changed to slice
-        timestamps: &[i64],             // Changed to slice
-        user_embeddings: &[f32],        // Changed to slice
-        candidate_ids: &[i32],          // Changed to slice
+        user_ids: &[i32],
+        timestamps: &[i64],
+        user_embeddings: &[f32],
+        candidate_ids: &[i32],
+        ranker_model_version_choice: Option<VersionChoice>
+    ) -> Result<RankedMovies, Status> {
+
+        let searcher = self.searcher.load();
+        self._make_ranker_request_impl(
+            user_ids,
+            timestamps,
+            user_embeddings,
+            candidate_ids,
+            &searcher,
+            &self.user_history,
+            ranker_model_version_choice
+        ).await
+    }
+
+    pub async fn _make_ranker_request_impl(
+        &self,
+        user_ids: &[i32],
+        timestamps: &[i64],
+        user_embeddings: &[f32],
+        candidate_ids: &[i32],
+        searcher: &Searcher,
+        user_history: &UserHistory,
         ranker_model_version_choice: Option<VersionChoice>
     ) -> Result<RankedMovies, Status> {
 
@@ -365,8 +370,6 @@ impl Orchestrator {
             )));
         }
 
-        let searcher = self.searcher.load();
-
         let labels: Vec<i32> = vec![1; candidate_ids.len()];
 
         //println!("about to create input graph arrays for ranker request");
@@ -374,17 +377,17 @@ impl Orchestrator {
         // Note: We removed the `&` prefixes here because the arguments are ALREADY references (slices)
         let padded_super_graph_arrays: JraphGraph = build_enriched_padded_supergraph(
             ranker_metadata.batch_size,
-            user_ids,                 // Was &user_ids
-            timestamps,               // Was &timestamps
-            candidate_ids,            // Was &candidate_ids
-            &labels,                  // Still needs & because we created it as a Vec locally
-            &self.user_history,
+            user_ids,
+            timestamps,
+            candidate_ids,
+            &labels,
+            user_history,
             ranker_metadata.max_history,
             ranker_metadata.num_catalog_users,
             searcher.get_num_catalog_movies(),
             searcher.get_embed_len(),
             searcher.get_movies_embedding_catalog_ref(),
-            user_embeddings,          // Was &user_embeddings
+            user_embeddings,
             self.ranker_n_local_devices
         );
 
@@ -511,6 +514,48 @@ impl Orchestrator {
         searcher.get_movies_embedding_catalog_ref().clone()
     }
 
+    pub async fn _predict_for_analysis(&self,
+        user_reqs: UsersRequest,
+        ann_res: ApproxNearestNeighborsResponse,
+        searcher: &Searcher,
+        user_history: &UserHistory,
+        ) -> Result<Response<RankedMovies>, Status> {
+
+        let user_ids = ann_res.user_ids;
+        // length: n_users * embed_len
+        let user_embeddings = ann_res.user_embeddings;
+        // length: n_users * num_candidates
+        let ann_movie_ids = ann_res.candidate_ids;
+
+        let ranker_model_version_choice = Some(VersionChoice::Version(user_reqs.ranker_model_version));
+
+        let mut ranked_movies = self._make_ranker_request_impl(
+            &user_ids, &user_reqs.timestamps, &user_embeddings, &ann_movie_ids,
+            searcher, user_history,
+            ranker_model_version_choice.clone()).await?;
+
+        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .map_err(|e| {
+                // Optional: log it so you can see the error in your server console
+                eprintln!("Failed to fetch ranker metadata: {}", e);
+                // Convert to a gRPC Status
+                Status::internal(format!("Internal metadata error: {}", e))
+            })?;
+
+        let num_candidates = ranker_metadata.num_candidates;
+
+        let (top_movie_ids, top_scores) = get_top_k_desc_scores(
+            & mut ranked_movies.movie_ids, &mut ranked_movies.scores, num_candidates, self.top_k
+        );
+
+        Ok(Response::new( RankedMovies{
+            user_ids: user_ids,
+            movie_ids: top_movie_ids,
+            scores: top_scores,
+            k: self.top_k as u32,
+        }))
+    }
+
     async fn _predict(&self, req: Request<UsersRequest>) -> Result<Response<RankedMovies>, Status> {
 
         let user_reqs = req.into_inner();
@@ -635,7 +680,24 @@ impl Orchestrator {
         }))
     }
 
-    pub async fn _approx_nearest_neighbors(&self, req: Request<UsersRequest>) -> Result<Response<ApproxNearestNeighborsResponse>, Status> {
+
+    pub async fn _approx_nearest_neighbors(&self, req: Request<UsersRequest>)
+        -> Result<Response<ApproxNearestNeighborsResponse>, Status> {
+
+        let searcher = self.searcher.load();
+        self._approx_nearest_neighbors_impl(
+            req,
+            &self.user_history,
+            &searcher,
+        ).await
+    }
+
+    /// for convenience of test and analysis methods to plug in other componenets outside of orchestrator's
+    pub async fn _approx_nearest_neighbors_impl(&self,
+        req: Request<UsersRequest>,
+        user_history: &UserHistory,
+        searcher: &Searcher,
+        ) -> Result<Response<ApproxNearestNeighborsResponse>, Status> {
 
         let users_req = req.into_inner();
 
@@ -651,12 +713,9 @@ impl Orchestrator {
         //println!("_ann: n_users={}, user_embed.len={}, _embed_len={}", users_req.user_ids.len(), user_embeddings.len(), _embed_len);
 
         // length is n_users
-        let n_hists : Vec<usize> = self.user_history.get_history_count_before_timestamp(
+        let n_hists : Vec<usize> = user_history.get_history_count_before_timestamp(
             &users_req.user_ids, &users_req.timestamps
         );
-
-        // finds num_candidates approx nearest neighbors
-        let searcher = self.searcher.load();
 
         let ranker_model_version_choice = Some(VersionChoice::Version(users_req.ranker_model_version));
 
@@ -678,7 +737,7 @@ impl Orchestrator {
         let num_catalog_users = ranker_metadata.num_catalog_users as i32;
 
         // history is length n_users * max_n_hist
-        let (history, _ratings) : (Vec<i32>, Vec<i32>) = self.user_history.get_history_before_timestamp(
+        let (history, _ratings) : (Vec<i32>, Vec<i32>) = user_history.get_history_before_timestamp(
             &users_req.user_ids, &users_req.timestamps, max_n_hist);
 
         // Pre-allocate the exact size needed for the final flattened candidates
