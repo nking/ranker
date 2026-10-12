@@ -122,13 +122,13 @@ def get_vizier_for_hpo_tier(hpo_tier:int, embed_in_dim:int, top_k:int) -> Dict[s
             "num_layers" : 2,
             "hidden_dim" : 64,
             "num_heads" : 2,
-            "dropout_rate" : 0.2,
-            "learning_rate" : 5e-4,
+            "dropout_rate" : 0.1,
+            "learning_rate" : 1e-3,
             "weight_decay" : 1e-3,
             "out_dim" : embed_in_dim,
             "edge_embed_dim" : 8,
-            "max_history" : history_cand_range[0],
-            "num_candidates" : history_cand_range[0],
+            "max_history" : history_cand_range[0],      #40
+            "num_candidates" : history_cand_range[0],   #40
             "mlp_hidden_dim" : 1.0,
             "focal_loss_gamma" : 2.0})
     elif hpo_tier==1:
@@ -189,10 +189,10 @@ def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in
     root.add_discrete_param("top_k", feasible_values=[top_k])
     root.add_discrete_param("embed_in_dim", feasible_values=[embed_in_dim])
 
-    root.add_discrete_param("use_focal_loss", feasible_values=[1])
-    root.add_discrete_param("use_ipw", feasible_values=[1])
+    root.add_discrete_param("use_focal_loss", feasible_values=[0])
+    root.add_discrete_param("use_ipw", feasible_values=[0])
 
-    root.add_discrete_param("temperature", feasible_values=[0.15])
+    root.add_discrete_param("temperature", feasible_values=[0.2])
     #feasible_values=[0.07, 0.1, 0.25, 0.5])
     root.add_categorical_param("tier_weights", feasible_values=["[0.33, 0.33, 0.33]"])
 
