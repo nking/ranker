@@ -1,0 +1,31 @@
+# serve the candidate model for post_training_analysis.rs
+#
+#USAGE
+#  docker compose --project-directory . -f deploy/compose/docker-compose-TFS-candidate.yaml up -d
+#     the project_directory flag ensure the file paths are all relative to that directory
+services:
+  tfs-bi-encoder-candidate:
+    image: tensorflow/serving:2.16.1
+    container_name: tfs-bi-encoder-candidate
+    restart: unless-stopped
+    ports:
+      - "172.17.0.1:8520:8500" # gRPC port
+      - "172.17.0.1:8521:8501" # REST API port
+    environment:
+      - MODEL_NAME=candidate
+    volumes:
+      - ./src/test/resources/model_repositories/saved_model_formats/bi-encoder/candidate:/models/candidate
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "echo > /dev/tcp/localhost/8501" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    #curl -X POST http://172.17.0.1:8521/v1/models/candidate:predict \
+    #  -H 'Content-Type: application/json' \
+    #  -d '{
+    #    "inputs": {
+    #      "genres": [["Action|Sci-Fi"], ["Comedy|Romance"]],
+    #      "movie_id": [[2571], [13]]
+    #    }
+    #  }'
