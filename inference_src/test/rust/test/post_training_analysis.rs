@@ -31,6 +31,7 @@ struct TestHarness {
     embed_len: usize,
     movie_tiers_df: LazyFrame,
     user_tiers_df: LazyFrame,
+    candidate_uri: String
 }
 
 impl TestHarness {
@@ -42,6 +43,7 @@ impl TestHarness {
 
         let query_uri = config.query_uri.clone();
         let ranker_uri = config.ranker_uri.clone();
+        let candidate_uri = config.candidate_uri.clone();
         let ranker_n_local_devices = config.ranker_n_local_devices;
         let top_k = config.top_k;
         let user_db_path: PathBuf = config.user_db_path.clone();
@@ -75,7 +77,7 @@ impl TestHarness {
             ranker_n_local_devices,
             top_k,
             persisted_index_path,
-            user_db_path
+            user_db_path,
         ).await.unwrap();
 
         let ratings_uris: Vec<String> = vec![
@@ -128,7 +130,8 @@ impl TestHarness {
             train_history_df: train_history_df,
             pos_test_df: pos_test_df,
             movie_tiers_df: movie_tiers_df,
-            user_tiers_df: user_tiers_df
+            user_tiers_df: user_tiers_df,
+            candidate_uri: candidate_uri
         }
     }
 }
@@ -182,11 +185,12 @@ mod post_training_analysis {
     use polars::prelude::*;
     use rayon::prelude::*; // Required for parallel slate comparisons in _diversity_metrics
     use tonic::{Request, Response};
+    use inference_engine::embeddings_ann::Searcher;
     // Bring everything from the outer scope (TestHarness, helper functions, etc.) into the test module
     use super::*;
 
     use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
-    use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMoviesAndRepr, UsersRequest};
+    use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMoviesAndRepr, UsersRequest, MoviesRequest};
     use inference_engine::pb::recommender_service_server::RecommenderService;
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
     use inference_engine::util::{get_top_k_desc_scores};
@@ -450,6 +454,7 @@ mod post_training_analysis {
 
         let cold_start_users = cale_cold_start_user_metrics(
             harness,
+            query_model_version.clone(),
             &ranker_metadata,
             num_candidates,
             top_k,
@@ -462,23 +467,22 @@ mod post_training_analysis {
             summary_output_dir,
         ).await?;
 
-        /*
         let emb_hubness = cale_cold_start_movie_metrics(
             harness,
+            query_model_version.clone(),
             &ranker_metadata,
             num_candidates,
             top_k,
-            &user_gt_counts,
             &user_ids,
+            &timestamps,
             &ann_res.user_embeddings,
             &candidate_movie_ids, //num_candidates
             &top_k_movie_ids, //top_k
             &ranker_movie_ids,
-            &parquet_output_dir,
-            &summary_output_dir,
-            _embedding_hubness
+            parquet_output_dir,
+            summary_output_dir,
         ).await?;
-        */
+
 
         let _ = cross_metric_analysis(
             &base_metrics, &coverage, &pop_bias, &diversity, &emb_hubness, &ctx_hubness, &rank_agreement,
@@ -488,16 +492,54 @@ mod post_training_analysis {
         Ok(())
     }
 
-    async fn cale_cold_start_user_metrics(
+    async fn cale_cold_start_movie_metrics(
         harness: &TestHarness,
+        query_model_version:Option<VersionChoice>,
         ranker_model_metadata: &Arc<RankerModelMetadata>,
         num_candidates: usize,
         top_k: usize,
-        user_ids: &Vec<i32>,
-        timestamps: &Vec<i64>,
-        candidate_movie_ids: &Vec<i32>,
-        top_k_movie_ids: &Vec<i32>,
-        ranker_movie_ids: &Vec<i32>,
+        user_ids: &[i32],
+        timestamps: &[i64],
+        user_embeddings: &[f32],
+        candidate_movie_ids: &[i32],
+        top_k_movie_ids: &[i32],
+        ranker_movie_ids: &[i32],
+        parquet_output_dir: &str,
+        summary_output_dir: &str) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+
+        let embed_len = ranker_model_metadata.embed_len;
+        let num_candidates = ranker_model_metadata.num_candidates;
+        let candidate_model_version = query_model_version.clone();
+
+        /*
+        //select 167 randomly from each (movies_tier=0, 1, and 2) of test dataset
+
+        let candidate_client = CandidateModelClient::new(&harness.candidate_uri, ranker_metadata.embed_len).await;
+
+        let (old_movie_ids, new_movie_ids, new_movie_embeddings) = get_cold_start_movies(harness, ranker_metadata.embed_len);
+
+        let new_searcher : Searcher = Searcher::new_detached(&new_movie_embeddings, embed_len,
+            num_candidates).expect("error while constructing Searcher");
+
+        // let initial_searcher = Searcher::new(movie_embeddings_uri, num_candidates, &persisted_index_path)?;
+
+        //let original_movie_embeddings = harness.orchestrator._get_movies_embedding_catalog();
+        */
+
+        todo!()
+    }
+
+    async fn cale_cold_start_user_metrics(
+        harness: &TestHarness,
+        query_model_version:Option<VersionChoice>,
+        ranker_model_metadata: &Arc<RankerModelMetadata>,
+        num_candidates: usize,
+        top_k: usize,
+        user_ids: &[i32],
+        timestamps: &[i64],
+        candidate_movie_ids: &[i32],
+        top_k_movie_ids: &[i32],
+        ranker_movie_ids: &[i32],
         parquet_output_dir: &str,
         summary_output_dir: &str) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
 

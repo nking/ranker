@@ -5,12 +5,12 @@ mod client_tests {
     use std::path::PathBuf;
     use serde_json::Value;
     use inference_engine::app_config::AppConfig;
-    use inference_engine::model_client::{QueryModelClient, RankerModelClient};
+    use inference_engine::model_client::{CandidateModelClient, QueryModelClient, RankerModelClient};
     use inference_engine::graph_builder::{create_fake_padded_super_batch, JraphGraph};
     use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
     //use super::*;
     // Assuming your UserRequest is accessible here
-    use inference_engine::pb::UsersRequest;
+    use inference_engine::pb::{UsersRequest, MoviesRequest};
     use inference_engine::query_model_metadata::QueryModelMetadata;
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
 
@@ -53,13 +53,54 @@ mod client_tests {
         let result : Result<Vec<f32>, Box<dyn Error>> = client.get_users_embeddings(mock_request,
             query_model_version_choice).await;
 
-        assert!(result.is_ok(), "Failed to get embedding: {:?}", result.err());
+        assert!(result.is_ok(), "Failed to get user embedding: {:?}", result.err());
 
         let embedding = result.unwrap();
         assert_eq!(client.embed_len, embedding.len());
 
         // Assert the expected dimension length (e.g., 128)
-        assert!(!embedding.is_empty(), "Embedding vector is empty!");
+        assert!(!embedding.is_empty(), "User Embedding vector is empty!");
+
+    }
+
+    #[tokio::test]
+    async fn test_candidate_model_connection() {
+
+        let config_path = get_config_json_uri();
+        let config = AppConfig::load_from_file(&config_path).unwrap();
+
+        // getting the query metadata instead, but it is same a candidate metadata
+        let query_metadata_uri = format!(
+            "{}/{}/assets.extra/{}",
+            config.query_saved_models_uri.trim_end_matches('/'), 1, "hyperparameters.json");
+
+        let query_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri).unwrap();
+
+        let client = CandidateModelClient::new(config.candidate_uri, query_metadata.embed_len).await;
+
+        let mock_request = MoviesRequest {
+            movie_ids: vec![6041],
+            genres: vec!["Action|Sci-Fi".to_string()],
+            n_movies : 1,
+            candidate_model_version:1,
+        };
+
+        let candidate_model_version_choice = Some(VersionChoice::Version(1));
+
+        // If the docker container isn't running, or the model isn't loaded,
+        // this will fail and print the gRPC status error.
+        let result : Result<Vec<f32>, Box<dyn Error>> = client.get_movies_embeddings(mock_request,
+            candidate_model_version_choice).await;
+
+        assert!(result.is_ok(), "Failed to get movie embedding: {:?}", result.err());
+
+        let embedding = result.unwrap();
+        assert_eq!(client.embed_len, embedding.len());
+
+        // Assert the expected dimension length (e.g., 128)
+        assert!(!embedding.is_empty(), "Movie Embedding vector is empty!");
+
+
     }
 
     #[tokio::test]

@@ -68,6 +68,39 @@ impl Searcher {
         })
     }
 
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// * `movie_embeddings_uri`: uri to the parquet file containing movie embeddings
+    /// * `num_candidates`: the number of nearest neighbors to search for.
+    /// * `persisted_index_path`: file path to use to persist the index to for fast reloading.
+    ///
+    /// returns: Result<Searcher, Box<dyn Error+Send+Sync, Global>>
+    ///
+    // static constructor
+    pub fn new_detached(movie_embeddings_catalog: &[f32], embed_len: usize,
+        num_candidates: usize) -> Result<Self, Box<dyn std::error::Error+ Send + Sync>> {
+
+        println!("Movies embeddings embed_len: {}", embed_len);
+
+        let num_catalog_movies = movie_embeddings_catalog.len() / embed_len;
+
+        let index: Index = Self::construct_index(embed_len, num_catalog_movies)?;
+        for (id, chunk) in movie_embeddings_catalog.chunks_exact(embed_len).enumerate() {
+            index.add(id as u64, chunk)?;
+        }
+
+        Ok(Self{
+            indexer: index,
+            movie_embeddings_catalog : Vec::from(movie_embeddings_catalog),
+            num_catalog_movies: num_catalog_movies,
+            embed_len : embed_len,
+            num_candidates: num_candidates,
+            persisted_index_path: "".parse()?,
+        })
+    }
+
     /// build the ANN index for embedding vectors of length embed_len using inner_product
     /// (which results in cosine similarity distances if the embedding vectors ar already normalized)
     /// and save the index to path for fast re-loading abilities.

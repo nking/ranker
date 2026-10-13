@@ -549,25 +549,50 @@ class TestRanker(unittest.TestCase):
     def test_run_train_test_given(self):
         config = self.config.copy()
         
-        config['study_name'] = "GraphRanker_tuning_unittest4"
-        config['project_id'] =  'tune-unittest-04'
+        config['study_name'] = "GraphRanker_tuning_unittest_given"
+        config['project_id'] =  'tune-unittest-given'
         config['mlflow_experiment_name'] = config['study_name']
 
         self.delete_vizier_project(config['vizier_endpoint'], config['project_id'], config['study_name'])
 
-
-        hparams = {'top_k': 20, 'num_layers': 2, 'num_heads': 4, 'hidden_dim': 128,
-            'max_history': 70, 'num_candidates': 70, 'learning_rate': 0.001,
-            'weight_decay': 0.001, 'out_dim': 32, 'mlp_hidden_dim':0.5, 'edge_embed_dim': 16, 'dropout_rate': 0.2,
-            'temperature' : 0.1}
+        hparams = {
+                    #"batch_size" : 1024,
+                    "connections_check" : 0,
+                   "dropout_rate": 0.1,
+                   "edge_embed_dim": 8,
+                   "embed_in_dim": 32,
+                   "embed_len": 32,
+                   "focal_loss_gamma": 2,
+                   "hidden_dim": 64,
+                   "hpo_tier": 0,
+                   "learning_rate": 0.001,
+                   "max_history": 100,
+                   "mlp_hidden_dim" : 1.0,
+                   "num_candidates": 100,
+                   "num_epochs": 15,
+                   "num_heads": 2,
+                   "num_layers": 2,
+                   "num_movies": 3883,
+                   "num_users": 6040,
+                   "out_dim": 32,
+                   "seed": 1234567,
+                   "temperature": 0.25,
+                   "tier_weights": '[0.33,0.33,0.33]',
+                   "top_k": 20,
+                   "use_focal_loss": 0,
+                   "use_ipw": 0,
+                   "validate_checkpoint_restores": True,
+                   "weight_decay": 0.001,
+                   "train_id" : 789,
+                   }
         config.update(hparams)
         
         config['phase'] = 'train-given'
-        config['train_id'] = 2345
         config['validate_checkpoint_restores'] = True
-        config['connections_check'] = 0
 
         restore_dict, train_run = self._run_train_and_restore_chkpoint_and_assert(config)
+
+        self._assert_export_train_results(config)
 
         sfx = f"{config['study_name']}/train_{config['train_id']}"
         #or could use restore_dict['config']['best_checkpoint_uri']
@@ -579,8 +604,7 @@ class TestRanker(unittest.TestCase):
         config['phase'] = 'test-given'
         
         self._run_tst_and_assert(config)
-        
-        self._assert_export_train_results(config)
+
         self._assert_export_test_results(config)
     
     def _assert_export_methods(self, config:Dict[str, Any]):

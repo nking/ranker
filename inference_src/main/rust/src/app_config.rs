@@ -23,6 +23,10 @@ pub struct AppConfig {
     #[arg(long, env = "RANKER_URI", default_value = "http://172.17.0.1:8510")]
     pub ranker_uri: String,
 
+    /// URI for the TFS Query Model
+    #[arg(long, env = "QUERY_URI", default_value = "http://172.17.0.1:8520")]
+    pub candidate_uri: String,
+
     /// Path to the hyperparameters JSON file
     #[arg(long, env = "PARAMS_JSON_PATH")]
     pub params_json_path: String,

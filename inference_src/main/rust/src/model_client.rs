@@ -4,7 +4,7 @@ use std::time::Duration;
 use tonic::transport::{Channel, Endpoint};
 // use crate:: means look inside this project
 use crate::graph_builder::{JraphGraph};
-use crate::pb::{UsersRequest};
+use crate::pb::{UsersRequest, MoviesRequest};
 
 const CLIENT_CONNECT_TIMEOUT: u64 = 5;
 
@@ -21,6 +21,12 @@ use crate::ranker_model_metadata::RankerModelMetadata;
 
 #[derive(Debug)]
 pub struct QueryModelClient {
+    pub client: PredictionServiceClient<Channel>,
+    pub embed_len: usize
+}
+
+#[derive(Debug)]
+pub struct CandidateModelClient {
     pub client: PredictionServiceClient<Channel>,
     pub embed_len: usize
 }
@@ -206,6 +212,65 @@ impl RankerModelClient {
 
 }
 
+impl CandidateModelClient {
+    pub async fn new(uri: String, embed_len: usize) -> Self {
+        let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
+
+        let channel = endpoint
+            .connect_timeout(Duration::from_secs(CLIENT_CONNECT_TIMEOUT))
+            .connect()
+            .await
+            .expect("Failed to connect to TFS for candidate model");
+        Self {
+            client: PredictionServiceClient::new(channel),
+            embed_len: embed_len
+        }
+    }
+
+    pub async fn get_movies_embeddings(&self, request: MoviesRequest,
+        candidate_model_version_choice: Option<VersionChoice>) -> Result<Vec<f32>, Box<dyn Error>> {
+
+        let n_valid_movies : usize = request.n_movies as usize;
+
+        let predict_req: PredictRequest = build_candidate_model_inputs(request, candidate_model_version_choice);
+
+        // Send the request
+        let response = self.client.clone().predict(predict_req).await?;
+        let inner_response = response.into_inner();
+
+        if let Some((_key, tensor_proto)) = inner_response.outputs.into_iter().next() {
+
+            // Extract the flat f32 vector
+            let mut flat_embedding = if !tensor_proto.float_val.is_empty() {
+                tensor_proto.float_val
+            } else if !tensor_proto.tensor_content.is_empty() {
+                let raw_bytes = tensor_proto.tensor_content;
+                let mut embedding = Vec::with_capacity(raw_bytes.len() / 4);
+                for chunk in raw_bytes.chunks_exact(4) {
+                    let val = f32::from_le_bytes(chunk.try_into()?);
+                    embedding.push(val);
+                }
+                embedding
+            } else {
+                return Err("Error: Tensor contained neither float_val nor tensor_content".into());
+            };
+
+            // Reshape into batched vectors
+            let valid_len = n_valid_movies * self.embed_len;
+
+            // 3. Truncate the flat vector to drop padding graphs at the end
+            if flat_embedding.len() > valid_len {
+                flat_embedding.truncate(valid_len);
+            }
+
+            Ok(flat_embedding)
+        } else {
+            Err("Error: TFS response from candidate model contained no outputs".into())
+        }
+    }
+}
+
+
 ///
 ///
 /// # Arguments
@@ -237,6 +302,27 @@ pub fn build_query_model_inputs(req: UsersRequest, model_version_choice: Option<
     PredictRequest {
         model_spec: Some(ModelSpec {
             name: "query".to_string(),
+            signature_name: "serving_default".to_string(),
+            version_choice: model_version_choice,
+            ..Default::default()
+        }),
+        inputs: inputs,
+        ..Default::default()
+    }
+}
+
+pub fn build_candidate_model_inputs(req: MoviesRequest, model_version_choice: Option<VersionChoice>) -> PredictRequest {
+
+    let mut inputs : HashMap<String, TensorProto> = HashMap::new();
+
+    //currently: signature needs 64-bit inputs
+
+    inputs.insert("movie_id".into(), req.movie_ids.into_64bit_tensor2d());
+    inputs.insert("genres".into(), req.genres.into_tensor2d());
+
+    PredictRequest {
+        model_spec: Some(ModelSpec {
+            name: "candidate".to_string(),
             signature_name: "serving_default".to_string(),
             version_choice: model_version_choice,
             ..Default::default()

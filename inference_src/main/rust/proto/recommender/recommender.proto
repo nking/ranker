@@ -19,6 +19,14 @@ message UsersRequest {
   int64 ranker_model_version = 9;
 }
 
+//input request for movie embeddings.
+message MoviesRequest {
+  repeated int32 movie_ids = 1;
+  repeated string genres = 2;
+  uint32 n_movies = 3;
+  int64 candidate_model_version = 4;
+}
+
 // input for the graph ranker model
 
 // The output from your orchestrator containing parallel vectors of movie_ids and their model scores
