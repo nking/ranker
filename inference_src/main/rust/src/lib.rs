@@ -1,6 +1,8 @@
 
 pub mod user_history;
 pub mod user_db;
+
+pub mod movie_db;
 pub mod recommended_movies;
 pub mod graph_builder;
 

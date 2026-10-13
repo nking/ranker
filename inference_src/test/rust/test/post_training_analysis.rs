@@ -186,6 +186,7 @@ mod post_training_analysis {
     use rayon::prelude::*; // Required for parallel slate comparisons in _diversity_metrics
     use tonic::{Request, Response};
     use inference_engine::embeddings_ann::Searcher;
+    use inference_engine::model_client::CandidateModelClient;
     // Bring everything from the outer scope (TestHarness, helper functions, etc.) into the test module
     use super::*;
 
@@ -511,13 +512,11 @@ mod post_training_analysis {
         let num_candidates = ranker_model_metadata.num_candidates;
         let candidate_model_version = query_model_version.clone();
 
-        /*
         //select 167 randomly from each (movies_tier=0, 1, and 2) of test dataset
+        //let (old_movie_ids, new_movie_ids, new_movie_embeddings) = get_cold_start_movies(&harness,
+        //    ranker_model_metadata.embed_len).await;
 
-        let candidate_client = CandidateModelClient::new(&harness.candidate_uri, ranker_metadata.embed_len).await;
-
-        let (old_movie_ids, new_movie_ids, new_movie_embeddings) = get_cold_start_movies(harness, ranker_metadata.embed_len);
-
+        /*
         let new_searcher : Searcher = Searcher::new_detached(&new_movie_embeddings, embed_len,
             num_candidates).expect("error while constructing Searcher");
 
@@ -527,6 +526,29 @@ mod post_training_analysis {
         */
 
         todo!()
+    }
+
+    async fn get_cold_start_movies(harness: &&TestHarness, embed_len: usize) -> Result<(Vec<i32>, Vec<i32>, Vec<f32>), Box<dyn std::error::Error + Send + Sync>> {
+
+        /*
+        pos_test_df = self.join_df_to_movie_tiers(pos_test_df)
+        movie_test_counts = pos_test_df.group_by("movie_id").agg(pl.len().alias("test_interaction_count"))
+        candidate_pool = movie_test_counts.filter(pl.col("test_interaction_count") >= 5)
+
+        pos_test_df = candidate_pool.join(pos_test_df, on="movie_id", how="left")
+
+        num_per_tier = 167  # total = 501
+        candidate_pool_df = (pos_test_df.sample(fraction=1.0, seed=42, shuffle=True)
+            .group_by("movie_tier").head(num_per_tier))
+
+        original_movie_ids = candidate_pool_df["movie_id"].unique().to_numpy()
+         */
+
+
+        //select 167 randomly from each (movies_tier=0, 1, and 2) of test dataset
+       // let candidate_client = CandidateModelClient::new(harness.candidate_uri, embed_len).await;
+
+        Ok((Vec::new(), Vec::new(), Vec::new()))
     }
 
     async fn cale_cold_start_user_metrics(
