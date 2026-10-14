@@ -1,0 +1,61 @@
+2026-10-14 16:21:20.385570: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2026-10-14 16:21:20.436719: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2026-10-14 16:21:21.856002: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2026-10-14 16:21:23.247573: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+
+MetaGraphDef with tag-set: 'serve' contains the following SignatureDefs:
+
+signature_def['__saved_model_init_op']:
+  The given SavedModel SignatureDef contains the following input(s):
+  The given SavedModel SignatureDef contains the following output(s):
+    outputs['__saved_model_init_op'] tensor_info:
+        dtype: DT_INVALID
+        shape: unknown_rank
+        name: NoOp
+  Method name is: 
+
+signature_def['serving_default']:
+  The given SavedModel SignatureDef contains the following input(s):
+    inputs['genres'] tensor_info:
+        dtype: DT_STRING
+        shape: (-1, 1)
+        name: serving_default_genres:0
+    inputs['movie_id'] tensor_info:
+        dtype: DT_INT64
+        shape: (-1, 1)
+        name: serving_default_movie_id:0
+  The given SavedModel SignatureDef contains the following output(s):
+    outputs['outputs'] tensor_info:
+        dtype: DT_FLOAT
+        shape: (-1, 32)
+        name: StatefulPartitionedCall_3:0
+  Method name is: tensorflow/serving/predict
+
+signature_def['serving_default_examples']:
+  The given SavedModel SignatureDef contains the following input(s):
+    inputs['examples'] tensor_info:
+        dtype: DT_STRING
+        shape: (-1)
+        name: serving_default_examples_examples:0
+  The given SavedModel SignatureDef contains the following output(s):
+    outputs['outputs'] tensor_info:
+        dtype: DT_FLOAT
+        shape: (-1, 32)
+        name: StatefulPartitionedCall_4:0
+  Method name is: tensorflow/serving/predict
+The MetaGraph with tag set ['serve'] contains the following ops: {'Shape', 'ConcatV2', 'StaticRegexReplace', 'Max', 'SquaredDifference', 'Cumsum', 'NotEqual', 'Sub', 'Less', 'SaveV2', 'RestoreV2', 'AddV2', 'MergeV2Checkpoints', 'RealDiv', 'ShardedFilename', 'VarHandleOp', 'ParseExampleV2', 'Identity', 'Mul', 'Range', 'LookupTableFindV2', 'Where', 'LookupTableImportV2', 'StopGradient', 'Pack', 'VarIsInitializedOp', 'Mean', 'FloorMod', 'StringSplitV2', 'DisableCopyOnRead', 'HashTableV2', 'Minimum', 'Reshape', 'StridedSlice', 'BroadcastTo', 'ExpandDims', 'Squeeze', 'Const', 'Cast', 'GatherV2', 'StaticRegexFullMatch', 'Rsqrt', 'RaggedTensorToTensor', 'ReadVariableOp', 'OneHot', 'Tile', 'Placeholder', 'Elu', 'Prod', 'StringJoin', 'FloorDiv', 'Sum', 'Fill', 'Cumprod', 'AssignVariableOp', 'Maximum', 'PlaceholderWithDefault', 'MatMul', 'Square', 'UnsortedSegmentSum', 'NoOp', 'Select', 'BatchMatMulV2', 'SelectV2', 'Neg', 'StatefulPartitionedCall'}
+
+Concrete Functions:
+  Function Name: 'serving_default'
+    Option #1
+      Callable with:
+        Argument #1
+          DType: dict
+          Value: {'movie_id': TensorSpec(shape=(None, 1), dtype=tf.int64, name='movie_id'), 'genres': TensorSpec(shape=(None, 1), dtype=tf.string, name='genres'), }
+
+  Function Name: 'serving_default_examples'
+    Option #1
+      Callable with:
+        Argument #1
+          examples: TensorSpec(shape=(None,), dtype=tf.string, name='examples')

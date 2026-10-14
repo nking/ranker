@@ -1,9 +1,26 @@
+the dir data/bie-encoder contains tower-products for versions
+of the trained tower that coincide with the 
+model_repositories/saved_model_formats/bi-encoder/<model>/ versions
+
+to load tmp_mounts/fake_gcs_data for the trained model specific products
+cp -f data/bi-encoder/<version>/* to the tmp_mounts/fake_gcs_data directory
+before running tests and zipping it for Kaggle.
+
 user_recommendations*array_records record are a list of 
 msgpack serialized rows containing
 [int, list[int]] of user_id, recommended_movie_ids.
 The files were written in repository
 github.com/nking/retrieval.git
-in file src/test/python/movie_lens_retrieval/write_user_recommendations_and_negatives.py
+in file src/test/python/movie_lens_retrieval/write_tower_products.py
+There is a metadata file to track the two-tower model which made them.
+
+<user|movie>_emb*array_records record are a list of 
+msgpack serialized rows containing
+[int, list[float]] of id, embedding vector.
+The files were written in repository
+github.com/nking/retrieval.git
+in file src/test/python/movie_lens_retrieval/write_tower_products.py
+There is a metadata file to track the two-tower model which made them.
 
 ratings_<*>.array_record are a list of
 msgpack serialized rows containing
