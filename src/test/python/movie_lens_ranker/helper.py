@@ -29,8 +29,12 @@ def get_kaggle() -> bool:
   return kaggle
 
 def get_project_dir() -> str:
-  cwd = os.getcwd()
-  head = cwd
+  #cwd = os.getcwd()
+  #head = cwd
+  script_path = os.path.abspath(__file__)
+  script_dir = os.path.dirname(script_path)
+  head = script_dir
+
   proj_dir = ""
   while head and head != os.sep:
     head, tail = os.path.split(head)

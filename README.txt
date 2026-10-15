@@ -2,13 +2,13 @@
 
 project to create a ranker model for the mid-tier
 in a 3 part recommendation system.  Part 1 is
-the Two-tower bi-encoder + Scann for retrieval.
+the Two-tower bi-encoder + Scann or USearch for retrieval.
 part 2 is the ranker (list-wise cross-encoder) in this project.
 part 3 is the re-ranker (fine-tuned pretrained list-wise cross-encoder).
 
 this project will create a ranker from
 the Jax AI Stack + Rax.
-It will use a kubeflow pipeline for an MlOps pipeline
+It will use a kubeflow pipeline for an MlOps pipeline.
 
 part 1 can be found at:
 https://github.com/nking/recommender_systems.git
@@ -52,7 +52,7 @@ some details about the model
     rather than interactions between ids, and so the results are inductive
     and can be applied to inputs that have not been seen before.
 
-    The GATv2 is followed by a linear layer with output dimension 1 in order
+    The GATv2 is followed by a 2-layer MLP with output dimension 1 in order
     to produce scores for each candidate.
 
     The results are useful relative to the input graph, that is, for ranking
@@ -61,7 +61,7 @@ some details about the model
   TODO: considering a CliffordNet version, but it needs
         upstream of it, a bi-encoder that uses geometric algebra
         to make query (=user) bi-vectors and candidate (=movie) bi-vectors,
-        and it requires adaptations to the retrieval code including storage in ScANN.
+        and it requires adaptations to the retrieval code including storage in ScANN or Usearch.
         - this Geometric Algebra (GA) cross encoder would have layers:
           (1) a geometric product layer to characterize the interaction
              where the GP is dot product + wedge product between a
@@ -76,9 +76,9 @@ some details about the model
           and get a more expressive result for similar final runtime complexity
           and space complexity.
           ==> that the runtime and space complexities are of same order as
-              the prototype GraphRanker means that the geometric alegra
+              the prototype GraphRanker means that the geometric algebra
               cross-encoder model, like the GraphRanker GATv2 cross-encoder
-              model would benefit from 8 times faster training with accelerators
+              model would benefit from several times faster training with accelerators
 --------------------------------------------------
 
 project directory hierarchy:
@@ -89,14 +89,16 @@ project directory hierarchy:
 │   ├──test/   
 │   │   ├── python/movie_lens_ranker  # Tests for Main Branch
 │   |   └── resources                 #data for tests
-├── deploy/                         # Yaml Files (No executable code)   
-│   ├── compose/                    # Local Docker Compose configurations   
-│   │   ├── docker-compose.yaml     # Combines app + dbs   
-│   │   └── docker-compose-dbs.yaml # Just the 3 database containers   
-│   └── k8s/                        # Native Kubernetes definitions   
-│       ├── rbac.yaml               # Role & RoleBindings   
-│       ├── databases/              # Manifests for your local DBs (replacing compose)   
-│       └── trainjob.yaml           # Kubeflow Trainer v2 YAML template   
+├── deploy/                                       # Yaml Files (No executable code)
+│   ├── compose/                                  # Local Docker Compose configurations
+│   │   ├── docker-compose.yaml                   # Combines app + dbs
+│   │   ├── docker-compose-TFS.yaml               # TFS hosting of the tower Query model and Ranker model
+│   │   ├── docker-compose-TFS-candidate.yaml     # TFS hosting of the tower Candidate model
+│   │   └── docker-compose-dbs.yaml               # the 3 database containers
+│   └── k8s/                          # Native Kubernetes definitions
+│       ├── rbac.yaml                 # Role & RoleBindings
+│       ├── databases/                # Manifests for your local DBs (replacing compose)
+│       └── trainjob.yaml             # Kubeflow Trainer v2 YAML template
 │   
 ├── orchestration/                  # Python Advanced Launchers & Runners   
 │   ├── k8s/   
@@ -105,8 +107,8 @@ project directory hierarchy:
 │   |   └── run_app_trainer.sh      # Bash script to use kubectl to run cluster, dbs, and Trainer v2   
 │   |   └── run_app_trainer.py      # Python script to use kubectl, kind, k8s to run cluster, dbs, and Trainer v2   
 │   │   └── run_app_trainer_kfp.py  # Python script to build/run KFP pipeline   
-│   ├── xmanager/   
-│   │   └── launcher.py             # XManager script (xm_local + docker socket)   
+│   ├── xmanager/                   # Xmanager and Docker files
+│   │   └── launcher_pipeline.py    # XManager script (xm_local + docker socket)
 │   
 ├── scripts/                        # Operational Bash/Utility Scripts   
 ├── Dockerfile_*                    # Image Dockerfiles   
@@ -114,7 +116,7 @@ project directory hierarchy:
 └── README.md   
 └── pyproject.toml   
 
-Then the sources for the export (needs tensorflow + orbax), inference (needs rust and tensorlow)
+Then the sources for the export (needs tensorflow + orbax), inference (needs rust and tensorflow)
 export_src
 │   ├── pyproject.toml
 │   ├── main
@@ -123,20 +125,17 @@ export_src
 │   ├── test
 │       └── python 
 │            └── movie_lens_ranker_export
+|                    └── test_export.py     # script to export an orbax checkpoint to TF SavedModel
 |
-inference_src
+inference_src    # code for the end-to-end inference using rust
 │   ├── pyproject.toml
     ├── main
-    |   └── python                  
-    |        └── movie_lens_ranker_inference
     |   └── rust                      #rust src code for input graph
     |        └── Cargo.toml
     |        └── src
     ├── test
-        └── python                  
-             └── movie_lens_ranker_inference
         └── rust                      #rust src code for input graph
-             └── src
+             └── test
 
 tf_c++_op_src
 
@@ -151,7 +150,7 @@ source $HOME/.cargo/env
 to compile the rust code while developing (editable install will pick up the compiled changes):
 maturin develop
 
--TODO: make an changes to orchestrators to include rust
+-TODO: make changes to orchestrators to include rust
 
 --------------------------------------------------
 Note that some of the software stack requires the OS to be linux.
@@ -180,7 +179,7 @@ Running the code:
 - there is a script to setup and run a k8s cluster using kind
   see Running k82/kind below
 
-- there will be a Kubeflow Pipeline (KFP) to run the code
+- there is a Kubeflow Pipeline (KFP) to run the code
   see Running KFP below
 
 -----------------------------------------------------------------------
