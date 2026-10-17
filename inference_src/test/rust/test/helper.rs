@@ -81,8 +81,8 @@ pub fn get_embeddings_uris(two_tower_version: Option<i32>) -> (String, String) {
 
     let base_dir = get_project_dir().expect("Failed to get project directory");
     let data_dir = match two_tower_version {
-        Some(version) => format!("src/test/resources/data/tower_versions/{}/", version),
-        None => "src/test/resources/data/tower_versions/1/".to_string(),
+        Some(version) => format!("src/test/resources/data/bi-encoder/{}/", version),
+        None => "src/test/resources/data/bi-encoder/1/".to_string(),
     };
 
     let user_embedding_uri = base_dir
@@ -103,8 +103,8 @@ pub fn get_embeddings_uris(two_tower_version: Option<i32>) -> (String, String) {
 pub fn get_embeddings_metadata_uris(two_tower_version: Option<i32>) -> (String, String) {
     let base_dir = get_project_dir().expect("Failed to get project directory");
     let data_dir = match two_tower_version {
-        Some(version) => format!("src/test/resources/data/tower_versions/{}/", version),
-        None => "src/test/resources/data/tower_versions/1/".to_string(),
+        Some(version) => format!("src/test/resources/data/bi-encoder/{}/", version),
+        None => "src/test/resources/data/bi-encoder/1/".to_string(),
     };
 
     let user_uri = base_dir
@@ -126,8 +126,8 @@ pub fn get_recommended_movies_uris(two_tower_version: Option<i32>) -> (String, S
 
     let base_dir = get_project_dir().expect("Failed to get project directory");
     let data_dir = match two_tower_version {
-        Some(version) => format!("src/test/resources/data/tower_versions/{}/", version),
-        None => "src/test/resources/data/tower_versions/1/".to_string(),
+        Some(version) => format!("src/test/resources/data/bi-encoder/{}/", version),
+        None => "src/test/resources/data/bi-encoder/1/".to_string(),
     };
 
     let movies_rec_uri = base_dir

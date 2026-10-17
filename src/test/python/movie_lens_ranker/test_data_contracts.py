@@ -35,10 +35,10 @@ class TestDataContracts(unittest.TestCase):
             "src/test/resources/data/ratings_train_disliked.array_record")
         
         self.recommendations_uri = os.path.join(get_project_dir(),
-            f"src/test/resources/data/tower_versions/{two_tower_version}/recommended_movies.array_record")
+            f"src/test/resources/data/bi-encoder/{two_tower_version}/recommended_movies.array_record")
 
         self.recommendations_ts_uri = os.path.join(get_project_dir(),
-            f"src/test/resources/data/tower_versions/{two_tower_version}/recommended_movies_timestamps.array_record")
+            f"src/test/resources/data/bi-encoder/{two_tower_version}/recommended_movies_timestamps.array_record")
         
         self.ratings_train_uri = os.path.join(get_project_dir(),
             "src/test/resources/data/ratings_train_liked.array_record")
@@ -50,13 +50,13 @@ class TestDataContracts(unittest.TestCase):
             "src/test/resources/data/ratings_test_liked.array_record")
         
         self.movie_embeddings_uri = os.path.join(get_project_dir(),
-            f"src/test/resources/data/tower_versions/{two_tower_version}/movie_emb-00000-of-00001.array_record")
+            f"src/test/resources/data/bi-encoder/{two_tower_version}/movie_emb-00000-of-00001.array_record")
         
         self.user_embeddings_uri = os.path.join(get_project_dir(),
-            f"src/test/resources/data/tower_versions/{two_tower_version}/user_emb-00000-of-00001.array_record")
+            f"src/test/resources/data/bi-encoder/{two_tower_version}/user_emb-00000-of-00001.array_record")
         
         self.movie_ids_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/movies-00000-of-00001.array_record")
+            "src/test/resources/data/movies.array_record")
 
     def test_contracts(self):
         validate_movies(self.movie_ids_uri)

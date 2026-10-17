@@ -33,7 +33,7 @@ mod app_runner_tests {
         } else {
             "metadata_single.json"
         };
-        let ranker_metadata_uri = format!(
+        let _ranker_metadata_uri = format!(
             "{}/{}/assets.extra/{}",
             config.ranker_saved_models_uri.trim_end_matches('/'), 1, filename);
 

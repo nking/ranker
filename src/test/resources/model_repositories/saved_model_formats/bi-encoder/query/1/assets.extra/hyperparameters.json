@@ -9,39 +9,27 @@
             }
         },
         {
-            "class_name": "Float",
+            "class_name": "Fixed",
             "config": {
                 "name": "learning_rate",
-                "default": 0.0001,
                 "conditions": [],
-                "min_value": 0.0001,
-                "max_value": 0.001,
-                "step": null,
-                "sampling": "log"
+                "value": 0.001
             }
         },
         {
-            "class_name": "Float",
+            "class_name": "Fixed",
             "config": {
                 "name": "weight_decay",
-                "default": 0.0001,
                 "conditions": [],
-                "min_value": 0.0001,
-                "max_value": 0.05,
-                "step": null,
-                "sampling": "log"
+                "value": 0.05
             }
         },
         {
-            "class_name": "Float",
+            "class_name": "Fixed",
             "config": {
                 "name": "drop_rate",
-                "default": 0.4,
                 "conditions": [],
-                "min_value": 0.35,
-                "max_value": 0.65,
-                "step": null,
-                "sampling": "linear"
+                "value": 0.35
             }
         },
         {
@@ -55,22 +43,17 @@
         {
             "class_name": "Fixed",
             "config": {
-                "name": "regl2",
+                "name": "layer_sizes",
                 "conditions": [],
-                "value": 0.0
+                "value": "[64, 32]"
             }
         },
         {
-            "class_name": "Choice",
+            "class_name": "Fixed",
             "config": {
-                "name": "layer_sizes",
-                "default": "[32]",
+                "name": "regl2",
                 "conditions": [],
-                "values": [
-                    "[32]",
-                    "[64, 32]"
-                ],
-                "ordered": false
+                "value": 0.0
             }
         },
         {
@@ -122,29 +105,19 @@
             }
         },
         {
-            "class_name": "Choice",
+            "class_name": "Fixed",
             "config": {
                 "name": "bias_corr_alpha",
-                "default": 0.05,
                 "conditions": [],
-                "values": [
-                    0.01,
-                    0.05,
-                    0.1
-                ],
-                "ordered": true
+                "value": 0.01
             }
         },
         {
-            "class_name": "Float",
+            "class_name": "Fixed",
             "config": {
                 "name": "temperature",
-                "default": 0.05,
                 "conditions": [],
-                "min_value": 0.05,
-                "max_value": 0.25,
-                "step": 0.025,
-                "sampling": "linear"
+                "value": 0.25
             }
         },
         {
@@ -152,7 +125,7 @@
             "config": {
                 "name": "movie_tiers_uri",
                 "conditions": [],
-                "value": "/kaggle/working/recommender_systems/src/test/resources/movie_tiers.json"
+                "value": "/home/nichole/projects/github/recommender_systems/src/test/resources/movie_tiers.json"
             }
         },
         {
@@ -232,7 +205,7 @@
             "config": {
                 "name": "git_hash",
                 "conditions": [],
-                "value": "b0c6635ad90a976f52558877765d796f9682dc29"
+                "value": "eb065f311b726069e2814fed59e35708846bb057"
             }
         },
         {
@@ -240,7 +213,7 @@
             "config": {
                 "name": "input_dataset_element_spec_raw_ser",
                 "conditions": [],
-                "value": "gASVAgIAAAAAAAB9lCiMBmdlbmRlcpSMInRlbnNvcmZsb3cucHl0aG9uLmZyYW1ld29yay50ZW5zb3KUjApUZW5zb3JTcGVjlJOUjCh0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsudGVuc29yX3NoYXBllIwLVGVuc29yU2hhcGWUk5RdlChoBYwJRGltZW5zaW9ulJOUToWUUpRoCksBhZRSlGWFlFKUjCJ0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsuZHR5cGVzlIwIYXNfZHR5cGWUk5SMBnN0cmluZ5SFlFKUaAGHlFKUjAZnZW5yZXOUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoGYeUUpSMA2FnZZRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoE4wFaW50NjSUhZRSlGgjh5RSlIwIbW92aWVfaWSUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaC1oMIeUUpSMCm9jY3VwYXRpb26UaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaC1oOoeUUpSMCXRpbWVzdGFtcJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoLWhEh5RSlIwHdXNlcl9pZJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoLWhOh5RSlHUu"
+                "value": "gASVAgIAAAAAAAB9lCiMBmdlbnJlc5SMInRlbnNvcmZsb3cucHl0aG9uLmZyYW1ld29yay50ZW5zb3KUjApUZW5zb3JTcGVjlJOUjCh0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsudGVuc29yX3NoYXBllIwLVGVuc29yU2hhcGWUk5RdlChoBYwJRGltZW5zaW9ulJOUToWUUpRoCksBhZRSlGWFlFKUjCJ0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsuZHR5cGVzlIwIYXNfZHR5cGWUk5SMBnN0cmluZ5SFlFKUaAGHlFKUjANhZ2WUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBOMBWludDY0lIWUUpRoGYeUUpSMBmdlbmRlcpRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmgmh5RSlIwIbW92aWVfaWSUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaCNoMIeUUpSMCm9jY3VwYXRpb26UaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaCNoOoeUUpSMCXRpbWVzdGFtcJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoI2hEh5RSlIwHdXNlcl9pZJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoI2hOh5RSlHUu"
             }
         },
         {
@@ -258,8 +231,8 @@
         "weight_decay": 0.05,
         "drop_rate": 0.35,
         "log_q_correction_factor": 1.0,
-        "regl2": 0.0,
         "layer_sizes": "[64, 32]",
+        "regl2": 0.0,
         "feature_acronym": "ahosy",
         "incl_genres": true,
         "BATCH_SIZE": 2048,
@@ -268,7 +241,7 @@
         "use_log_q_corr_decay": false,
         "bias_corr_alpha": 0.01,
         "temperature": 0.25,
-        "movie_tiers_uri": "/kaggle/working/recommender_systems/src/test/resources/movie_tiers.json",
+        "movie_tiers_uri": "/home/nichole/projects/github/recommender_systems/src/test/resources/movie_tiers.json",
         "n_users": 6040,
         "n_movies": 3883,
         "n_genres": 18,
@@ -278,8 +251,8 @@
         "num_test": 48285,
         "version": "1.0.0",
         "model_name": "user_movie",
-        "git_hash": "b0c6635ad90a976f52558877765d796f9682dc29",
-        "input_dataset_element_spec_raw_ser": "gASVAgIAAAAAAAB9lCiMBmdlbmRlcpSMInRlbnNvcmZsb3cucHl0aG9uLmZyYW1ld29yay50ZW5zb3KUjApUZW5zb3JTcGVjlJOUjCh0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsudGVuc29yX3NoYXBllIwLVGVuc29yU2hhcGWUk5RdlChoBYwJRGltZW5zaW9ulJOUToWUUpRoCksBhZRSlGWFlFKUjCJ0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsuZHR5cGVzlIwIYXNfZHR5cGWUk5SMBnN0cmluZ5SFlFKUaAGHlFKUjAZnZW5yZXOUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoGYeUUpSMA2FnZZRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoE4wFaW50NjSUhZRSlGgjh5RSlIwIbW92aWVfaWSUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaC1oMIeUUpSMCm9jY3VwYXRpb26UaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaC1oOoeUUpSMCXRpbWVzdGFtcJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoLWhEh5RSlIwHdXNlcl9pZJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoLWhOh5RSlHUu",
+        "git_hash": "eb065f311b726069e2814fed59e35708846bb057",
+        "input_dataset_element_spec_raw_ser": "gASVAgIAAAAAAAB9lCiMBmdlbnJlc5SMInRlbnNvcmZsb3cucHl0aG9uLmZyYW1ld29yay50ZW5zb3KUjApUZW5zb3JTcGVjlJOUjCh0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsudGVuc29yX3NoYXBllIwLVGVuc29yU2hhcGWUk5RdlChoBYwJRGltZW5zaW9ulJOUToWUUpRoCksBhZRSlGWFlFKUjCJ0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsuZHR5cGVzlIwIYXNfZHR5cGWUk5SMBnN0cmluZ5SFlFKUaAGHlFKUjANhZ2WUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBOMBWludDY0lIWUUpRoGYeUUpSMBmdlbmRlcpRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmgmh5RSlIwIbW92aWVfaWSUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaCNoMIeUUpSMCm9jY3VwYXRpb26UaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaCNoOoeUUpSMCXRpbWVzdGFtcJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoI2hEh5RSlIwHdXNlcl9pZJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoI2hOh5RSlHUu",
         "input_dataset_element_spec_trans_ser": "gASV/gIAAAAAAAB9lCiMA2FnZZSMInRlbnNvcmZsb3cucHl0aG9uLmZyYW1ld29yay50ZW5zb3KUjApUZW5zb3JTcGVjlJOUjCh0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsudGVuc29yX3NoYXBllIwLVGVuc29yU2hhcGWUk5RdlChoBYwJRGltZW5zaW9ulJOUToWUUpRoCksBhZRSlGWFlFKUjCJ0ZW5zb3JmbG93LnB5dGhvbi5mcmFtZXdvcmsuZHR5cGVzlIwIYXNfZHR5cGWUk5SMB2Zsb2F0MzKUhZRSlGgBh5RSlIwGZ2VuZGVylGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaBmHlFKUjAZnZW5yZXOUaARoB12UKGgKToWUUpRoCksBhZRSlGgKSxKFlFKUZYWUUpRoFmgjh5RSlIwCaHKUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoL4eUUpSMBWhyX3drlGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaDmHlFKUjAVtb250aJRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmhDh5RSlIwIbW92aWVfaWSUaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoTYeUUpSMCm9jY3VwYXRpb26UaARoB12UKGgKToWUUpRoCksBhZRSlGWFlFKUaBZoV4eUUpSMC3NlY19pbnRvX3lylGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaGGHlFKUjAd1c2VyX2lklGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaGuHlFKUjAd3ZWVrZGF5lGgEaAddlChoCk6FlFKUaApLAYWUUpRlhZRSlGgWaHWHlFKUjAJ5cpRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmh/h5RSlIwEeXJfepRoBGgHXZQoaApOhZRSlGgKSwGFlFKUZYWUUpRoFmiJh5RSlHUu"
     }
 }

@@ -9,7 +9,6 @@ mod movie_db_tests {
     use inference_engine::app_config::AppConfig;
     use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
     use inference_engine::movie_db::MovieDb;
-    use inference_engine::user_db::{UserDb};
 
     #[tokio::test]
     pub async fn test_movie_db_load() {

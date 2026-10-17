@@ -1,10 +1,10 @@
 use std::net::SocketAddr;
 use clap::Parser;
 use serde::Deserialize;
-use std::path::PathBuf;
-use std::fs::File;
 use std::io::BufReader;
-
+use std::env;
+use std::fs::{self, File};
+use std::path::{Component, Path, PathBuf};
 
 /// Command-line arguments and environment variables
 #[derive(Parser, Debug, Deserialize, Clone)]
@@ -24,7 +24,7 @@ pub struct AppConfig {
     pub ranker_uri: String,
 
     /// URI for the TFS Query Model
-    #[arg(long, env = "QUERY_URI", default_value = "http://172.17.0.1:8520")]
+    #[arg(long, env = "CANDIDATE_URI", default_value = "http://172.17.0.1:8520")]
     pub candidate_uri: String,
 
     /// Path to the hyperparameters JSON file
@@ -88,9 +88,90 @@ pub struct AppConfig {
 impl AppConfig {
     /// Loads the configuration from a given file path
     pub fn load_from_file(path: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let file = File::open(path)?;
+
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("<unknown>"));
+        let rust_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        println!("[AppConfig] Current working directory: {:?}", cwd);
+        println!("[AppConfig] Rust root (CARGO_MANIFEST_DIR): {:?}", rust_root);
+
+        // Allow the config file path itself to be resolved relative to CWD first,
+        // falling back to the Rust root if CWD is different (e.g. in IDE test runners).
+        let config_path = {
+            let p = Path::new(path);
+            if p.exists() {
+                Self::resolve_path(&cwd, path)
+            } else {
+                Self::resolve_path(&rust_root, path)
+            }
+        };
+        println!("[AppConfig] Loading config from: {:?}", config_path);
+
+        let file = File::open(&config_path)?;
         let reader = BufReader::new(file);
-        let config: AppConfig = serde_json::from_reader(reader)?;
+        let mut config: AppConfig = serde_json::from_reader(reader)?;
+
+        // Resolve all relative paths in default.json against the Rust root directory
+        config.resolve_all_paths(&rust_root);
+
         Ok(config)
     }
+
+    fn resolve_all_paths(&mut self, base_dir: &Path) {
+        self.params_json_path = Self::resolve_string_path(base_dir, &self.params_json_path);
+        self.movie_embeddings_path = Self::resolve_string_path(base_dir, &self.movie_embeddings_path);
+        self.movies_path = Self::resolve_string_path(base_dir, &self.movies_path);
+        self.movie_tiers_path = Self::resolve_string_path(base_dir, &self.movie_tiers_path);
+        self.query_saved_models_uri = Self::resolve_string_path(base_dir, &self.query_saved_models_uri);
+        self.ranker_saved_models_uri = Self::resolve_string_path(base_dir, &self.ranker_saved_models_uri);
+
+        self.ratings_uris = self
+            .ratings_uris
+            .iter()
+            .map(|u| Self::resolve_string_path(base_dir, u))
+            .collect();
+
+        self.persisted_index_path = Self::resolve_path(base_dir, &self.persisted_index_path);
+        self.user_db_path = Self::resolve_path(base_dir, &self.user_db_path);
+    }
+
+    fn resolve_string_path(base_dir: &Path, raw_path: &str) -> String {
+        // Leave http:// or https:// URIs untouched if any ever pass through
+        if raw_path.starts_with("http://") || raw_path.starts_with("https://") {
+            return raw_path.to_string();
+        }
+        Self::resolve_path(base_dir, raw_path)
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// Joins a relative path onto `base_dir` and normalizes `.` and `..` segments.
+    /// Uses `fs::canonicalize` if the path exists on disk, or lexical resolution if it doesn't yet.
+    fn resolve_path<P: AsRef<Path>>(base_dir: &Path, raw_path: P) -> PathBuf {
+        let p = raw_path.as_ref();
+        let joined = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            base_dir.join(p)
+        };
+
+        // If the file/dir already exists, canonicalize resolves symlinks and `..`
+        if let Ok(canon) = fs::canonicalize(&joined) {
+            return canon;
+        }
+
+        // Fallback lexical cleanup for paths that don't exist yet (like persisted_index_path)
+        let mut normalized = PathBuf::new();
+        for component in joined.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    normalized.pop();
+                }
+                c => normalized.push(c.as_os_str()),
+            }
+        }
+        normalized
+    }
+
 }

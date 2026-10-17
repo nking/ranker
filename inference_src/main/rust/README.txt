@@ -1,7 +1,8 @@
 
 The tests in this sub-project under inference_src require the bi-encoder Query model and
 the cross-encoder ranking model to be deployed.
-see ranker/deploy/compose/docker-compose-TFS.yaml
+see ranker/deploy/compose/docker-compose-TFS.yaml and
+ranker/deploy/compose/docker-compose-TFS-candidate.yaml
 for how to deploy the models.
 
 Details on the deployments:

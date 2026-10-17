@@ -9,6 +9,7 @@ pub mod helper {
 }
 use inference_engine::app_config::AppConfig;
 use inference_engine::orchestrator::Orchestrator;
+use inference_engine::movie_db::MovieDb;
 use helper::{get_train_val_test_liked_uris, DataSize};
 use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
 use crate::helper::{get_bin_dir, get_config_json_uri, get_movie_tiers_df, get_user_tiers_df, load_and_concat_parquet};
@@ -31,7 +32,8 @@ struct TestHarness {
     embed_len: usize,
     movie_tiers_df: LazyFrame,
     user_tiers_df: LazyFrame,
-    candidate_uri: String
+    candidate_uri: String,
+    movies_path: String
 }
 
 impl TestHarness {
@@ -131,7 +133,8 @@ impl TestHarness {
             pos_test_df: pos_test_df,
             movie_tiers_df: movie_tiers_df,
             user_tiers_df: user_tiers_df,
-            candidate_uri: candidate_uri
+            candidate_uri: candidate_uri,
+            movies_path: config.movies_path
         }
     }
 }
@@ -513,8 +516,8 @@ mod post_training_analysis {
         let candidate_model_version = query_model_version.clone();
 
         //select 167 randomly from each (movies_tier=0, 1, and 2) of test dataset
-        //let (old_movie_ids, new_movie_ids, new_movie_embeddings) = get_cold_start_movies(&harness,
-        //    ranker_model_metadata.embed_len).await;
+        let (old_movie_ids, new_movie_ids, new_movie_embeddings) = get_cold_start_movies(&harness,
+            candidate_model_version.clone(), ranker_model_metadata.embed_len).await;
 
         /*
         let new_searcher : Searcher = Searcher::new_detached(&new_movie_embeddings, embed_len,
@@ -528,27 +531,78 @@ mod post_training_analysis {
         todo!()
     }
 
-    async fn get_cold_start_movies(harness: &&TestHarness, embed_len: usize) -> Result<(Vec<i32>, Vec<i32>, Vec<f32>), Box<dyn std::error::Error + Send + Sync>> {
+    ///  simulate cold start movies and return the original ids, new cold start movie ids,
+    ///   and the cold start mebeddings.
+    ///
+    /// # Arguments
+    ///
+    /// * `harness`:
+    /// * `embed_len`:
+    ///
+    /// returns: Result<(Vec<i32, Global>, Vec<i32, Global>, Vec<f32, Global>), Box<dyn Error+Send+Sync, Global>>
+    async fn get_cold_start_movies(harness: &TestHarness,
+        candidate_model_version:Option<VersionChoice>, embed_len: usize) -> Result<(Vec<i32>, Vec<i32>, Vec<f32>), Box<dyn std::error::Error + Send + Sync>> {
 
-        /*
-        pos_test_df = self.join_df_to_movie_tiers(pos_test_df)
-        movie_test_counts = pos_test_df.group_by("movie_id").agg(pl.len().alias("test_interaction_count"))
-        candidate_pool = movie_test_counts.filter(pl.col("test_interaction_count") >= 5)
+        let num_per_tier: usize = 167; // 167 * 3 tiers = 501 total
 
-        pos_test_df = candidate_pool.join(pos_test_df, on="movie_id", how="left")
+        //  Join test interactions with movie tiers (clone movie_tiers_df to avoid moving out of &TestHarness)
+        let pos_test_movie_tiered = harness.pos_test_df.clone()
+            .left_join(harness.movie_tiers_df.clone(), col("movie_id"), col("movie_id"));
 
-        num_per_tier = 167  # total = 501
-        candidate_pool_df = (pos_test_df.sample(fraction=1.0, seed=42, shuffle=True)
-            .group_by("movie_tier").head(num_per_tier))
+        // Count test interactions per unique (movie_id, movie_tier), filter >= 5,
+        //    shuffle deterministically, and take up to 167 unique movies per tier.
+        let candidate_pool_df = pos_test_movie_tiered
+            .group_by([
+                col("movie_id").cast(DataType::Int32),
+                col("movie_tier"),
+            ])
+            .agg([
+                len().alias("test_interaction_count"),
+            ])
+            .filter(col("test_interaction_count").gt_eq(lit(5u32)))
+            // Deterministic pseudo-random order (works without needing the optional `random` feature flag;
+            // if `features = ["random"]` is enabled on polars, you can use `col("*").shuffle(Some(42))` instead)
+            .with_columns([
+                ((col("movie_id").cast(DataType::UInt64) * lit(2654435761u64)) % lit(1_000_000_007u64))
+                    .alias("_shuffle_key")
+            ])
+            .sort(["_shuffle_key"], SortMultipleOptions::default())
+            .group_by([col("movie_tier")])
+            .head(Some(num_per_tier))
+            .collect()?;
 
-        original_movie_ids = candidate_pool_df["movie_id"].unique().to_numpy()
-         */
+        // Extract original_movie_ids as Vec<i32>
+        let original_movie_ids: Vec<i32> = candidate_pool_df
+            .column("movie_id")?
+            .i32()?
+            .into_no_null_iter()
+            .collect();
+
+        let n_sampled = original_movie_ids.len();
+
+        // Generate contiguous new_movie_ids
+        // movie catalog starts at offset, so begin new ids after all movies
+        let id0 = (harness.movies_offset + harness.num_catalog_movies + 1) as i32;
+        let new_movie_ids: Vec<i32> = (id0 .. id0 + (n_sampled as i32)).collect();
+
+        // generate the MoviesRequests using the original movie_ids
+        //  then replace all the movie_ids in the request with 0s for the OOV
+        //  (see recommender_systems class MovieModel movie_emb for details)
+        let movie_db : MovieDb = MovieDb::new(harness.movies_path.clone()).unwrap();
+        let mut movies_request = movie_db.get_request(&original_movie_ids, candidate_model_version.clone());
 
 
-        //select 167 randomly from each (movies_tier=0, 1, and 2) of test dataset
-       // let candidate_client = CandidateModelClient::new(harness.candidate_uri, embed_len).await;
+        // create new embeddings
+        let client = CandidateModelClient::new(harness.candidate_uri, embed_len).await;
 
-        Ok((Vec::new(), Vec::new(), Vec::new()))
+        let results : Result<Vec<f32>, Box<dyn Error>> = client.get_movies_embeddings(movies_request,
+            candidate_model_version).await;
+
+        let new_embeddings : Vec<f32> = results?.into_inner();
+
+
+        Ok((original_movie_ids, new_movie_ids, new_embeddings))
+
     }
 
     async fn cale_cold_start_user_metrics(
