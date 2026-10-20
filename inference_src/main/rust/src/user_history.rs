@@ -18,7 +18,7 @@ pub struct UserMapEntry {
     pub timestamps: Vec<i64>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UserHistory {
     pub user_ids : Vec<i32>,
     pub movie_ids : Vec<i32>,

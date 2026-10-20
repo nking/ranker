@@ -182,21 +182,24 @@ impl Drop for TestHarness {
 #[cfg(test)]
 mod post_training_analysis {
     use std::collections::HashMap;
+    use std::error::Error;
     use std::fs::File;
     use std::path::Path;
     use polars::df;
     use polars::prelude::*;
     use rayon::prelude::*; // Required for parallel slate comparisons in _diversity_metrics
-    use tonic::{Request, Response};
+    use tonic::{Request, Response, Status};
+    use usearch::ffi::Matches;
     use inference_engine::embeddings_ann::Searcher;
     use inference_engine::model_client::CandidateModelClient;
     // Bring everything from the outer scope (TestHarness, helper functions, etc.) into the test module
     use super::*;
 
     use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
-    use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMoviesAndRepr, UsersRequest, MoviesRequest};
+    use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMoviesAndRepr, UsersRequest, MoviesRequest, RankedMovies};
     use inference_engine::pb::recommender_service_server::RecommenderService;
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
+    use inference_engine::user_history::UserHistory;
     use inference_engine::util::{get_top_k_desc_scores};
     use crate::helper::get_unique_user_and_first_timestamp;
 
@@ -296,7 +299,6 @@ mod post_training_analysis {
             top_k_movie_ids.extend(top)
         }
         assert_eq!(top_k_movie_ids.len(), n_users * top_k);
-
 
         let n_users = user_ids.len();
 
@@ -474,6 +476,7 @@ mod post_training_analysis {
         let emb_hubness = cale_cold_start_movie_metrics(
             harness,
             query_model_version.clone(),
+            ranker_model_version.clone(),
             &ranker_metadata,
             num_candidates,
             top_k,
@@ -487,7 +490,6 @@ mod post_training_analysis {
             summary_output_dir,
         ).await?;
 
-
         let _ = cross_metric_analysis(
             &base_metrics, &coverage, &pop_bias, &diversity, &emb_hubness, &ctx_hubness, &rank_agreement,
             num_candidates, top_k, summary_output_dir
@@ -499,6 +501,7 @@ mod post_training_analysis {
     async fn cale_cold_start_movie_metrics(
         harness: &TestHarness,
         query_model_version:Option<VersionChoice>,
+        ranker_model_version:Option<VersionChoice>,
         ranker_model_metadata: &Arc<RankerModelMetadata>,
         num_candidates: usize,
         top_k: usize,
@@ -514,19 +517,77 @@ mod post_training_analysis {
         let embed_len = ranker_model_metadata.embed_len;
         let num_candidates = ranker_model_metadata.num_candidates;
         let candidate_model_version = query_model_version.clone();
+        let movies_offset = ranker_model_metadata.num_catalog_users + 1;
 
         //select 167 randomly from each (movies_tier=0, 1, and 2) of test dataset
         let (old_movie_ids, new_movie_ids, new_movie_embeddings) = get_cold_start_movies(&harness,
-            candidate_model_version.clone(), ranker_model_metadata.embed_len).await;
+            candidate_model_version.clone(), ranker_model_metadata.embed_len).await
+            .expect("Error while simulating cold start movies");
 
-        /*
-        let new_searcher : Searcher = Searcher::new_detached(&new_movie_embeddings, embed_len,
+        // copy the original movie embeddings, and concat the new_movie_embeddings onto the end
+        let _original_movie_catalog : Vec<f32> = harness.orchestrator._get_movies_embedding_catalog();
+        let mut new_movies_catalog :Vec<f32> = Vec::with_capacity(_original_movie_catalog.len() + new_movie_ids.len());
+        new_movies_catalog.extend_from_slice(&_original_movie_catalog);
+        new_movies_catalog.extend_from_slice(&new_movie_embeddings);
+
+        let new_searcher : Searcher = Searcher::new_detached(&new_movies_catalog, embed_len,
             num_candidates).expect("error while constructing Searcher");
 
-        // let initial_searcher = Searcher::new(movie_embeddings_uri, num_candidates, &persisted_index_path)?;
+        let n_users = user_ids.len();
+        println!("test n_unique_users={}", n_users);
+        // no batch_size constraints for the query model or ANN requests
+        let tonic_request: Request<UsersRequest>  =
+            harness.orchestrator.get_users_request(&user_ids, &timestamps,
+                query_model_version.clone(), ranker_model_version.clone()).await?;
 
-        //let original_movie_embeddings = harness.orchestrator._get_movies_embedding_catalog();
+        let user_history = harness.orchestrator._get_user_history();
+
+        let new_candidate_movie_ids :  Vec<i32> = harness.orchestrator
+            ._get_approx_nearest_neighbors(
+                &user_ids,
+                &timestamps,
+                &user_embeddings,
+                &user_history,
+                &new_searcher,
+                num_candidates,
+                movies_offset as i32).await.expect("Error while making ANN search").into_inner();
+
+        // return num_candidates.  not truncated to top_k
+        let mut ranked_movies : RankedMovies = harness.orchestrator._make_ranker_request_impl(
+            &user_ids,
+            &timestamps,
+            &user_embeddings,
+            &new_candidate_movie_ids,
+            &new_searcher,
+            &user_history,
+            ranker_model_version.clone()
+        ).await.expect("Error while requesting ranking of candidates");
+
+        let (top_new_ranked_movie_ids, top_new_ranked_scores) = get_top_k_desc_scores(
+            & mut ranked_movies.movie_ids, &mut ranked_movies.scores, num_candidates, harness.orchestrator.top_k
+        );
+
+        // those results are used to make the ranker requests
+        // this is a brief walk through of using the new movie_ids in the ranker instead of 0:
+        /*
+            - graph building
+               - is given new movie embeddings catalog therefore, one can use
+                 the new_movie_ids
+                 -- just need to not use the default already build orchestrator methods which
+                     use the graph_builder with the original movie_ids only
+            - inference
+               => if use 0 then in GraphRanker.__call__ the cold starts all share identity 0 inspite of their differences,
+                  so use the new_movie_ids!!
+            - document it
         */
+
+        // then we will have retrieval results that may or may not contain both original and new movie_ids
+        // and we will have ranker results tha may of may not contain both original and new movie_ids
+
+        // then we calc stats, but
+
+
+        editing
 
         todo!()
     }
@@ -589,17 +650,23 @@ mod post_training_analysis {
         //  then replace all the movie_ids in the request with 0s for the OOV
         //  (see recommender_systems class MovieModel movie_emb for details)
         let movie_db : MovieDb = MovieDb::new(harness.movies_path.clone()).unwrap();
-        let mut movies_request = movie_db.get_request(&original_movie_ids, candidate_model_version.clone());
+        let movies_request_opt : Option<Request<MoviesRequest>> = movie_db.get_request(&original_movie_ids,
+            candidate_model_version.clone());
 
+        let request = movies_request_opt.ok_or_else(|| {
+            Status::invalid_argument("Error trying to form MoviesRequest")
+        })?;
 
-        // create new embeddings
+        let mut movies_request = request.into_inner();
+        movies_request.movie_ids = vec![0; new_movie_ids.len()];
+
+        // create new embeddings with cold start Ids
         let client = CandidateModelClient::new(harness.candidate_uri, embed_len).await;
 
         let results : Result<Vec<f32>, Box<dyn Error>> = client.get_movies_embeddings(movies_request,
             candidate_model_version).await;
 
-        let new_embeddings : Vec<f32> = results?.into_inner();
-
+        let new_embeddings : Vec<f32> = results.expect("Error trying to create movie embeddings with OOV 0 for movie_ids");
 
         Ok((original_movie_ids, new_movie_ids, new_embeddings))
 

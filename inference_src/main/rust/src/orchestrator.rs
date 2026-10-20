@@ -514,6 +514,10 @@ impl Orchestrator {
         searcher.get_movies_embedding_catalog_ref().clone()
     }
 
+    pub fn _get_user_history(&self) -> UserHistory {
+        self.user_history.clone()
+    }
+
     pub async fn _predict_for_analysis(&self,
         user_reqs: UsersRequest,
         ann_res: ApproxNearestNeighborsResponse,
@@ -692,6 +696,90 @@ impl Orchestrator {
         ).await
     }
 
+
+    /// for convenience of test and analysis methods to plug in other components outside of orchestrator's
+    pub async fn _get_approx_nearest_neighbors(&self,
+        user_ids: &[i32],
+        timestamps: &[i64],
+        user_embeddings: &[f32],
+        user_history: &UserHistory,
+        searcher: &Searcher,
+        num_candidates: usize, // for the ANN saarch k
+        movies_offset: i32, // usually 1 + num_catalog_users
+    ) -> Result<Response<Vec<i32>>, Status> {
+
+        //let _embed_len = user_embeddings.len() / users_req.user_ids.len();
+        //println!("_ann: n_users={}, user_embed.len={}, _embed_len={}", users_req.user_ids.len(), user_embeddings.len(), _embed_len);
+
+        // length is n_users
+        let n_hists : Vec<usize> = user_history.get_history_count_before_timestamp(
+            &user_ids, &timestamps
+        );
+
+        //TODO: consider limiting this to keep the search quick:
+        let max_n_hist : usize = *(n_hists.iter().max().unwrap());
+
+        // history is length n_users * max_n_hist
+        let (history, _ratings) : (Vec<i32>, Vec<i32>) = user_history.get_history_before_timestamp(
+            &user_ids, &timestamps, max_n_hist);
+
+        // Pre-allocate the exact size needed for the final flattened candidates
+        let mut final_candidates: Vec<i32> = Vec::with_capacity(user_ids.len() * num_candidates);
+
+        // choose more than num_candidates to choose only unseen from them, then rank for top num_candidates
+        let _n_srch : usize = min(num_candidates + max_n_hist, searcher.get_num_catalog_movies());
+        let n_srch = Some(_n_srch);
+
+        let nearest : Vec<Matches>
+            = searcher.search(&user_embeddings, n_srch)
+            .map_err(|e| Status::internal(format!("Vector search failed: {}", e)))?;
+
+        for i in 0..nearest.len() {
+            // final_candidates length is n_users * n_srch
+            // candidate_ids are in "reference frame" of 0 to num_catalog_movies  - 1, so translate to
+            // reference frame num_catalog_users + 1 to num_catalog_users + 1 + num_catalog_movies
+            let raw_candidate_ids: Vec<i32> = nearest[i].keys
+                .iter()
+                .map(|x| *x as i32 + movies_offset)
+                .collect();
+
+            let _distances = &nearest[i].distances;
+            //let user_id = users_req.user_ids[i];
+
+            let hist_start = i * max_n_hist;
+            let hist_end = hist_start + max_n_hist;
+
+            let watched_set: HashSet<i32> = history[hist_start..hist_end].iter().copied().collect();
+
+            // Filter out watched movies
+            let mut unwatched: Vec<i32> = raw_candidate_ids.iter()
+                .copied()
+                .filter(|id| !watched_set.contains(id))
+                .collect();
+
+            // unwatched will be < k or >= k
+
+            // Backfill if we filtered out too many
+            if unwatched.len() < num_candidates {
+                let n_backfill = num_candidates - unwatched.len();
+
+                // NOTE: Backfilling with history means injecting watched movies.
+                // If you have a padding ID (like 0) or popular fallback catalog IDs, use those instead.
+                unwatched.extend(
+                    history[hist_start..hist_end].iter().take(n_backfill).copied()
+                );
+            }
+
+            // Ensure we have exactly k items for this user
+            unwatched.truncate(num_candidates);
+
+            // Append this user's fixed-length candidates into the final flat vector
+            final_candidates.extend_from_slice(&unwatched);
+        }
+
+        Ok(Response::new(final_candidates))
+    }
+
     /// for convenience of test and analysis methods to plug in other componenets outside of orchestrator's
     pub async fn _approx_nearest_neighbors_impl(&self,
         req: Request<UsersRequest>,
@@ -826,7 +914,7 @@ impl RecommenderService for Orchestrator {
         self._approx_nearest_neighbors(req).await
     }
 
-    /// predicts top_k movies for a user and returs them as a pairs of movie_id and
+    /// predicts top_k movies for a user and returns them as a pairs of movie_id and
     /// cosine similarity distance sorted ascending by increasing distances.
     ///
     /// # Arguments
