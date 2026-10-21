@@ -1,0 +1,13 @@
+{
+  "metrics": {
+    "ctx_hubness_skewness_ranker_contextual_k_20": 4.8,
+    "ctx_hubness_max_nk_ranker_contextual_k_20": 84.0,
+    "ctx_hubness_mean_sim_ranker_contextual_k_20": 0.79,
+    "ctx_hubness_centroid_corr_ranker_contextual_k_20": 0.62,
+    "ctx_exposure_mean_nk_ranker_contextual_k_20": 42.0,
+    "ctx_exposure_mean_anisotropy_ranker_contextual_k_20": 0.79
+  },
+  "automated_conclusions": [
+    "CONTEXTUAL HUBNESS (Model B)"
+  ]
+}

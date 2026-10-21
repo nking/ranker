@@ -1,0 +1,35 @@
+{
+  "retrieval_ann_100": {
+    "metrics": {
+      "coverage_at_100_full_retrieval_ann_100": 0.39,
+      "gini_at_100_full_retrieval_ann_100": 0.84,
+      "lorenz_at_100_bottom_80_share_retrieval_ann_100": 0.06,
+      "lorenz_at_100_top_10_share_retrieval_ann_100": 0.78
+    },
+    "automated_conclusions": [
+      "COVERAGE & GINI (Model B)"
+    ]
+  },
+  "retrieval_ann_20": {
+    "metrics": {
+      "coverage_at_20_full_retrieval_ann_20": 0.39,
+      "gini_at_20_full_retrieval_ann_20": 0.84,
+      "lorenz_at_20_bottom_80_share_retrieval_ann_20": 0.06,
+      "lorenz_at_20_top_10_share_retrieval_ann_20": 0.78
+    },
+    "automated_conclusions": [
+      "COVERAGE & GINI (Model B)"
+    ]
+  },
+  "ranker_20": {
+    "metrics": {
+      "coverage_at_20_full_ranker_20": 0.39,
+      "gini_at_20_full_ranker_20": 0.84,
+      "lorenz_at_20_bottom_80_share_ranker_20": 0.06,
+      "lorenz_at_20_top_10_share_ranker_20": 0.78
+    },
+    "automated_conclusions": [
+      "COVERAGE & GINI (Model B)"
+    ]
+  }
+}

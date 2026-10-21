@@ -1,0 +1,38 @@
+{
+  "retrieval_ann_100": {
+    "metrics": {
+      "hubness_skewness_k_100_retrieval_ann_100": 4.8,
+      "hubness_max_nk_k_100_retrieval_ann_100": 88.2,
+      "hubness_centroid_corr_k_100_retrieval_ann_100": 0.62,
+      "hub_exposure_mean_nk_k_100_retrieval_ann_100": 42.0,
+      "hub_exposure_mean_sim_k_100_retrieval_ann_100": 0.64
+    },
+    "automated_conclusions": [
+      "EMBEDDING HUBNESS (Model B)"
+    ]
+  },
+  "retrieval_ann_20": {
+    "metrics": {
+      "hubness_skewness_k_20_retrieval_ann_20": 4.8,
+      "hubness_max_nk_k_20_retrieval_ann_20": 88.2,
+      "hubness_centroid_corr_k_20_retrieval_ann_20": 0.62,
+      "hub_exposure_mean_nk_k_20_retrieval_ann_20": 42.0,
+      "hub_exposure_mean_sim_k_20_retrieval_ann_20": 0.64
+    },
+    "automated_conclusions": [
+      "EMBEDDING HUBNESS (Model B)"
+    ]
+  },
+  "ranker_20": {
+    "metrics": {
+      "hubness_skewness_k_20_ranker_20": 4.8,
+      "hubness_max_nk_k_20_ranker_20": 88.2,
+      "hubness_centroid_corr_k_20_ranker_20": 0.62,
+      "hub_exposure_mean_nk_k_20_ranker_20": 42.0,
+      "hub_exposure_mean_sim_k_20_ranker_20": 0.64
+    },
+    "automated_conclusions": [
+      "EMBEDDING HUBNESS (Model B)"
+    ]
+  }
+}

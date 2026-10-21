@@ -1,0 +1,9 @@
+{
+  "metrics": {
+    "mean_overlap_at_20": 0.7217640528767272,
+    "mean_spearman_rho_at_20": 0.8183882336465619
+  },
+  "automated_conclusions": [
+    "RANK AGREEMENT (Model B)"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "retrieval_ann_100": {
+    "metrics": {
+      "pop_bias_rec_mean_k_100_retrieval_ann_100": 184.0815627812358,
+      "pop_bias_hist_mean_retrieval_ann_100": 135.99769028259396,
+      "pop_bias_delta_mean_k_100_retrieval_ann_100": 48.083872498641774
+    },
+    "automated_conclusions": [
+      "POPULARITY CALIBRATION (Model B)"
+    ]
+  },
+  "retrieval_ann_20": {
+    "metrics": {
+      "pop_bias_rec_mean_k_20_retrieval_ann_20": 184.0815627812358,
+      "pop_bias_hist_mean_retrieval_ann_20": 135.99769028259396,
+      "pop_bias_delta_mean_k_20_retrieval_ann_20": 48.083872498641774
+    },
+    "automated_conclusions": [
+      "POPULARITY CALIBRATION (Model B)"
+    ]
+  },
+  "ranker_20": {
+    "metrics": {
+      "pop_bias_rec_mean_k_20_ranker_20": 184.0815627812358,
+      "pop_bias_hist_mean_ranker_20": 135.99769028259396,
+      "pop_bias_delta_mean_k_20_ranker_20": 48.083872498641774
+    },
+    "automated_conclusions": [
+      "POPULARITY CALIBRATION (Model B)"
+    ]
+  }
+}

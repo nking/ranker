@@ -1,0 +1,29 @@
+{
+  "retrieval_ann_100": {
+    "metrics": {
+      "interlist_diversity_mean_k_100_retrieval_ann_100": 0.8816839138887747,
+      "intralist_diversity_mean_k_100_retrieval_ann_100": 0.38152627697280195
+    },
+    "automated_conclusions": [
+      "DIVERSITY SUMMARY (Model A)"
+    ]
+  },
+  "retrieval_ann_20": {
+    "metrics": {
+      "interlist_diversity_mean_k_20_retrieval_ann_20": 0.8816839138887747,
+      "intralist_diversity_mean_k_20_retrieval_ann_20": 0.38152627697280195
+    },
+    "automated_conclusions": [
+      "DIVERSITY SUMMARY (Model A)"
+    ]
+  },
+  "ranker_20": {
+    "metrics": {
+      "interlist_diversity_mean_k_20_ranker_20": 0.8816839138887747,
+      "intralist_diversity_mean_k_20_ranker_20": 0.38152627697280195
+    },
+    "automated_conclusions": [
+      "DIVERSITY SUMMARY (Model A)"
+    ]
+  }
+}
