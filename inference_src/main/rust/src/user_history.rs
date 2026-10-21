@@ -123,6 +123,13 @@ impl UserHistory {
 
                 // rightmost index where user_timestamps <= target_ts
 
+                if user_timestamps.is_empty()
+                    || user_timestamps[0] == self.ts_pad_value
+                    || user_timestamps[0] > target_ts
+                {
+                    continue;
+                }
+
                 let count = util::ceiling_search(user_timestamps, target_ts);
 
                 ret_counts[i] = count + 1;
@@ -130,6 +137,82 @@ impl UserHistory {
         }
 
         ret_counts
+    }
+
+    /// Creates and returns a new `UserHistory` containing all existing user histories
+    /// plus empty (padded) history slots for `new_user_ids`, maintaining sorted `user_ids`
+    /// order for binary search.
+    pub fn add_cold_starts(existing: &UserHistory, new_user_ids: &[i32]) -> UserHistory {
+
+        let max_hist = existing.max_history;
+
+        // Sort, deduplicate, and exclude any IDs already present in `existing`
+        let mut added_uids: Vec<i32> = new_user_ids
+            .iter()
+            .copied()
+            .filter(|uid| existing.user_ids.binary_search(uid).is_err())
+            .collect();
+        added_uids.sort_unstable();
+        added_uids.dedup();
+
+        let n_existing = existing.user_ids.len();
+        let n_added = added_uids.len();
+        let n_total = n_existing + n_added;
+
+        // Pre-allocate flattened buffers filled with pad values.
+        //    Cold-start users need no further writes to movie_ids/ratings/timestamps.
+        let mut user_ids = Vec::with_capacity(n_total);
+        let mut movie_ids = vec![existing.pad_value; n_total * max_hist];
+        let mut ratings = vec![existing.pad_value; n_total * max_hist];
+        let mut timestamps = vec![existing.ts_pad_value; n_total * max_hist];
+
+        // Two-pointer sorted merge of `existing.user_ids` and `added_uids`
+        let mut i = 0; // index into `existing`
+        let mut j = 0; // index into `added_uids`
+
+        while i < n_existing || j < n_added {
+            let take_existing = if i < n_existing && j < n_added {
+                existing.user_ids[i] < added_uids[j]
+            } else {
+                i < n_existing
+            };
+
+            let out_idx = user_ids.len();
+
+            if take_existing {
+                user_ids.push(existing.user_ids[i]);
+
+                if max_hist > 0 {
+                    let src_start = i * max_hist;
+                    let src_end = src_start + max_hist;
+                    let dst_start = out_idx * max_hist;
+                    let dst_end = dst_start + max_hist;
+
+                    movie_ids[dst_start..dst_end]
+                        .copy_from_slice(&existing.movie_ids[src_start..src_end]);
+                    ratings[dst_start..dst_end]
+                        .copy_from_slice(&existing.ratings[src_start..src_end]);
+                    timestamps[dst_start..dst_end]
+                        .copy_from_slice(&existing.timestamps[src_start..src_end]);
+                }
+                i += 1;
+            } else {
+                // Cold-start user: buffers at `out_idx * max_hist` are already filled
+                // with `pad_value` and `ts_pad_value`.
+                user_ids.push(added_uids[j]);
+                j += 1;
+            }
+        }
+
+        UserHistory {
+            user_ids,
+            movie_ids,
+            ratings,
+            timestamps,
+            max_history: max_hist,
+            pad_value: existing.pad_value,
+            ts_pad_value: existing.ts_pad_value,
+        }
     }
     
 }

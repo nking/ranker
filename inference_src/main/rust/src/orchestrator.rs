@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use arc_swap::ArcSwap;
+use arc_swap::{ArcSwap, Guard};
 use crate::model_client::{QueryModelClient, RankerModelClient};
 use crate::embeddings_ann::Searcher;
 use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
@@ -332,7 +332,15 @@ impl Orchestrator {
         ranker_model_version_choice: Option<VersionChoice>
     ) -> Result<RankedMovies, Status> {
 
+        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .map_err(|e| {
+                eprintln!("Failed to fetch ranker metadata: {}", e);
+                Status::internal(format!("Internal metadata error: {}", e))
+            })?;
+        let num_catalog_users = ranker_metadata.num_catalog_users;
+
         let searcher = self.searcher.load();
+
         self._make_ranker_request_impl(
             user_ids,
             timestamps,
@@ -340,6 +348,7 @@ impl Orchestrator {
             candidate_ids,
             &searcher,
             &self.user_history,
+            num_catalog_users,
             ranker_model_version_choice
         ).await
     }
@@ -352,6 +361,7 @@ impl Orchestrator {
         candidate_ids: &[i32],
         searcher: &Searcher,
         user_history: &UserHistory,
+        num_catalog_users: usize,
         ranker_model_version_choice: Option<VersionChoice>
     ) -> Result<RankedMovies, Status> {
 
@@ -383,7 +393,7 @@ impl Orchestrator {
             &labels,
             user_history,
             ranker_metadata.max_history,
-            ranker_metadata.num_catalog_users,
+            num_catalog_users,
             searcher.get_num_catalog_movies(),
             searcher.get_embed_len(),
             searcher.get_movies_embedding_catalog_ref(),
@@ -518,11 +528,16 @@ impl Orchestrator {
         self.user_history.clone()
     }
 
+    pub fn _get_searcher(&self) -> Guard<Arc<Searcher>> {
+        self.searcher.load()
+    }
+
     pub async fn _predict_for_analysis(&self,
         user_reqs: UsersRequest,
         ann_res: ApproxNearestNeighborsResponse,
         searcher: &Searcher,
         user_history: &UserHistory,
+        num_catalog_users:usize,
         ) -> Result<Response<RankedMovies>, Status> {
 
         let user_ids = ann_res.user_ids;
@@ -535,7 +550,7 @@ impl Orchestrator {
 
         let mut ranked_movies = self._make_ranker_request_impl(
             &user_ids, &user_reqs.timestamps, &user_embeddings, &ann_movie_ids,
-            searcher, user_history,
+            searcher, user_history, num_catalog_users,
             ranker_model_version_choice.clone()).await?;
 
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
@@ -691,6 +706,7 @@ impl Orchestrator {
         let searcher = self.searcher.load();
         self._approx_nearest_neighbors_impl(
             req,
+            None,
             &self.user_history,
             &searcher,
         ).await
@@ -783,11 +799,14 @@ impl Orchestrator {
     /// for convenience of test and analysis methods to plug in other componenets outside of orchestrator's
     pub async fn _approx_nearest_neighbors_impl(&self,
         req: Request<UsersRequest>,
+        _original_user_ids: Option<&[i32]>, // can be None.  used to allow cold_start user_ids to use watch history of the origial ids....purely an analysis use...
         user_history: &UserHistory,
         searcher: &Searcher,
         ) -> Result<Response<ApproxNearestNeighborsResponse>, Status> {
 
         let users_req = req.into_inner();
+
+        let n_users = users_req.user_ids.len();
 
         let query_model_version_choice = Some(VersionChoice::Version(users_req.query_model_version));
 
@@ -800,9 +819,20 @@ impl Orchestrator {
         //let _embed_len = user_embeddings.len() / users_req.user_ids.len();
         //println!("_ann: n_users={}, user_embed.len={}, _embed_len={}", users_req.user_ids.len(), user_embeddings.len(), _embed_len);
 
+        let user_ids0: &[i32] = match _original_user_ids {
+            Some(slice) => {
+                assert_eq!(slice.len(), n_users,
+                    "_original_user_ids length ({}) must match users_req.user_ids length ({})",
+                        slice.len(), n_users
+                );
+                slice
+            }
+            None => &users_req.user_ids,
+        };
+
         // length is n_users
         let n_hists : Vec<usize> = user_history.get_history_count_before_timestamp(
-            &users_req.user_ids, &users_req.timestamps
+            &user_ids0, &users_req.timestamps
         );
 
         let ranker_model_version_choice = Some(VersionChoice::Version(users_req.ranker_model_version));
@@ -826,10 +856,10 @@ impl Orchestrator {
 
         // history is length n_users * max_n_hist
         let (history, _ratings) : (Vec<i32>, Vec<i32>) = user_history.get_history_before_timestamp(
-            &users_req.user_ids, &users_req.timestamps, max_n_hist);
+            &user_ids0, &users_req.timestamps, max_n_hist);
 
         // Pre-allocate the exact size needed for the final flattened candidates
-        let mut final_candidates: Vec<i32> = Vec::with_capacity(users_req.user_ids.len() * k);
+        let mut final_candidates: Vec<i32> = Vec::with_capacity(n_users * k);
 
         // choose more than num_candidates to choose only unseen from them, then rank for top num_candidates
         let _n_srch : usize = min(k + max_n_hist, searcher.get_num_catalog_movies());
@@ -883,7 +913,7 @@ impl Orchestrator {
         }
 
         Ok(Response::new(ApproxNearestNeighborsResponse {
-            user_ids: users_req.user_ids, // Use the extracted field directly
+            user_ids: Vec::from(user_ids0), // Use the extracted field directly
             user_embeddings,
             candidate_ids: final_candidates,
         }))

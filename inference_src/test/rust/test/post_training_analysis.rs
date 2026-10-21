@@ -27,6 +27,7 @@ struct TestHarness {
     movies_df: LazyFrame,
     #[allow(dead_code)]
     movies_offset: usize,
+    num_catalog_users: usize,
     #[allow(dead_code)]
     num_catalog_movies: usize,
     embed_len: usize,
@@ -127,6 +128,7 @@ impl TestHarness {
             ratings_uris: ratings_uris,
             movies_df: movies_df,
             movies_offset: movies_offset,
+            num_catalog_users: ranker_metadata.num_catalog_users,
             num_catalog_movies: num_catalog_movies,
             embed_len: embed_len,
             train_history_df: train_history_df,
@@ -199,6 +201,7 @@ mod post_training_analysis {
     use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMoviesAndRepr, UsersRequest, MoviesRequest, RankedMovies};
     use inference_engine::pb::recommender_service_server::RecommenderService;
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
+    use inference_engine::user_db::UserDb;
     use inference_engine::user_history::UserHistory;
     use inference_engine::util::{get_top_k_desc_scores};
     use crate::helper::get_unique_user_and_first_timestamp;
@@ -458,22 +461,7 @@ mod post_training_analysis {
             summary_output_dir
         ).await?;
 
-        let cold_start_users = cale_cold_start_user_metrics(
-            harness,
-            query_model_version.clone(),
-            &ranker_metadata,
-            num_candidates,
-            top_k,
-            &user_ids,
-            &timestamps,
-            &candidate_movie_ids, //num_candidates
-            &top_k_movie_ids, //top_k
-            &ranker_movie_ids,
-            parquet_output_dir,
-            summary_output_dir,
-        ).await?;
-
-        let emb_hubness = cale_cold_start_movie_metrics(
+        let cold_start_movie_metrics = calc_cold_start_movie_metrics(
             harness,
             query_model_version.clone(),
             ranker_model_version.clone(),
@@ -490,6 +478,25 @@ mod post_training_analysis {
             summary_output_dir,
         ).await?;
 
+
+        let cold_start_user_metrics = calc_cold_start_user_metrics(
+            harness,
+            query_model_version.clone(),
+            ranker_model_version.clone(),
+            &ranker_metadata,
+            num_candidates,
+            top_k,
+            &user_ids,
+            &timestamps,
+            &ann_res.user_embeddings,
+            &candidate_movie_ids, //num_candidates
+            &top_k_movie_ids, //top_k
+            &ranker_movie_ids,
+            parquet_output_dir,
+            summary_output_dir,
+        ).await?;
+
+
         let _ = cross_metric_analysis(
             &base_metrics, &coverage, &pop_bias, &diversity, &emb_hubness, &ctx_hubness, &rank_agreement,
             num_candidates, top_k, summary_output_dir
@@ -498,98 +505,235 @@ mod post_training_analysis {
         Ok(())
     }
 
-    async fn cale_cold_start_movie_metrics(
+    async fn calc_cold_start_movie_metrics(
         harness: &TestHarness,
-        query_model_version:Option<VersionChoice>,
-        ranker_model_version:Option<VersionChoice>,
+        query_model_version: Option<VersionChoice>,
+        ranker_model_version: Option<VersionChoice>,
         ranker_model_metadata: &Arc<RankerModelMetadata>,
         num_candidates: usize,
         top_k: usize,
         user_ids: &[i32],
         timestamps: &[i64],
         user_embeddings: &[f32],
-        candidate_movie_ids: &[i32],
-        top_k_movie_ids: &[i32],
-        ranker_movie_ids: &[i32],
+        _candidate_movie_ids: &[i32],
+        _top_k_movie_ids: &[i32],
+        _ranker_movie_ids: &[i32],
         parquet_output_dir: &str,
-        summary_output_dir: &str) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        summary_output_dir: &str,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
 
         let embed_len = ranker_model_metadata.embed_len;
-        let num_candidates = ranker_model_metadata.num_candidates;
+        let ranker_batch_size = ranker_model_metadata.batch_size;
         let candidate_model_version = query_model_version.clone();
-        let movies_offset = ranker_model_metadata.num_catalog_users + 1;
+        let movies_offset = harness.movies_offset;
 
-        //select 167 randomly from each (movies_tier=0, 1, and 2) of test dataset
-        let (old_movie_ids, new_movie_ids, new_movie_embeddings) = get_cold_start_movies(&harness,
-            candidate_model_version.clone(), ranker_model_metadata.embed_len).await
+        // Sample 167 movies per tier (501 total) and generate OOV=0 embeddings
+        let (old_movie_ids, new_movie_ids, new_movie_embeddings) = get_cold_start_movies(
+            harness,
+            candidate_model_version,
+            embed_len,
+        )
+            .await
             .expect("Error while simulating cold start movies");
 
-        // copy the original movie embeddings, and concat the new_movie_embeddings onto the end
-        let _original_movie_catalog : Vec<f32> = harness.orchestrator._get_movies_embedding_catalog();
-        let mut new_movies_catalog :Vec<f32> = Vec::with_capacity(_original_movie_catalog.len() + new_movie_ids.len());
+        // Copy original movie embeddings and append new_movie_embeddings onto the end
+        let _original_movie_catalog: Vec<f32> = harness.orchestrator._get_movies_embedding_catalog();
+        let mut new_movies_catalog: Vec<f32> = Vec::with_capacity(
+            _original_movie_catalog.len() + new_movie_embeddings.len()
+        );
         new_movies_catalog.extend_from_slice(&_original_movie_catalog);
         new_movies_catalog.extend_from_slice(&new_movie_embeddings);
 
-        let new_searcher : Searcher = Searcher::new_detached(&new_movies_catalog, embed_len,
-            num_candidates).expect("error while constructing Searcher");
+        // Build USearch index of catalog that includes cold start movies
+        let new_searcher: Searcher = Searcher::new_detached(
+            &new_movies_catalog,
+            embed_len,
+            num_candidates,
+        ).expect("Error while constructing Searcher");
 
         let n_users = user_ids.len();
-        println!("test n_unique_users={}", n_users);
-        // no batch_size constraints for the query model or ANN requests
-        let tonic_request: Request<UsersRequest>  =
-            harness.orchestrator.get_users_request(&user_ids, &timestamps,
-                query_model_version.clone(), ranker_model_version.clone()).await?;
-
         let user_history = harness.orchestrator._get_user_history();
 
-        let new_candidate_movie_ids :  Vec<i32> = harness.orchestrator
+        // ANN Retrieval @ num_candidates (e.g. 100)
+        let new_candidate_movie_ids: Vec<i32> = harness.orchestrator
             ._get_approx_nearest_neighbors(
-                &user_ids,
-                &timestamps,
-                &user_embeddings,
+                user_ids,
+                timestamps,
+                user_embeddings,
                 &user_history,
                 &new_searcher,
                 num_candidates,
-                movies_offset as i32).await.expect("Error while making ANN search").into_inner();
+                movies_offset as i32,
+            )
+            .await
+            .expect("Error while making ANN search")
+            .into_inner();
 
-        // return num_candidates.  not truncated to top_k
-        let mut ranked_movies : RankedMovies = harness.orchestrator._make_ranker_request_impl(
-            &user_ids,
-            &timestamps,
-            &user_embeddings,
+        assert_eq!(new_candidate_movie_ids.len(), n_users * num_candidates);
+
+        // Slice out ANN Retrieval @ top_k (e.g. 20) per user
+        let mut new_top_k_movie_ids: Vec<i32> = Vec::with_capacity(n_users * top_k);
+        for i in 0..n_users {
+            let i0 = i * num_candidates;
+            let i1 = i0 + top_k;
+            new_top_k_movie_ids.extend_from_slice(&new_candidate_movie_ids[i0..i1]);
+        }
+        assert_eq!(new_top_k_movie_ids.len(), n_users * top_k);
+
+        // Run Ranker in batches of `ranker_batch_size` and extract top_k per user
+        let mut top_new_ranked_movie_ids: Vec<i32> = Vec::with_capacity(n_users * top_k);
+
+        for i0 in (0..n_users).step_by(ranker_batch_size) {
+            let i1 = std::cmp::min(i0 + ranker_batch_size, n_users);
+
+            let mut ranked_movies: RankedMovies = harness.orchestrator
+                ._make_ranker_request_impl(
+                    &user_ids[i0..i1],
+                    &timestamps[i0..i1],
+                    &user_embeddings[i0 * embed_len..i1 * embed_len],
+                    &new_candidate_movie_ids[i0 * num_candidates..i1 * num_candidates],
+                    &new_searcher,
+                    &user_history,
+                    ranker_model_metadata.num_catalog_users,
+                    ranker_model_version.clone(),
+                )
+                .await
+                .expect("Error while requesting ranking of cold-start candidates");
+
+            let (batch_top_ids, _batch_top_scores) = get_top_k_desc_scores(
+                &mut ranked_movies.movie_ids,
+                &mut ranked_movies.scores,
+                num_candidates,
+                top_k,
+            );
+
+            top_new_ranked_movie_ids.extend(batch_top_ids);
+        }
+        assert_eq!(top_new_ranked_movie_ids.len(), n_users * top_k);
+
+        // Build updated movie_tiers_df and pos_test_df
+        let new_catalog_size = new_movies_catalog.len() / embed_len;
+
+        let id_map_lf = df!(
+            "old_movie_id" => &old_movie_ids,
+            "new_movie_id" => &new_movie_ids,
+        )?.lazy();
+
+        let base_movie_tiers_lf = harness.movie_tiers_df.clone()
+            .select([
+                col("movie_id").cast(DataType::Int32),
+                col("movie_tier").cast(DataType::Int32),
+            ]);
+
+        let phantom_movie_tiers_lf = id_map_lf.clone()
+            .inner_join(base_movie_tiers_lf.clone(), col("old_movie_id"), col("movie_id"))
+            .select([
+                col("new_movie_id").alias("movie_id"),
+                col("movie_tier"),
+            ]);
+
+        let new_movie_tiers_df = concat(
+            [base_movie_tiers_lf, phantom_movie_tiers_lf],
+            UnionArgs::default(),
+        )?;
+
+        let new_pos_test_df = harness.pos_test_df.clone()
+            .with_columns([col("movie_id").cast(DataType::Int32)])
+            .left_join(id_map_lf, col("movie_id"), col("old_movie_id"))
+            .with_columns([
+                coalesce(&[col("new_movie_id"), col("movie_id")]).alias("movie_id")
+            ])
+            .drop(by_name(["new_movie_id"], true, false));
+
+        let new_pos_test_tiered = new_pos_test_df.clone()
+            .left_join(
+                new_movie_tiers_df.clone(),
+                col("movie_id"),
+                col("movie_id"),
+            );
+
+        let user_gt_counts = new_pos_test_tiered
+            .group_by([col("user_id")])
+            .agg([
+                len().alias("total_positives"),
+                col("movie_tier").eq(lit(0)).sum().alias("gt_pos_tier_0"),
+                col("movie_tier").eq(lit(1)).sum().alias("gt_pos_tier_1"),
+                col("movie_tier").eq(lit(2)).sum().alias("gt_pos_tier_2"),
+            ]);
+
+        // Evaluate Retrieval @ num_candidates (100), Retrieval @ top_k (20), and Ranker @ top_k (20)
+        let tag_retr_100 = format!("retrieval_ann_{}_cold_start_movies", num_candidates);
+        let tag_retr_20 = format!("retrieval_ann_{}_cold_start_movies", top_k);
+        let tag_ranker_20 = format!("ranker_{}_cold_start_movies", top_k);
+
+        let (res_retr_100, concl_retr_100) = _metrics0(
+            num_candidates,
+            new_catalog_size,
+            &new_pos_test_df,
+            &new_movie_tiers_df,
+            &harness.user_tiers_df,
+            &user_gt_counts,
+            user_ids,
+            user_embeddings,
             &new_candidate_movie_ids,
-            &new_searcher,
-            &user_history,
-            ranker_model_version.clone()
-        ).await.expect("Error while requesting ranking of candidates");
+            parquet_output_dir,
+            summary_output_dir,
+            &tag_retr_100,
+        ).expect(&format!("{} failed", tag_retr_100));
 
-        let (top_new_ranked_movie_ids, top_new_ranked_scores) = get_top_k_desc_scores(
-            & mut ranked_movies.movie_ids, &mut ranked_movies.scores, num_candidates, harness.orchestrator.top_k
-        );
+        let (res_retr_20, concl_retr_20) = _metrics0(
+            top_k,
+            new_catalog_size,
+            &new_pos_test_df,
+            &new_movie_tiers_df,
+            &harness.user_tiers_df,
+            &user_gt_counts,
+            user_ids,
+            user_embeddings,
+            &new_top_k_movie_ids,
+            parquet_output_dir,
+            summary_output_dir,
+            &tag_retr_20,
+        ).expect(&format!("{} failed", tag_retr_20));
 
-        // those results are used to make the ranker requests
-        // this is a brief walk through of using the new movie_ids in the ranker instead of 0:
-        /*
-            - graph building
-               - is given new movie embeddings catalog therefore, one can use
-                 the new_movie_ids
-                 -- just need to not use the default already build orchestrator methods which
-                     use the graph_builder with the original movie_ids only
-            - inference
-               => if use 0 then in GraphRanker.__call__ the cold starts all share identity 0 inspite of their differences,
-                  so use the new_movie_ids!!
-            - document it
-        */
+        let (res_ranker_20, concl_ranker_20) = _metrics0(
+            top_k,
+            new_catalog_size,
+            &new_pos_test_df,
+            &new_movie_tiers_df,
+            &harness.user_tiers_df,
+            &user_gt_counts,
+            user_ids,
+            user_embeddings,
+            &top_new_ranked_movie_ids,
+            parquet_output_dir,
+            summary_output_dir,
+            &tag_ranker_20,
+        ).expect(&format!("{} failed", tag_ranker_20));
 
-        // then we will have retrieval results that may or may not contain both original and new movie_ids
-        // and we will have ranker results tha may of may not contain both original and new movie_ids
+        let agg_res = serde_json::json!({
+            tag_retr_100: {
+                "metrics": res_retr_100,
+                "automated_conclusions": concl_retr_100
+            },
+            tag_retr_20: {
+                "metrics": res_retr_20,
+                "automated_conclusions": concl_retr_20
+            },
+            tag_ranker_20: {
+                "metrics": res_ranker_20,
+                "automated_conclusions": concl_ranker_20
+            },
+        });
 
-        // then we calc stats, but
+        let output_json_file_name = "stratified_metrics_cold_start_movies.json";
+        let output_file_path = Path::new(summary_output_dir).join(output_json_file_name);
+        let file = File::create(&output_file_path)?;
+        serde_json::to_writer_pretty(file, &agg_res)?;
 
+        println!("wrote to {:?}", output_file_path);
 
-        editing
-
-        todo!()
+        Ok(agg_res)
     }
 
     ///  simulate cold start movies and return the original ids, new cold start movie ids,
@@ -643,7 +787,7 @@ mod post_training_analysis {
 
         // Generate contiguous new_movie_ids
         // movie catalog starts at offset, so begin new ids after all movies
-        let id0 = (harness.movies_offset + harness.num_catalog_movies + 1) as i32;
+        let id0 = (harness.movies_offset + harness.num_catalog_movies) as i32;
         let new_movie_ids: Vec<i32> = (id0 .. id0 + (n_sampled as i32)).collect();
 
         // generate the MoviesRequests using the original movie_ids
@@ -661,7 +805,7 @@ mod post_training_analysis {
         movies_request.movie_ids = vec![0; new_movie_ids.len()];
 
         // create new embeddings with cold start Ids
-        let client = CandidateModelClient::new(harness.candidate_uri, embed_len).await;
+        let client = CandidateModelClient::new(harness.candidate_uri.clone(), embed_len).await;
 
         let results : Result<Vec<f32>, Box<dyn Error>> = client.get_movies_embeddings(movies_request,
             candidate_model_version).await;
@@ -672,23 +816,326 @@ mod post_training_analysis {
 
     }
 
-    async fn cale_cold_start_user_metrics(
+    ///  simulate cold start users and return the original ids, new cold start user ids,
+    ///   and the cold start embeddings.
+    ///
+    /// # Arguments
+    ///
+    /// * `harness`:
+    /// * `embed_len`:
+    ///
+    /// returns: Result<(Vec<i32, Global>, Vec<i32, Global>, Vec<f32, Global>), Box<dyn Error+Send+Sync, Global>>
+    ///     (original_user_ids, new_user_ids, timestamps, ann.candidate_ids, ann.user_embeddings)
+    async fn get_cold_start_users(harness: &TestHarness,
+        query_model_version:Option<VersionChoice>, ranker_model_version:Option<VersionChoice>)
+        -> Result<(Vec<i32>, Vec<i32>, Vec<i64>, Vec<i32>, Vec<f32>), Box<dyn std::error::Error + Send + Sync>> {
+
+        let num_per_tier: usize = 167; // 167 * 3 tiers = 501 total
+
+        // Join test interactions with user tiers
+        let pos_test_user_tiered = harness.pos_test_df.clone()
+            .left_join(harness.user_tiers_df.clone(), col("user_id"), col("user_id"));
+
+        // Count test interactions and grab the first (minimum) timestamp per unique (user_id, user_tier),
+        // filter >= 5 movies, shuffle deterministically, and take up to 167 unique users per tier.
+        let candidate_pool_df = pos_test_user_tiered
+            .group_by([
+                col("user_id").cast(DataType::Int32),
+                col("user_tier"),
+            ])
+            .agg([
+                len().alias("test_interaction_count"),
+                col("timestamp").cast(DataType::Int64).min().alias("first_timestamp"),
+            ])
+            .filter(col("test_interaction_count").gt_eq(lit(5u32)))
+            .with_columns([
+                ((col("user_id").cast(DataType::UInt64) * lit(2654435761u64)) % lit(1_000_000_007u64))
+                    .alias("_shuffle_key")
+            ])
+            .sort(["_shuffle_key"], SortMultipleOptions::default())
+            .group_by([col("user_tier")])
+            .head(Some(num_per_tier))
+            .collect()?;
+
+        let original_user_ids: Vec<i32> = candidate_pool_df
+            .column("user_id")?
+            .i32()?
+            .into_no_null_iter()
+            .collect();
+
+        let first_timestamps: Vec<i64> = candidate_pool_df
+            .column("first_timestamp")?
+            .i64()?
+            .into_no_null_iter()
+            .collect();
+
+        let n_sampled = original_user_ids.len();
+
+        // Note: `movies_offset` is `num_catalog_users + 1`.
+        // To avoid colliding with existing user IDs (1..=num_catalog_users) or movie IDs,
+        // start after the movie catalog (or at `harness.movies_offset` if user/movie ID spaces are separate here):
+        let id0 = (harness.num_catalog_users + 1) as i32;
+        let new_user_ids: Vec<i32> = (id0 .. id0 + (n_sampled as i32)).collect();
+
+        // generate the UsersRequests using the original user_ids
+        //  then replace all the user_ids in the request with 0s for the OOV
+
+        let request: Request<UsersRequest> = harness
+            .orchestrator
+            .get_users_request(
+                &original_user_ids,
+                &first_timestamps,
+                query_model_version.clone(),
+                ranker_model_version.clone(),
+            )
+            .await.expect("Error trying to form UsersRequest");
+
+        let mut users_request: UsersRequest = request.into_inner();
+        users_request.user_ids = vec![0; new_user_ids.len()];
+
+        let tonic_request: Request<UsersRequest> = Request::new(users_request);
+
+        // fetch the ANN, then subtract out the watch history of the original_ids
+
+        let searcher = harness.orchestrator._get_searcher();
+
+        // returns num_candidates for each user
+        let res : Result<Response<ApproxNearestNeighborsResponse>, Status> =
+            harness.orchestrator._approx_nearest_neighbors_impl(
+                tonic_request,
+                Some(&original_user_ids),
+                &harness.orchestrator._get_user_history(),
+                &searcher,
+            ).await;
+
+        let ann_res : Response<ApproxNearestNeighborsResponse> = res.expect("Error during request to Wuery and ANN search");
+
+        let ann : ApproxNearestNeighborsResponse = ann_res.into_inner();
+
+        Ok((original_user_ids, new_user_ids, first_timestamps, ann.candidate_ids, ann.user_embeddings))
+    }
+
+
+    async fn calc_cold_start_user_metrics(
         harness: &TestHarness,
         query_model_version:Option<VersionChoice>,
+        ranker_model_version:Option<VersionChoice>,
         ranker_model_metadata: &Arc<RankerModelMetadata>,
         num_candidates: usize,
         top_k: usize,
         user_ids: &[i32],
         timestamps: &[i64],
+        user_embeddings: &[f32],
         candidate_movie_ids: &[i32],
         top_k_movie_ids: &[i32],
         ranker_movie_ids: &[i32],
         parquet_output_dir: &str,
         summary_output_dir: &str) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
 
-        //select 167 randomly from each (user_tier=0, 1, and 2) of test dataset
+        let embed_len = ranker_model_metadata.embed_len;
+        let num_candidates = ranker_model_metadata.num_candidates;
+        let candidate_model_version = query_model_version.clone();
+        let movies_offset = ranker_model_metadata.num_catalog_users + 1;
 
-        todo!()
+        //select 167 randomly from each (user_tier=0, 1, and 2) of test dataset.
+        // create user embeddings using the selected user data but give them ids of 0.
+        // make an ANN search of the new cold start user embeddings against the full movie catalog,
+        // and subtract out the watched user history of the original id holder.
+        let (original_user_ids, new_user_ids, timestamps,
+            new_candidate_ids, new_user_embeddings) =
+            get_cold_start_users(
+                harness,
+                query_model_version.clone(),
+                ranker_model_version.clone()).await.expect("Error while simulating cold start users");
+
+        // concatenate the new user embeddings onto end of the original user_embeddings
+        /*let mut new_user_embeddings_catalog: Vec<f32> = Vec::with_capacity(
+            user_embeddings.len() + new_user_embeddings.len()
+        );
+        new_user_embeddings_catalog.extend_from_slice(&user_embeddings);
+        new_user_embeddings_catalog.extend_from_slice(&new_user_embeddings);
+        */
+
+        let n_cold_users = new_user_ids.len();
+        assert_eq!(new_candidate_ids.len(), n_cold_users * num_candidates);
+        assert_eq!(new_user_embeddings.len(), n_cold_users * embed_len);
+
+        // 2. Slice out ANN Retrieval @ top_k (e.g. 20) per cold-start user
+        let mut new_top_k_movie_ids: Vec<i32> = Vec::with_capacity(n_cold_users * top_k);
+        for i in 0..n_cold_users {
+            let i0 = i * num_candidates;
+            let i1 = i0 + top_k;
+            new_top_k_movie_ids.extend_from_slice(&new_candidate_ids[i0..i1]);
+        }
+        assert_eq!(new_top_k_movie_ids.len(), n_cold_users * top_k);
+
+        // Build UserHistory with empty (padded) entries for `new_user_ids`
+        let base_user_history = harness.orchestrator._get_user_history();
+        let user_history = UserHistory::add_cold_starts(&base_user_history, &new_user_ids);
+        let searcher = harness.orchestrator._get_searcher();
+
+        let new_num_catalog_users = ranker_model_metadata.num_catalog_users + new_user_ids.len();
+        let ranker_batch_size = ranker_model_metadata.batch_size;
+
+        let mut top_new_ranked_movie_ids: Vec<i32> = Vec::with_capacity(n_cold_users * top_k);
+
+        for i0 in (0..n_cold_users).step_by(ranker_batch_size) {
+            let i1 = std::cmp::min(i0 + ranker_batch_size, n_cold_users);
+
+            let mut ranked_movies: RankedMovies = harness
+                .orchestrator
+                ._make_ranker_request_impl(
+                    &new_user_ids[i0..i1],
+                    &timestamps[i0..i1],
+                    &new_user_embeddings[i0 * embed_len..i1 * embed_len],
+                    &new_candidate_ids[i0 * num_candidates..i1 * num_candidates],
+                    &searcher,
+                    &user_history,
+                    new_num_catalog_users,
+                    ranker_model_version.clone(),
+                )
+                .await
+                .expect("Error while requesting ranking for cold-start users");
+
+            let (batch_top_ids, _batch_top_scores) = get_top_k_desc_scores(
+                &mut ranked_movies.movie_ids,
+                &mut ranked_movies.scores,
+                num_candidates,
+                top_k,
+            );
+
+            top_new_ranked_movie_ids.extend(batch_top_ids);
+        }
+        assert_eq!(top_new_ranked_movie_ids.len(), n_cold_users * top_k);
+
+        let user_id_map_lf = df!(
+            "old_user_id" => &original_user_ids,
+            "new_user_id" => &new_user_ids,
+        )?.lazy();
+
+        // Standardize original user_tiers_df to Int32 and append new_user_ids
+        // inheriting the exact user_tier of their corresponding old_user_id.
+        let base_user_tiers_lf = harness.user_tiers_df.clone()
+            .select([
+                col("user_id").cast(DataType::Int32),
+                col("user_tier").cast(DataType::Int32),
+            ]);
+
+        let phantom_user_tiers_lf = user_id_map_lf.clone()
+            .inner_join(base_user_tiers_lf.clone(), col("old_user_id"), col("user_id"))
+            .select([
+                col("new_user_id").alias("user_id"),
+                col("user_tier"),
+            ]);
+
+        let new_user_tiers_df = concat(
+            [base_user_tiers_lf, phantom_user_tiers_lf],
+            UnionArgs::default(),
+        )?;
+
+        // Swap old_user_id -> new_user_id in pos_test_df so the cold-start user IDs
+        // are evaluated against their true held-out positive test interactions.
+        let new_pos_test_df = harness.pos_test_df.clone()
+            .with_columns([col("user_id").cast(DataType::Int32)])
+            .left_join(user_id_map_lf, col("user_id"), col("old_user_id"))
+            .with_columns([
+                coalesce(&[col("new_user_id"), col("user_id")]).alias("user_id")
+            ])
+            .drop(by_name(["new_user_id"], true, false));
+
+        // Join with movie_tiers_df to compute user_gt_counts
+        let new_pos_test_tiered = new_pos_test_df.clone()
+            .left_join(
+                harness.movie_tiers_df.clone(),
+                col("movie_id"),
+                col("movie_id"),
+            );
+
+        let user_gt_counts = new_pos_test_tiered
+            .group_by([col("user_id")])
+            .agg([
+                len().alias("total_positives"),
+                col("movie_tier").eq(lit(0)).sum().alias("gt_pos_tier_0"),
+                col("movie_tier").eq(lit(1)).sum().alias("gt_pos_tier_1"),
+                col("movie_tier").eq(lit(2)).sum().alias("gt_pos_tier_2"),
+            ]);
+
+        let catalog_size = harness.num_catalog_movies;
+
+        // Evaluate Retrieval @ num_candidates (100), Retrieval @ top_k (20), and Ranker @ top_k (20)
+        //    specifically over the `new_user_ids` cohort
+        let tag_retr_100 = format!("retrieval_ann_{}_cold_start_users", num_candidates);
+        let tag_retr_20 = format!("retrieval_ann_{}_cold_start_users", top_k);
+        let tag_ranker_20 = format!("ranker_{}_cold_start_users", top_k);
+
+        let (res_retr_100, concl_retr_100) = _metrics0(
+            num_candidates,
+            catalog_size,
+            &new_pos_test_df,
+            &harness.movie_tiers_df,
+            &new_user_tiers_df,
+            &user_gt_counts,
+            &new_user_ids,
+            &new_user_embeddings,
+            &new_candidate_ids,
+            parquet_output_dir,
+            summary_output_dir,
+            &tag_retr_100,
+        ).expect(&format!("{} failed", tag_retr_100));
+
+        let (res_retr_20, concl_retr_20) = _metrics0(
+            top_k,
+            catalog_size,
+            &new_pos_test_df,
+            &harness.movie_tiers_df,
+            &new_user_tiers_df,
+            &user_gt_counts,
+            &new_user_ids,
+            &new_user_embeddings,
+            &new_top_k_movie_ids,
+            parquet_output_dir,
+            summary_output_dir,
+            &tag_retr_20,
+        ).expect(&format!("{} failed", tag_retr_20));
+
+        let (res_ranker_20, concl_ranker_20) = _metrics0(
+            top_k,
+            catalog_size,
+            &new_pos_test_df,
+            &harness.movie_tiers_df,
+            &new_user_tiers_df,
+            &user_gt_counts,
+            &new_user_ids,
+            &new_user_embeddings,
+            &top_new_ranked_movie_ids,
+            parquet_output_dir,
+            summary_output_dir,
+            &tag_ranker_20,
+        ).expect(&format!("{} failed", tag_ranker_20));
+
+        let agg_res = serde_json::json!({
+            tag_retr_100: {
+                "metrics": res_retr_100,
+                "automated_conclusions": concl_retr_100
+            },
+            tag_retr_20: {
+                "metrics": res_retr_20,
+                "automated_conclusions": concl_retr_20
+            },
+            tag_ranker_20: {
+                "metrics": res_ranker_20,
+                "automated_conclusions": concl_ranker_20
+            },
+        });
+
+        let output_json_file_name = "stratified_metrics_cold_start_users.json";
+        let output_file_path = Path::new(summary_output_dir).join(output_json_file_name);
+        let file = File::create(&output_file_path)?;
+        serde_json::to_writer_pretty(file, &agg_res)?;
+
+        println!("wrote to {:?}", output_file_path);
+
+        Ok(agg_res)
     }
 
     async fn contextual_hubness(
@@ -1818,17 +2265,40 @@ mod post_training_analysis {
         (final_skewness, max_nk, mean_risk, pearson_r)
     }
 
-    /// Evaluates Retrieval or Ranker output and returns a tuple of (Metrics Dictionary, Conclusions List)
     fn _metrics(
         k: usize,                    // either num_candidates or top_k
         catalog_size: usize,
         harness: &TestHarness,
         user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...]
         user_ids: &[i32],            // shape: (n_users)
-        _user_embeddings: &[f32],     // shape (n_users * embed_len)
+        user_embeddings: &[f32],     // shape (n_users * embed_len)
         neighbors: &[i32],           // shape: (n_users * k)
         parquet_output_dir: &str,
-        #[allow(dead_code)]
+        summary_output_dir: &str,
+        tag: &str,
+    ) -> PolarsResult<(HashMap<String, f64>, Vec<String>)> {
+
+        _metrics0(k, catalog_size,
+            &harness.pos_test_df, &harness.movie_tiers_df, &harness.user_tiers_df,
+            user_gt_counts,
+            user_ids, user_embeddings, neighbors, parquet_output_dir, summary_output_dir, tag)
+
+    }
+
+
+    /// Evaluates Retrieval or Ranker output and returns a tuple of (Metrics Dictionary, Conclusions List)
+    /// Evaluates Retrieval or Ranker output and returns a tuple of (Metrics Dictionary, Conclusions List)
+    fn _metrics0(
+        k: usize,                    // either num_candidates or top_k
+        catalog_size: usize,
+        pos_test_df: &LazyFrame,
+        movie_tiers_df: &LazyFrame,
+        user_tiers_df: &LazyFrame,
+        user_gt_counts: &LazyFrame,  // [user_id, total_positives, gt_pos_tier_0, ...]
+        user_ids: &[i32],            // shape: (n_users)
+        _user_embeddings: &[f32],    // shape (n_users * embed_len)
+        neighbors: &[i32],           // shape: (n_users * k)
+        parquet_output_dir: &str,
         _summary_output_dir: &str,
         tag: &str,
     ) -> PolarsResult<(HashMap<String, f64>, Vec<String>)> {
@@ -1855,17 +2325,29 @@ mod post_training_analysis {
             "rank" => ranks,
         )?.lazy();
 
+        // Standardize join key types to Int32 to prevent Polars schema mismatch errors
+        let pos_test_clean = pos_test_df.clone().with_columns([
+            col("user_id").cast(DataType::Int32),
+            col("movie_id").cast(DataType::Int32),
+        ]);
+        let movie_tiers_clean = movie_tiers_df.clone().with_columns([
+            col("movie_id").cast(DataType::Int32),
+            col("movie_tier").cast(DataType::Int32),
+        ]);
+
         // Join with truth datasets
         let joined_lf = retrieval_df
             .join_builder()
-            .with(harness.pos_test_df.clone())
+            .with(pos_test_clean)
             .left_on([col("user_id"), col("movie_id")])
             .right_on([col("user_id"), col("movie_id")])
             .how(JoinType::Left)
             .finish()
-            .left_join(harness.movie_tiers_df.clone(), col("movie_id"), col("movie_id"));
+            .left_join(movie_tiers_clean, col("movie_id"), col("movie_id"));
 
         // Construct Aggregation Expressions
+        // Note: Use `.max()` instead of `.first()` for Reciprocal Rank (`1.0 / rank`)
+        // because hash joins do not preserve row order by `rank`, and `max(1/rank) == 1/min(rank)`.
         let is_hit = col("rating").is_not_null();
         let dcg_expr = lit(1.0) / (col("rank").cast(DataType::Float64) + lit(1.0)).log(lit(2.0));
         let rr_expr = lit(1.0) / col("rank").cast(DataType::Float64);
@@ -1873,38 +2355,32 @@ mod post_training_analysis {
         let mut agg_exprs = vec![
             is_hit.clone().sum().alias("hits_global"),
             dcg_expr.clone().filter(is_hit.clone()).sum().alias("dcg_global"),
-            rr_expr.clone().filter(is_hit.clone()).first().alias("rr_global"), // <-- ADD THIS
+            rr_expr.clone().filter(is_hit.clone()).max().fill_null(lit(0.0)).alias("rr_global"),
         ];
 
         for t in 0..=2 {
             let tier_hit = is_hit.clone().and(col("movie_tier").eq(lit(t)));
-            agg_exprs.push(tier_hit.clone().sum().alias(&format!("hits_tier_{}", t)));
-            agg_exprs.push(dcg_expr.clone().filter(tier_hit.clone()).sum().alias(&format!("dcg_tier_{}", t)));
-            // Extract the RR for the first hit belonging to this specific movie tier
-            agg_exprs.push(rr_expr.clone().filter(tier_hit).first().alias(&format!("rr_tier_{}", t)));
+            agg_exprs.push(tier_hit.clone().sum().alias(format!("hits_tier_{}", t)));
+            agg_exprs.push(dcg_expr.clone().filter(tier_hit.clone()).sum().alias(format!("dcg_tier_{}", t)));
+            agg_exprs.push(rr_expr.clone().filter(tier_hit).max().alias(format!("rr_tier_raw_{}", t)));
         }
 
         // Group by User ID and Apply Metrics
         let metrics_lf = joined_lf
             .group_by([col("user_id")])
             .agg(agg_exprs)
-            .left_join(harness.user_tiers_df.clone(), col("user_id"), col("user_id"))
+            .left_join(user_tiers_df.clone(), col("user_id"), col("user_id"))
             .inner_join(user_gt_counts.clone(), col("user_id"), col("user_id"));
 
-        // Extract IDCG cache logic into a map_elements closure
+        // Extract IDCG cache logic into a map closure
         let idcg_cache_clone = idcg_cache.clone();
         let apply_idcg = move |col: Column| -> PolarsResult<Column> {
-            // Extract the Series from the Column
-            let s = col.as_materialized_series();
-            // Downcast to u32
+            let s = col.as_materialized_series().cast(&DataType::UInt32)?;
             let ca = s.u32()?;
             let out: Float64Chunked = ca.iter().map(|opt_val| {
-                // u32 can't be negative, so just cast directly to usize
                 let count = opt_val.unwrap_or(0) as usize;
-                // Wrap the f64 in Some() so collect() can build the ChunkedArray
                 Some(idcg_cache_clone[count.min(k)])
             }).collect();
-            // Return a Column
             Ok(Column::from(out.into_series()))
         };
 
@@ -1928,10 +2404,10 @@ mod post_training_analysis {
         let mut ndcg_exprs = vec![
             (col("dcg_global") / col("idcg_global")).fill_nan(lit(0.0)).alias("ndcg_global"),
             (col("total_positives").cast(DataType::Float64) * lit(expected_random_dcg_part1) / col("idcg_global"))
-                .alias("expected_random_ndcg")
+                .alias("expected_random_ndcg"),
         ];
 
-        // Add Movie Tier specific derivations
+        // Add Movie Tier specific derivations (masked to users who actually have gt_pos_tier_{t} > 0)
         for t in 0..=2 {
             let gt_col = format!("gt_pos_tier_{}", t);
             let idcg_col = format!("idcg_tier_{}", t);
@@ -1951,12 +2427,21 @@ mod post_training_analysis {
                 when(col(&gt_col).gt(lit(0)))
                     .then(col(&format!("hits_tier_{}", t)).cast(DataType::Float64) / col(&gt_col).cast(DataType::Float64))
                     .otherwise(lit(Null{}))
-                    .alias(&format!("recall_tier_{}", t))
+                    .alias(format!("recall_tier_{}", t))
             );
 
             col_exprs.push(
-                (col(&format!("hits_tier_{}", t)).cast(DataType::Float64) / lit(k as f64))
-                    .alias(&format!("precision_tier_{}", t))
+                when(col(&gt_col).gt(lit(0)))
+                    .then(col(&format!("hits_tier_{}", t)).cast(DataType::Float64) / lit(k as f64))
+                    .otherwise(lit(Null{}))
+                    .alias(format!("precision_tier_{}", t))
+            );
+
+            col_exprs.push(
+                when(col(&gt_col).gt(lit(0)))
+                    .then(col(&format!("rr_tier_raw_{}", t)).fill_null(lit(0.0)))
+                    .otherwise(lit(Null{}))
+                    .alias(format!("rr_tier_{}", t))
             );
 
             // PHASE 2: Add dependent calculations to ndcg_exprs
@@ -1965,18 +2450,14 @@ mod post_training_analysis {
                     .then(col(&format!("dcg_tier_{}", t)) / col(&idcg_col))
                     .otherwise(lit(Null{}))
                     .fill_nan(lit(0.0))
-                    .alias(&format!("ndcg_tier_{}", t))
+                    .alias(format!("ndcg_tier_{}", t))
             );
         }
 
-        // Apply calculations in two sequential steps
+        // Apply calculations in two sequential steps using `ndcg_exprs`
         let mut metrics_df = metrics_lf
             .with_columns(col_exprs)
-            .with_columns([
-                (col("dcg_global") / col("idcg_global")).fill_nan(lit(0.0)).alias("ndcg_global"),
-                (col("total_positives").cast(DataType::Float64) * lit(expected_random_dcg_part1) / col("idcg_global"))
-                    .alias("expected_random_ndcg")
-            ])
+            .with_columns(ndcg_exprs)
             .collect()?;
 
         // Write to Parquet
@@ -1994,18 +2475,14 @@ mod post_training_analysis {
         agg_res.insert(format!("precision_at_{}_std", k), get_col_std(&metrics_df, "precision_global"));
         agg_res.insert(format!("ndcg_at_{}_mean", k), get_col_mean(&metrics_df, "ndcg_global"));
         agg_res.insert(format!("ndcg_at_{}_std", k), get_col_std(&metrics_df, "ndcg_global"));
-
-        let mrr_global = metrics_df.column("rr_global").unwrap().fill_null(FillNullStrategy::Zero).unwrap();
-        let mrr_mean = mrr_global.f64().unwrap().mean().unwrap_or(0.0);
-        let mrr_std = mrr_global.f64().unwrap().std(1).unwrap_or(0.0);
-        agg_res.insert(format!("mrr_at_{}_mean", k), mrr_mean);
-        agg_res.insert(format!("mrr_at_{}_std", k), mrr_std);
+        agg_res.insert(format!("mrr_at_{}_mean", k), get_col_mean(&metrics_df, "rr_global"));
+        agg_res.insert(format!("mrr_at_{}_std", k), get_col_std(&metrics_df, "rr_global"));
 
         agg_res.insert(format!("recall_at_{}_mean_random", k), get_col_mean(&metrics_df, "expected_random_recall"));
         agg_res.insert(format!("precision_at_{}_mean_random", k), get_col_mean(&metrics_df, "expected_random_precision"));
         agg_res.insert(format!("ndcg_at_{}_mean_random", k), get_col_mean(&metrics_df, "expected_random_ndcg"));
 
-        // User Tier Extractions
+        // User Tier & Movie Tier Extractions
         for t in 0..=2 {
             let mask = metrics_df
                 .column("user_tier")?
@@ -2022,12 +2499,10 @@ mod post_training_analysis {
             agg_res.insert(format!("precision_at_{}_std_user_tier_{}", k, t), get_col_std(&filtered_df, "precision_global"));
             agg_res.insert(format!("ndcg_at_{}_mean_user_tier_{}", k, t), get_col_mean(&filtered_df, "ndcg_global"));
             agg_res.insert(format!("ndcg_at_{}_std_user_tier_{}", k, t), get_col_std(&filtered_df, "ndcg_global"));
+            agg_res.insert(format!("mrr_at_{}_mean_user_tier_{}", k, t), get_col_mean(&filtered_df, "rr_global"));
+            agg_res.insert(format!("mrr_at_{}_std_user_tier_{}", k, t), get_col_std(&filtered_df, "rr_global"));
 
-            let u_mrr = filtered_df.column("rr_global").unwrap().fill_null(FillNullStrategy::Zero).unwrap();
-            agg_res.insert(format!("mrr_at_{}_mean_user_tier_{}", k, t), u_mrr.f64().unwrap().mean().unwrap_or(0.0));
-            agg_res.insert(format!("mrr_at_{}_std_user_tier_{}", k, t), u_mrr.f64().unwrap().std(1).unwrap_or(0.0));
-
-            // Movie Tier Extractions (using non-null valid data rows)
+            // Movie Tier Extractions (automatically ignores Null rows where gt_pos_tier_{t} == 0)
             let recall_col = format!("recall_tier_{}", t);
             let n_movie_samples = metrics_df.column(&recall_col)?.is_not_null().sum().unwrap_or(0);
 
@@ -2035,9 +2510,7 @@ mod post_training_analysis {
             agg_res.insert(format!("recall_at_{}_mean_movie_tier_{}", k, t), get_col_mean(&metrics_df, &recall_col));
             agg_res.insert(format!("precision_at_{}_mean_movie_tier_{}", k, t), get_col_mean(&metrics_df, &format!("precision_tier_{}", t)));
             agg_res.insert(format!("ndcg_at_{}_mean_movie_tier_{}", k, t), get_col_mean(&metrics_df, &format!("ndcg_tier_{}", t)));
-
-            let m_mrr = metrics_df.column(&format!("rr_tier_{}", t)).unwrap().fill_null(FillNullStrategy::Zero).unwrap();
-            agg_res.insert(format!("mrr_at_{}_mean_movie_tier_{}", k, t), m_mrr.f64().unwrap().mean().unwrap_or(0.0));
+            agg_res.insert(format!("mrr_at_{}_mean_movie_tier_{}", k, t), get_col_mean(&metrics_df, &format!("rr_tier_{}", t)));
         }
 
         //  Generate Automated Conclusions

@@ -1,14 +1,15 @@
-use std::{path::{Path}};
-use crate::pb::{UsersRequest};
+use std::sync::Arc;
+use crate::pb::UsersRequest;
 use memmap2::Mmap;
 use std::fs::File;
 use std::io::Result;
+use std::path::Path;
 use tonic::Request;
 use crate::model_client::tf_serving::model_spec::VersionChoice;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UserDb {
-    mmap: Mmap,
+    mmap: Arc<Mmap>,
     record_size: usize,
 }
 
@@ -24,7 +25,7 @@ impl UserDb {
         // users.bin row has: gender, age, occupation.
         // user_id is implied as index+1
         Ok(Self {
-            mmap,
+            mmap: Arc::new(mmap),
             record_size: 9, // 1 byte (c) + 4 bytes (I) + 4 bytes (I)
         })
     }
