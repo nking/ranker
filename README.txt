@@ -130,12 +130,13 @@ export_src
 inference_src    # code for the end-to-end inference using rust
 │   ├── pyproject.toml
     ├── main
-    |   └── rust                      #rust src code for input graph
+    |   └── rust                      #rust src code for input graph and server code
     |        └── Cargo.toml
     |        └── src
     ├── test
-        └── rust                      #rust src code for input graph
+        └── rust                      #rust test code
              └── test
+             └── resources            #rust test data
 
 tf_c++_op_src
 

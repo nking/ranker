@@ -191,7 +191,6 @@ mod post_training_analysis {
     use polars::prelude::*;
     use rayon::prelude::*; // Required for parallel slate comparisons in _diversity_metrics
     use tonic::{Request, Response, Status};
-    use usearch::ffi::Matches;
     use inference_engine::embeddings_ann::Searcher;
     use inference_engine::model_client::CandidateModelClient;
     // Bring everything from the outer scope (TestHarness, helper functions, etc.) into the test module
@@ -201,7 +200,6 @@ mod post_training_analysis {
     use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMoviesAndRepr, UsersRequest, MoviesRequest, RankedMovies};
     use inference_engine::pb::recommender_service_server::RecommenderService;
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
-    use inference_engine::user_db::UserDb;
     use inference_engine::user_history::UserHistory;
     use inference_engine::util::{get_top_k_desc_scores};
     use crate::helper::get_unique_user_and_first_timestamp;
@@ -211,14 +209,27 @@ mod post_training_analysis {
 
         let harness = TestHarness::new().await;
 
-        let query_model_version = Some(VersionChoice::Version(1));
+        //NOTE:  edit these for the models to analyze
+        let q_ver: usize = 1;
+        let r_ver: usize = 1;
 
-        // change these for the model choices and output directory to write stats to
-        let ranker_model_version = Some(VersionChoice::Version(1));
+        let query_model_version = Some(VersionChoice::Version(q_ver as i64));
+        let ranker_model_version = Some(VersionChoice::Version(r_ver as i64));
+
         let output_base_dir = get_bin_dir().unwrap().to_string_lossy().into_owned();
-        let summary_output_dir = format!("{}/post_training_analysis", output_base_dir.trim_end_matches('/'));
+        let summary_output_dir = format!(
+            "{}/post_training_analysis_q{:02}_r{:02}",
+            output_base_dir.trim_end_matches('/'),
+            q_ver,
+            r_ver
+        );
         let _ = recreate_directory(summary_output_dir.as_str())?;
-        let parquet_output_dir = format!("{}/parquet_metrics",  output_base_dir.trim_end_matches('/'));
+        let parquet_output_dir = format!(
+            "{}/parquet_metrics_q{:02}_r{:02}",
+            output_base_dir.trim_end_matches('/'),
+            q_ver,
+            r_ver
+        );
         let _ = recreate_directory(parquet_output_dir.as_str())?;
 
 
@@ -498,7 +509,8 @@ mod post_training_analysis {
 
 
         let _ = cross_metric_analysis(
-            &base_metrics, &coverage, &pop_bias, &diversity, &emb_hubness, &ctx_hubness, &rank_agreement,
+            &base_metrics, &coverage, &pop_bias, &diversity, &emb_hubness, &ctx_hubness,
+            &rank_agreement,&cold_start_movie_metrics, &cold_start_user_metrics,
             num_candidates, top_k, summary_output_dir
         ).await?;
 
@@ -909,8 +921,18 @@ mod post_training_analysis {
             ).await;
 
         let ann_res : Response<ApproxNearestNeighborsResponse> = res.expect("Error during request to Wuery and ANN search");
-
         let ann : ApproxNearestNeighborsResponse = ann_res.into_inner();
+
+        {
+            debug_assert_eq!(n_sampled, original_user_ids.len());
+            debug_assert_eq!(n_sampled, new_user_ids.len());
+            let ranker_metadata = harness.orchestrator.get_or_fetch_ranker_metadata(
+                ranker_model_version.clone()
+            ).expect("error fetching ranker metadata");
+            let num_candidates = ranker_metadata.num_candidates;
+            debug_assert_eq!(n_sampled * num_candidates, ann.candidate_ids.len());
+            debug_assert_eq!(n_sampled * ranker_metadata.embed_len, ann.user_embeddings.len());
+        }
 
         Ok((original_user_ids, new_user_ids, first_timestamps, ann.candidate_ids, ann.user_embeddings))
     }
@@ -2641,7 +2663,9 @@ mod post_training_analysis {
         diversity: &serde_json::Value,
         emb_hubness: &serde_json::Value,
         ctx_hubness: &serde_json::Value,
-        rank_agreement : &serde_json::Value,
+        rank_agreement: &serde_json::Value,
+        cold_start_movies: &serde_json::Value,
+        cold_start_users: &serde_json::Value,
         num_candidates: usize,
         top_k: usize,
         summary_output_dir: &str,
@@ -2650,6 +2674,14 @@ mod post_training_analysis {
         let tag1 = format!("retrieval_ann_{}", num_candidates);
         let tag2 = format!("retrieval_ann_{}", top_k);
         let tag3 = format!("ranker_{}", top_k);
+
+        let tag_cs_mov_ret_100 = format!("retrieval_ann_{}_cold_start_movies", num_candidates);
+        let tag_cs_mov_ret_20 = format!("retrieval_ann_{}_cold_start_movies", top_k);
+        let tag_cs_mov_rnk_20 = format!("ranker_{}_cold_start_movies", top_k);
+
+        let tag_cs_usr_ret_100 = format!("retrieval_ann_{}_cold_start_users", num_candidates);
+        let tag_cs_usr_ret_20 = format!("retrieval_ann_{}_cold_start_users", top_k);
+        let tag_cs_usr_rnk_20 = format!("ranker_{}_cold_start_users", top_k);
 
         // Helper to safely extract a f64 from the nested JSON tree
         let extract = |json: &serde_json::Value, tag: &str, metric: &str| -> f64 {
@@ -2663,7 +2695,7 @@ mod post_training_analysis {
         let mut conclusions = Vec::new();
 
         // =================================================================
-        //  FUNNEL ANALYSIS (Retriever @ 100 vs Retriever @ 20)
+        // 1. FUNNEL ANALYSIS (Retriever @ 100 vs Retriever @ 20)
         // =================================================================
         let recall_100 = extract(base_metrics, &tag1, &format!("recall_at_{}_mean", num_candidates));
         let recall_20 = extract(base_metrics, &tag2, &format!("recall_at_{}_mean", top_k));
@@ -2677,7 +2709,7 @@ mod post_training_analysis {
         }
 
         // =================================================================
-        //  RANKER VS RETRIEVER LIFT (Ranker @ 20 vs Retriever @ 20)
+        // 2. RANKER VS RETRIEVER LIFT (Ranker @ 20 vs Retriever @ 20)
         // =================================================================
         let mrr_ret_20 = extract(base_metrics, &tag2, &format!("mrr_at_{}_mean", top_k));
         let mrr_rnk_20 = extract(base_metrics, &tag3, &format!("mrr_at_{}_mean", top_k));
@@ -2719,7 +2751,7 @@ mod post_training_analysis {
         }
 
         // =================================================================
-        // RANKER CHURN CORRELATION
+        // 3. RANKER CHURN CORRELATION
         // =================================================================
         let overlap = extract(rank_agreement, "metrics", &format!("mean_overlap_at_{}", top_k));
 
@@ -2746,7 +2778,7 @@ mod post_training_analysis {
         }
 
         // =================================================================
-        // ROOT CAUSE CORRELATIONS (Gini vs. Hubness)
+        // 4. ROOT CAUSE CORRELATIONS (Gini vs. Hubness)
         // =================================================================
         let gini_rnk_20 = extract(coverage, &tag3, &format!("gini_at_{}_full_{}", top_k, tag3));
         let div_rnk_20 = extract(diversity, &tag3, &format!("interlist_diversity_mean_k_{}_{}", top_k, tag3));
@@ -2771,6 +2803,172 @@ mod post_training_analysis {
         }
 
         // =================================================================
+        // 5. ITEM COLD-START ANALYSIS (OOV=0 Phantom Movies vs. Warm Catalog)
+        // =================================================================
+        let cs_mov_recall_100 = extract(cold_start_movies, &tag_cs_mov_ret_100, &format!("recall_at_{}_mean", num_candidates));
+        let cs_mov_ndcg_ret_20 = extract(cold_start_movies, &tag_cs_mov_ret_20, &format!("ndcg_at_{}_mean", top_k));
+        let cs_mov_ndcg_rnk_20 = extract(cold_start_movies, &tag_cs_mov_rnk_20, &format!("ndcg_at_{}_mean", top_k));
+        let cs_mov_mrr_ret_20 = extract(cold_start_movies, &tag_cs_mov_ret_20, &format!("mrr_at_{}_mean", top_k));
+        let cs_mov_mrr_rnk_20 = extract(cold_start_movies, &tag_cs_mov_rnk_20, &format!("mrr_at_{}_mean", top_k));
+
+        if recall_100 > 0.0 && cs_mov_recall_100 > 0.0 {
+            let mov_ret_retention = (cs_mov_recall_100 / recall_100) * 100.0;
+            if mov_ret_retention >= 85.0 {
+                conclusions.push(format!(
+                    "ITEM COLD-START RESILIENCE (RETRIEVER): When 501 test movies are replaced with unmemorized OOV=0 phantom items, Recall@{} retains {:.1}% of warm performance ({:.2}% vs {:.2}%). The Candidate Tower's content features (genres/metadata) generalize strongly into the embedding space.",
+                    num_candidates, mov_ret_retention, cs_mov_recall_100 * 100.0, recall_100 * 100.0
+                ));
+            } else if mov_ret_retention >= 60.0 {
+                conclusions.push(format!(
+                    "MODERATE ITEM COLD-START DROP (RETRIEVER): Replacing 501 test movies with OOV=0 phantom items retains {:.1}% of warm Recall@{} ({:.2}% vs {:.2}%). The Candidate Tower relies partially on memorized movie ID embeddings.",
+                    mov_ret_retention, num_candidates, cs_mov_recall_100 * 100.0, recall_100 * 100.0
+                ));
+            } else {
+                conclusions.push(format!(
+                    "SEVERE ITEM ID MEMORIZATION (RETRIEVER): Recall@{} collapses to {:.1}% of warm baseline ({:.2}% vs {:.2}%) when 501 test movies use OOV=0 IDs. The Candidate Tower is over-reliant on memorized item IDs and under-utilizing movie side-features.",
+                    num_candidates, mov_ret_retention, cs_mov_recall_100 * 100.0, recall_100 * 100.0
+                ));
+            }
+        }
+
+        if cs_mov_ndcg_ret_20 > 0.0 {
+            let cs_mov_rnk_lift = ((cs_mov_ndcg_rnk_20 - cs_mov_ndcg_ret_20) / cs_mov_ndcg_ret_20) * 100.0;
+            let cs_mov_mrr_lift = if cs_mov_mrr_ret_20 > 0.0 {
+                ((cs_mov_mrr_rnk_20 - cs_mov_mrr_ret_20) / cs_mov_mrr_ret_20) * 100.0
+            } else {
+                0.0
+            };
+
+            if cs_mov_rnk_lift > 5.0 {
+                conclusions.push(format!(
+                    "ITEM COLD-START RANKER LIFT: Even with OOV=0 phantom movies in the candidate pool, the Ranker improves NDCG@{} by {:.1}% (and MRR@{} by {:.1}%) over pure retrieval. The GATv2 graph attention effectively scores cold-start item embeddings against user history.",
+                    top_k, cs_mov_rnk_lift, top_k, cs_mov_mrr_lift
+                ));
+            } else if cs_mov_rnk_lift < -2.0 {
+                conclusions.push(format!(
+                    "ITEM COLD-START RANKER PENALTY: The Ranker degrades NDCG@{} by {:.1}% when scoring cold-start movies ({:.2}% vs Retriever {:.2}%). The Cross-Encoder is biased toward memorized warm movie embeddings and buries new OOV items.",
+                    top_k, cs_mov_rnk_lift.abs(), cs_mov_ndcg_rnk_20 * 100.0, cs_mov_ndcg_ret_20 * 100.0
+                ));
+            }
+        }
+
+        // Compare Blockbuster (Tier 2) vs Niche (Tier 0) drop under Item Cold-Start
+        let warm_mov_t2_ndcg = extract(base_metrics, &tag3, &format!("ndcg_at_{}_mean_movie_tier_2", top_k));
+        let cs_mov_t2_ndcg = extract(cold_start_movies, &tag_cs_mov_rnk_20, &format!("ndcg_at_{}_mean_movie_tier_2", top_k));
+        let warm_mov_t0_ndcg = extract(base_metrics, &tag3, &format!("ndcg_at_{}_mean_movie_tier_0", top_k));
+        let cs_mov_t0_ndcg = extract(cold_start_movies, &tag_cs_mov_rnk_20, &format!("ndcg_at_{}_mean_movie_tier_0", top_k));
+
+        if warm_mov_t2_ndcg > 0.0 && warm_mov_t0_ndcg > 0.0 {
+            let t2_drop_pct = ((warm_mov_t2_ndcg - cs_mov_t2_ndcg) / warm_mov_t2_ndcg) * 100.0;
+            let t0_drop_pct = ((warm_mov_t0_ndcg - cs_mov_t0_ndcg) / warm_mov_t0_ndcg) * 100.0;
+
+            if t2_drop_pct > t0_drop_pct + 10.0 {
+                conclusions.push(format!(
+                    "HEAD ITEM ID DEPENDENCY: Under cold-start movie simulation, Tier 2 (head) NDCG@{} drops by {:.1}% ({:.2}% -> {:.2}%), compared to a {:.1}% change for Tier 0 (long-tail) items. Popular items rely heavily on memorized collaborative ID weights rather than metadata.",
+                    top_k, t2_drop_pct, warm_mov_t2_ndcg * 100.0, cs_mov_t2_ndcg * 100.0, t0_drop_pct
+                ));
+            }
+        }
+
+        // =================================================================
+        // 6. USER COLD-START ANALYSIS (OOV=0 Users & Empty History vs. Warm Users)
+        // =================================================================
+        let cs_usr_recall_100 = extract(cold_start_users, &tag_cs_usr_ret_100, &format!("recall_at_{}_mean", num_candidates));
+        let cs_usr_rand_recall_100 = extract(cold_start_users, &tag_cs_usr_ret_100, &format!("recall_at_{}_mean_random", num_candidates));
+        let cs_usr_ndcg_ret_20 = extract(cold_start_users, &tag_cs_usr_ret_20, &format!("ndcg_at_{}_mean", top_k));
+        let cs_usr_ndcg_rnk_20 = extract(cold_start_users, &tag_cs_usr_rnk_20, &format!("ndcg_at_{}_mean", top_k));
+        let cs_usr_mrr_ret_20 = extract(cold_start_users, &tag_cs_usr_ret_20, &format!("mrr_at_{}_mean", top_k));
+        let cs_usr_mrr_rnk_20 = extract(cold_start_users, &tag_cs_usr_rnk_20, &format!("mrr_at_{}_mean", top_k));
+
+        if recall_100 > 0.0 && cs_usr_recall_100 > 0.0 {
+            let usr_ret_retention = (cs_usr_recall_100 / recall_100) * 100.0;
+            let rand_mult = if cs_usr_rand_recall_100 > 0.0 {
+                cs_usr_recall_100 / cs_usr_rand_recall_100
+            } else {
+                0.0
+            };
+
+            if usr_ret_retention >= 65.0 {
+                conclusions.push(format!(
+                    "STRONG DEMOGRAPHIC COLD-START (USER RETRIEVER): With user_id=0 (OOV), demographic features alone (age, gender, occupation) retain {:.1}% of warm Recall@{} ({:.2}% vs {:.2}%, {:.1}x random baseline).",
+                    usr_ret_retention, num_candidates, cs_usr_recall_100 * 100.0, recall_100 * 100.0, rand_mult
+                ));
+            } else if cs_usr_recall_100 > cs_usr_rand_recall_100 * 2.0 {
+                conclusions.push(format!(
+                    "MODERATE DEMOGRAPHIC COLD-START (USER RETRIEVER): Cold-start users retain {:.1}% of warm Recall@{} ({:.2}% vs {:.2}%), beating the random baseline by {:.1}x, though collaborative ID/history carries the majority of personalization signal.",
+                    usr_ret_retention, num_candidates, cs_usr_recall_100 * 100.0, recall_100 * 100.0, rand_mult
+                ));
+            } else {
+                conclusions.push(format!(
+                    "WEAK USER COLD-START SIGNAL: Cold-start User Recall@{} is {:.2}% (only {:.1}% of warm Recall and {:.1}x random). User demographic features alone provide minimal geometric separation in the Query Tower.",
+                    num_candidates, cs_usr_recall_100 * 100.0, usr_ret_retention, rand_mult
+                ));
+            }
+        }
+
+        if cs_usr_ndcg_ret_20 > 0.0 {
+            let cs_usr_rnk_lift = ((cs_usr_ndcg_rnk_20 - cs_usr_ndcg_ret_20) / cs_usr_ndcg_ret_20) * 100.0;
+            let cs_usr_mrr_lift = if cs_usr_mrr_ret_20 > 0.0 {
+                ((cs_usr_mrr_rnk_20 - cs_usr_mrr_ret_20) / cs_usr_mrr_ret_20) * 100.0
+            } else {
+                0.0
+            };
+
+            if cs_usr_rnk_lift > 3.0 {
+                conclusions.push(format!(
+                    "ZERO-HISTORY GRAPH RANKER LIFT: Even when cold-start users have an empty watch history in the GATv2 subgraph, the Ranker improves NDCG@{} by {:.1}% (and MRR@{} by {:.1}%) over pure retrieval.",
+                    top_k, cs_usr_rnk_lift, top_k, cs_usr_mrr_lift
+                ));
+            } else if cs_usr_rnk_lift < -3.0 {
+                conclusions.push(format!(
+                    "ZERO-HISTORY GRAPH DEGRADATION: When cold-start users have an empty watch history, the GATv2 Ranker degrades NDCG@{} by {:.1}% ({:.2}% vs Retriever {:.2}%) and MRR@{} by {:.1}%. Without historical graph edges, message-passing injects noise; consider bypassing the GNN ranker or falling back to ANN scores when user history is empty.",
+                    top_k, cs_usr_rnk_lift.abs(), cs_usr_ndcg_rnk_20 * 100.0, cs_usr_ndcg_ret_20 * 100.0, top_k, cs_usr_mrr_lift.abs()
+                ));
+            } else {
+                conclusions.push(format!(
+                    "ZERO-HISTORY GRAPH STABILITY: For cold-start users with empty watch histories, the GATv2 Ranker preserves the Retriever's slate quality (NDCG@{} delta: {:.1}%).",
+                    top_k, cs_usr_rnk_lift
+                ));
+            }
+        }
+
+        // Power User (Tier 2) vs Light User (Tier 0) History Ablation
+        let warm_usr_t2_recall_20 = extract(base_metrics, &tag3, &format!("recall_at_{}_mean_user_tier_2", top_k));
+        let cs_usr_t2_recall_20 = extract(cold_start_users, &tag_cs_usr_rnk_20, &format!("recall_at_{}_mean_user_tier_2", top_k));
+        if warm_usr_t2_recall_20 > 0.0 && cs_usr_t2_recall_20 > 0.0 {
+            let history_value_lift = ((warm_usr_t2_recall_20 - cs_usr_t2_recall_20) / cs_usr_t2_recall_20) * 100.0;
+            conclusions.push(format!(
+                "POWER USER HISTORY ABLATION: Stripping Power Users (Tier 2) of their interaction history and user ID reduces Ranker Recall@{} from {:.2}% to {:.2}% (confirming that learned history + ID provides a {:+.1}% relative lift over raw demographics).",
+                top_k, warm_usr_t2_recall_20 * 100.0, cs_usr_t2_recall_20 * 100.0, history_value_lift
+            ));
+        }
+
+        // =================================================================
+        // 7. SYSTEMIC COLD-START ASYMMETRY (Users vs. Movies)
+        // =================================================================
+        if ndcg_rnk_20 > 0.0 && cs_mov_ndcg_rnk_20 > 0.0 && cs_usr_ndcg_rnk_20 > 0.0 {
+            let mov_rnk_retention = (cs_mov_ndcg_rnk_20 / ndcg_rnk_20) * 100.0;
+            let usr_rnk_retention = (cs_usr_ndcg_rnk_20 / ndcg_rnk_20) * 100.0;
+
+            if usr_rnk_retention + 15.0 < mov_rnk_retention {
+                conclusions.push(format!(
+                    "COLD-START BOTTLENECK (USER SIDE): End-to-end Ranker NDCG@{} retention is significantly lower for Cold-Start Users ({:.1}% of warm) than Cold-Start Movies ({:.1}% of warm). Onboarding new users (e.g., via interactive preference elicitation or richer user features) is a higher-leverage priority than item metadata.",
+                    top_k, usr_rnk_retention, mov_rnk_retention
+                ));
+            } else if mov_rnk_retention + 15.0 < usr_rnk_retention {
+                conclusions.push(format!(
+                    "COLD-START BOTTLENECK (ITEM SIDE): End-to-end Ranker NDCG@{} retention is significantly lower for Cold-Start Movies ({:.1}% of warm) than Cold-Start Users ({:.1}% of warm). Enriching item content features (e.g., plot/synopsis embeddings, cast, tags) is the highest-leverage priority.",
+                    top_k, mov_rnk_retention, usr_rnk_retention
+                ));
+            } else {
+                conclusions.push(format!(
+                    "BALANCED COLD-START RESILIENCE: User Cold-Start ({:.1}% NDCG@{} retention) and Item Cold-Start ({:.1}% NDCG@{} retention) exhibit comparable end-to-end resilience.",
+                    usr_rnk_retention, top_k, mov_rnk_retention, top_k
+                ));
+            }
+        }
+
+        // =================================================================
         // EXPORT
         // =================================================================
         let payload = serde_json::json!({
@@ -2785,7 +2983,7 @@ mod post_training_analysis {
         Ok(())
     }
 
-    pub async fn rank_agreement_and_churn(
+    async fn rank_agreement_and_churn(
         top_k: usize,
         user_ids: &[i32],
         retriever_movie_ids: &[i32], // shape: n_users * top_k

@@ -135,3 +135,7 @@ path= "../../test/rust/test/num_candidates_test.rs"
 [[test]]
 name = "post_training_analysis"
 path= "../../test/rust/test/post_training_analysis.rs"
+
+[[test]]
+name = "compare_post_training_analysis"
+path= "../../test/rust/test/compare_post_training_analysis.rs"
