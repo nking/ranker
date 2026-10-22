@@ -6,9 +6,9 @@ from pathlib import Path
 
 ##################################################
 #    initialize tmp_mounts contents
-#       - create tmp_mounts/fake_gcs_server/data
+#       - create tmp_mounts/fake-gcs-server/data
 #       - copy contents from src/test/resources/data
-#         to tmp_mounts/fake_gcs_server/data
+#         to tmp_mounts/fake-gcs-server/data
 #       - set permissions recursively to 755 for tmp_mounts
 #       - create postgres_data dir
 #       - create sqlite-data dir
@@ -95,7 +95,7 @@ def set_permissions_recursive(base_path, dir_perms=0o755, file_perms=0o644):
 
 def init_fake_gcs_dirs():
     tmp_mounts_dir = get_tmp_mounts_dir()
-    data_dir = os.path.join(tmp_mounts_dir, "fake_gcs_server", "data")
+    data_dir = os.path.join(tmp_mounts_dir, "fake-gcs-server", "data")
     data_src_dir = get_data_src_dir()
 
     if DEBUG:

@@ -2,7 +2,7 @@ The data are derivatives of the Movie Lens 1-M dataset, split
 in the recommender_systems project and partitioned by ratings.
 
 The data are written to src/test/resources/data
-and tmp_mounts/fake_gcs_Server/data by
+and tmp_mounts/fake-gcs-server/data by
 the script pre_training_data_copy_to_ranker.sh
 in the github project github.com/nking/recommender_systems.git
 
@@ -16,8 +16,8 @@ the dir data/bi-encoder contains tower-products for versions
 of the trained tower that coincide with the
 model_repositories/saved_model_formats/bi-encoder/<model>/ versions
 
-to load tmp_mounts/fake_gcs_data for the tower products
-cp -f data/bi-encoder/<version>/* to the tmp_mounts/fake_gcs_server/data directory
+to load tmp_mounts/fake-gcs-data for the tower products
+cp -f data/bi-encoder/<version>/* to the tmp_mounts/fake-gcs-server/data directory
 before running tests and zipping it for Kaggle.
 
 user_recommendations*array_records record are a list of
