@@ -992,8 +992,9 @@ mod post_training_analysis {
         assert_eq!(new_top_k_movie_ids.len(), n_cold_users * top_k);
 
         // Build UserHistory with empty (padded) entries for `new_user_ids`
-        let base_user_history = harness.orchestrator._get_user_history();
-        let user_history = UserHistory::add_cold_starts(&base_user_history, &new_user_ids);
+        let user_history = harness.orchestrator._get_user_history();
+        //CAVEAT: make sure that UserHistory.n_users is not used as new catalog nuum users
+
         let searcher = harness.orchestrator._get_searcher();
 
         let new_num_catalog_users = ranker_model_metadata.num_catalog_users + new_user_ids.len();
