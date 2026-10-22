@@ -3,9 +3,10 @@ use std::error::Error;
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-
+use std::process::Command;
 use clap::Parser;
 use polars::prelude::*;
+use plotters::prelude::*;
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -1035,6 +1036,299 @@ pub fn synthesize_comparative_conclusions(
     })
 }
 
+pub fn generate_comparison_graphics(
+    parquet_dir_a: &Path,
+    parquet_dir_b: &Path,
+    summary_dir_a: &Path,
+    summary_dir_b: &Path,
+    output_dir: &Path,
+    label_a: &str,
+    label_b: &str,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    fs::create_dir_all(output_dir)?;
+
+    // 1. Render Lorenz Curve Comparison
+    let l_a_path = summary_dir_a.join("lorenz_curve_top_20_ranker_20.json");
+    let l_b_path = summary_dir_b.join("lorenz_curve_top_20_ranker_20.json");
+    if l_a_path.is_file() && l_b_path.is_file() {
+        let curve_a: Vec<f64> = serde_json::from_reader(BufReader::new(File::open(l_a_path)?))?;
+        let curve_b: Vec<f64> = serde_json::from_reader(BufReader::new(File::open(l_b_path)?))?;
+
+        let file_path = output_dir.join("lorenz_curve_comparison.png");
+        let root = BitMapBackend::new(&file_path, (800, 800)).into_drawing_area();
+        root.fill(&WHITE)?;
+
+        let mut chart = ChartBuilder::on(&root)
+            .caption("Catalog Popularity Concentration (Lorenz Curve)", ("sans-serif", 22).into_font())
+            .margin(25)
+            .x_label_area_size(45)
+            .y_label_area_size(45)
+            .build_cartesian_2d(0f64..100f64, 0f64..1f64)?;
+
+        chart
+            .configure_mesh()
+            .x_name("Cumulative Catalog Items (%)")
+            .y_name("Cumulative Recommendations Share (%)")
+            .draw()?;
+
+        let n = curve_a.len().max(1) as f64;
+        let pts_a: Vec<(f64, f64)> = curve_a
+            .iter()
+            .enumerate()
+            .map(|(i, &y)| ((i as f64 + 1.0) * 100.0 / n, y))
+            .collect();
+        let pts_b: Vec<(f64, f64)> = curve_b
+            .iter()
+            .enumerate()
+            .map(|(i, &y)| ((i as f64 + 1.0) * 100.0 / n, y))
+            .collect();
+
+        chart
+            .draw_series(LineSeries::new(pts_a, &RGBColor(46, 139, 87)))?
+            .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RGBColor(46, 139, 87)))
+            .label(label_a);
+
+        chart
+            .draw_series(LineSeries::new(pts_b, &RGBColor(220, 20, 60)))?
+            .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RGBColor(220, 20, 60)))
+            .label(label_b);
+
+        chart
+            .draw_series(LineSeries::new(vec![(0.0, 0.0), (100.0, 1.0)], &GREY))?
+            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], GREY))
+            .label("Line of Perfect Equality");
+
+        chart
+            .configure_series_legend()
+            .background_style(&WHITE.mix(0.85))
+            .border_style(&BLACK)
+            .draw()?;
+
+        root.present()?;
+    }
+
+    // 2. Load Parquet Data for Stratified & Delta Analysis
+    let strat_file = "stratified_metrics_top_20_ranker_20.parquet";
+    let path_a = parquet_dir_a.join(strat_file);
+    let path_b = parquet_dir_b.join(strat_file);
+
+    if path_a.is_file() && path_b.is_file() {
+        let df_a = ParquetReader::new(File::open(&path_a)?).finish()?;
+        let df_b = ParquetReader::new(File::open(&path_b)?).finish()?;
+
+        if df_a.schema().contains("user_id") && df_b.schema().contains("user_id") {
+            let joined = df_a
+                .lazy()
+                .select([
+                    col("user_id").cast(DataType::Int64),
+                    col("user_tier"),
+                    col("ndcg_global"),
+                    col("recall_global"),
+                ])
+                .inner_join(
+                    df_b.lazy().select([
+                        col("user_id").cast(DataType::Int64),
+                        col("ndcg_global").alias("ndcg_global_b"),
+                        col("recall_global").alias("recall_global_b"),
+                    ]),
+                    col("user_id"),
+                    col("user_id"),
+                )
+                .collect()?;
+
+            if joined.height() > 0 {
+                // Render User Tier Grouped Bar Chart
+                if joined.schema().contains("user_tier") {
+                    let file_path = output_dir.join("user_tier_stratification.png");
+                    let root = BitMapBackend::new(&file_path, (900, 500)).into_drawing_area();
+                    root.fill(&WHITE)?;
+
+                    let mut mean_ndcg_a = [0.0; 3];
+                    let mut mean_ndcg_b = [0.0; 3];
+                    let tier_series = joined.column("user_tier")?.as_materialized_series().cast(&DataType::Int32)?;
+                    let tier_ca = tier_series.i32()?;
+                    let ndcg_a_ca = joined.column("ndcg_global")?.as_materialized_series().cast(&DataType::Float64)?.f64()?;
+                    let ndcg_b_ca = joined.column("ndcg_global_b")?.as_materialized_series().cast(&DataType::Float64)?.f64()?;
+
+                    let mut counts = [0; 3];
+                    for (t_opt, (na_opt, nb_opt)) in tier_ca.iter().zip(ndcg_a_ca.iter().zip(ndcg_b_ca.iter())) {
+                        if let (Some(t), Some(na), Some(nb)) = (t_opt, na_opt, nb_opt) {
+                            if t >= 0 && t <= 2 {
+                                let idx = t as usize;
+                                mean_ndcg_a[idx] += na;
+                                mean_ndcg_b[idx] += nb;
+                                counts[idx] += 1;
+                            }
+                        }
+                    }
+                    for i in 0..3 {
+                        if counts[i] > 0 {
+                            mean_ndcg_a[i] /= counts[i] as f64;
+                            mean_ndcg_b[i] /= counts[i] as f64;
+                        }
+                    }
+
+                    let mut chart = ChartBuilder::on(&root)
+                        .caption(format!("Performance Stratification by User Tier: {} vs {}", label_b, label_a), ("sans-serif", 20).into_font())
+                        .margin(25)
+                        .x_label_area_size(40)
+                        .y_label_area_size(40)
+                        .build_cartesian_2d(0f64..3f64, 0f64..1f64)?;
+
+                    chart.configure_mesh().x_labels(3).x_label_formatter(&|v| match *v as i32 {
+                        0 => "Tier 0 (Light)".to_string(),
+                        1 => "Tier 1 (Medium)".to_string(),
+                        _ => "Tier 2 (Power)".to_string(),
+                    }).y_name("Mean NDCG@20").draw()?;
+
+                    let width = 0.35;
+                    chart.draw_series(
+                        (0..3).map(|i| Rectangle::new([(i as f64 + 0.15, 0.0), (i as f64 + 0.15 + width, mean_ndcg_a[i])], RGBColor(46, 139, 87).filled()))
+                    )?.legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RGBColor(46, 139, 87))).label(label_a);
+
+                    chart.draw_series(
+                        (0..3).map(|i| Rectangle::new([(i as f64 + 0.15 + width, 0.0), (i as f64 + 0.15 + width * 2.0, mean_ndcg_b[i])], RGBColor(220, 20, 60).filled()))
+                    )?.legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RGBColor(220, 20, 60))).label(label_b);
+
+                    chart.configure_series_legend().background_style(&WHITE.mix(0.85)).border_style(&BLACK).draw()?;
+                    root.present()?;
+                }
+            }
+        }
+    }
+
+    println!("[Graphics] Native Plotters charts successfully rendered to: {:?}", output_dir);
+    Ok(())
+}
+
+pub fn generate_comparison_graphics_python_matplot_lib(
+    parquet_dir_a: &Path,
+    parquet_dir_b: &Path,
+    summary_dir_a: &Path,
+    summary_dir_b: &Path,
+    output_dir: &Path,
+    label_a: &str,
+    label_b: &str,
+) {
+    let script_content = format!(
+        r#"
+import json
+from pathlib import Path
+import numpy as np
+import polars as pl
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+parquet_a = Path(r"{0}")
+parquet_b = Path(r"{1}")
+summary_a = Path(r"{2}")
+summary_b = Path(r"{3}")
+out_dir = Path(r"{4}")
+label_a = r"{5}"
+label_b = r"{6}"
+
+out_dir.mkdir(parents=True, exist_ok=True)
+sns.set_theme(style="whitegrid", palette="muted")
+
+# 1. Paired Delta Distributions
+strat_file = "stratified_metrics_top_20_ranker_20.parquet"
+p_a = parquet_a / strat_file
+p_b = parquet_b / strat_file
+
+if p_a.is_file() and p_b.is_file():
+    df_a = pl.read_parquet(p_a)
+    df_b = pl.read_parquet(p_b)
+    if "user_id" in df_a.columns and "user_id" in df_b.columns:
+        joined = df_a.join(df_b, on="user_id", how="inner", suffix="_b")
+        if joined.height > 0:
+            fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+            metrics = [
+                ("ndcg_global", "ndcg_global_b", "NDCG@20 Paired Delta (Candidate - Baseline)"),
+                ("recall_global", "recall_global_b", "Recall@20 Paired Delta (Candidate - Baseline)"),
+            ]
+            for idx, (ca, cb, title) in enumerate(metrics):
+                if ca in joined.columns and cb in joined.columns:
+                    diffs = (joined[cb].cast(pl.Float64) - joined[ca].cast(pl.Float64)).to_numpy()
+                    valid = diffs[np.isfinite(diffs)]
+                    m_diff = float(np.mean(valid))
+                    sns.histplot(valid, ax=axes[idx], kde=True, color="royalblue", bins=30)
+                    axes[idx].axvline(0.0, color="red", linestyle="--", linewidth=1.5, label="Zero Delta")
+                    axes[idx].axvline(m_diff, color="darkorange", linestyle="-", linewidth=2, label=f"Mean: {{m_diff:+.4f}}")
+                    axes[idx].set_title(title, fontsize=12, fontweight="bold")
+                    axes[idx].set_xlabel("Delta Value", fontsize=10)
+                    axes[idx].set_ylabel("User Count", fontsize=10)
+                    axes[idx].legend(frameon=True, fontsize=9)
+            plt.suptitle(f"Paired Per-User Delta Distribution: {{label_b}} vs {{label_a}}", fontsize=14, fontweight="bold", y=1.02)
+            plt.tight_layout()
+            plt.savefig(out_dir / "paired_deltas_distribution.png", dpi=300, bbox_inches="tight")
+            plt.close()
+
+        # 2. User Tier Stratification
+        if "user_tier" in joined.columns:
+            rows = []
+            for t_val in (0, 1, 2):
+                sub = joined.filter(pl.col("user_tier") == t_val)
+                if sub.height > 0:
+                    for m_col, m_lbl in [("ndcg_global", "NDCG@20"), ("recall_global", "Recall@20")]:
+                        mA = sub[m_col].cast(pl.Float64).to_numpy()
+                        mB_vals = sub[f"{{m_col}}_b"].cast(pl.Float64).to_numpy()
+                        rows.append({{ "Tier": f"Tier {{t_val}}", "Metric": m_lbl, "Model": label_a, "Value": float(np.nanmean(mA)) }})
+                        rows.append({{ "Tier": f"Tier {{t_val}}", "Metric": m_lbl, "Model": label_b, "Value": float(np.nanmean(mB_vals)) }})
+            if rows:
+                import pandas as pd
+                df_plot = pd.DataFrame(rows)
+                plt.figure(figsize=(10, 5))
+                sns.barplot(data=df_plot, x="Tier", y="Value", hue="Model", palette="Set2")
+                plt.title(f"Performance Stratification by User Tier: {{label_b}} vs {{label_a}}", fontsize=13, fontweight="bold")
+                plt.ylabel("Metric Score", fontsize=11)
+                plt.xlabel("User Interaction Tier", fontsize=11)
+                plt.legend(title="Model Run", frameon=True)
+                plt.tight_layout()
+                plt.savefig(out_dir / "user_tier_stratification.png", dpi=300, bbox_inches="tight")
+                plt.close()
+
+# 3. Lorenz Curve Comparison
+l_a = summary_a / "lorenz_curve_top_20_ranker_20.json"
+l_b = summary_b / "lorenz_curve_top_20_ranker_20.json"
+if l_a.is_file() and l_b.is_file():
+    with open(l_a, "r", encoding="utf-8") as fa, open(l_b, "r", encoding="utf-8") as fb:
+        c_a = json.load(fa)
+        c_b = json.load(fb)
+    if isinstance(c_a, list) and isinstance(c_b, list):
+        plt.figure(figsize=(6, 6))
+        x_vals = np.linspace(0, 100, len(c_a))
+        plt.plot(x_vals, [0] + c_a[:-1] if len(c_a) > 0 else c_a, label=label_a, linewidth=2.5, color="forestgreen")
+        plt.plot(x_vals, [0] + c_b[:-1] if len(c_b) > 0 else c_b, label=label_b, linewidth=2.5, color="crimson")
+        plt.plot([0, 100], [0, 1], linestyle="--", color="gray", label="Line of Perfect Equality", linewidth=1.5)
+        plt.title("Catalog Popularity Concentration (Lorenz Curve)", fontsize=13, fontweight="bold")
+        plt.xlabel("Cumulative Catalog Items (%)", fontsize=11)
+        plt.ylabel("Cumulative Recommendations Share (%)", fontsize=11)
+        plt.legend(frameon=True, loc="upper left")
+        plt.tight_layout()
+        plt.savefig(out_dir / "lorenz_curve_comparison.png", dpi=300, bbox_inches="tight")
+        plt.close()
+
+print("[Graphics] Comparison charts rendered successfully.")
+"#,
+        parquet_dir_a.display(),
+        parquet_dir_b.display(),
+        summary_dir_a.display(),
+        summary_dir_b.display(),
+        output_dir.display(),
+        label_a,
+        label_b,
+    );
+
+    let script_path = output_dir.join("generate_plots.py");
+    if let Ok(mut file) = File::create(&script_path) {
+        use std::io::Write;
+        let _ = file.write_all(script_content.as_bytes());
+        let _ = Command::new("python3").arg(&script_path).status();
+    }
+}
+
 // ==============================================================================
 // PUBLIC ORCHESTRATOR & CLI / TEST ENTRYPOINTS
 // ==============================================================================
@@ -1084,6 +1378,17 @@ pub fn compare_post_training_runs(args: &CompareArgs) -> Result<(), Box<dyn Erro
         args.alpha,
     );
 
+    println!("[4/4] Generating publication-ready comparison graphics...");
+    generate_comparison_graphics(
+        &args.parquet_dir_a,
+        &args.parquet_dir_b,
+        &args.summary_dir_a,
+        &args.summary_dir_b,
+        &args.output_dir,
+        &label_a,
+        &label_b,
+    );
+
     let metrics_payload = json!({
         "metadata": {
             "baseline_a": {
@@ -1130,6 +1435,7 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 #[cfg(test)]
 mod compare_post_training_analysis {
     use super::*;
+    use plotters::prelude::*;
 
     /// Example test runner (similar to `test_analysis` in `post_training_analysis.rs`)
     //#[test]
