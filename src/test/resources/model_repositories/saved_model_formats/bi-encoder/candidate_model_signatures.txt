@@ -1,8 +1,8 @@
-2026-10-16 17:08:21.933019: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
-2026-10-16 17:08:22.076995: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+2026-10-22 10:22:46.016533: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2026-10-22 10:22:46.062619: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
 To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2026-10-16 17:08:24.940822: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
-2026-10-16 17:08:28.062685: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+2026-10-22 10:22:47.588918: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2026-10-22 10:22:49.078807: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
 
 MetaGraphDef with tag-set: 'serve' contains the following SignatureDefs:
 
@@ -28,7 +28,7 @@ signature_def['serving_default']:
   The given SavedModel SignatureDef contains the following output(s):
     outputs['outputs'] tensor_info:
         dtype: DT_FLOAT
-        shape: (-1, 32)
+        shape: (-1, 16)
         name: StatefulPartitionedCall_3:0
   Method name is: tensorflow/serving/predict
 
@@ -41,10 +41,10 @@ signature_def['serving_default_examples']:
   The given SavedModel SignatureDef contains the following output(s):
     outputs['outputs'] tensor_info:
         dtype: DT_FLOAT
-        shape: (-1, 32)
+        shape: (-1, 16)
         name: StatefulPartitionedCall_4:0
   Method name is: tensorflow/serving/predict
-The MetaGraph with tag set ['serve'] contains the following ops: {'HashTableV2', 'RaggedTensorToTensor', 'StatefulPartitionedCall', 'FloorDiv', 'Prod', 'FloorMod', 'ConcatV2', 'Cumsum', 'OneHot', 'Max', 'ExpandDims', 'Rsqrt', 'Squeeze', 'PlaceholderWithDefault', 'RealDiv', 'ShardedFilename', 'Less', 'MatMul', 'SelectV2', 'BroadcastTo', 'UnsortedSegmentSum', 'Fill', 'VarIsInitializedOp', 'Identity', 'Cumprod', 'Shape', 'Minimum', 'Square', 'NoOp', 'VarHandleOp', 'Elu', 'Pack', 'DisableCopyOnRead', 'SaveV2', 'GatherV2', 'Select', 'LookupTableFindV2', 'StaticRegexReplace', 'SquaredDifference', 'Reshape', 'LookupTableImportV2', 'Mean', 'ReadVariableOp', 'Cast', 'StaticRegexFullMatch', 'AddV2', 'ParseExampleV2', 'Sub', 'Maximum', 'NotEqual', 'Neg', 'StridedSlice', 'Tile', 'RestoreV2', 'MergeV2Checkpoints', 'StringJoin', 'Range', 'Where', 'Sum', 'Const', 'StopGradient', 'Transpose', 'Mul', 'Placeholder', 'AssignVariableOp', 'StringSplitV2'}
+The MetaGraph with tag set ['serve'] contains the following ops: {'Fill', 'Maximum', 'PlaceholderWithDefault', 'LookupTableFindV2', 'Squeeze', 'Cumsum', 'UnsortedSegmentSum', 'ReadVariableOp', 'RaggedTensorToTensor', 'Less', 'ParseExampleV2', 'Tile', 'Max', 'StaticRegexFullMatch', 'Cast', 'Reshape', 'DisableCopyOnRead', 'RestoreV2', 'StridedSlice', 'BroadcastTo', 'Cumprod', 'Mean', 'Select', 'AssignVariableOp', 'Mul', 'Square', 'Range', 'FloorDiv', 'NotEqual', 'Elu', 'GatherV2', 'Identity', 'NoOp', 'OneHot', 'StringSplitV2', 'StopGradient', 'RealDiv', 'SquaredDifference', 'Sum', 'Placeholder', 'LookupTableImportV2', 'Where', 'VarIsInitializedOp', 'FloorMod', 'Rsqrt', 'Neg', 'MergeV2Checkpoints', 'ExpandDims', 'BatchMatMulV2', 'HashTableV2', 'Minimum', 'Sub', 'Shape', 'SaveV2', 'MatMul', 'Const', 'SelectV2', 'StaticRegexReplace', 'StringJoin', 'ShardedFilename', 'Pack', 'VarHandleOp', 'ConcatV2', 'StatefulPartitionedCall', 'AddV2', 'Prod'}
 
 Concrete Functions:
   Function Name: 'serving_default'
@@ -52,7 +52,7 @@ Concrete Functions:
       Callable with:
         Argument #1
           DType: dict
-          Value: {'movie_id': TensorSpec(shape=(None, 1), dtype=tf.int64, name='movie_id'), 'genres': TensorSpec(shape=(None, 1), dtype=tf.string, name='genres'), }
+          Value: {'genres': TensorSpec(shape=(None, 1), dtype=tf.string, name='genres'), 'movie_id': TensorSpec(shape=(None, 1), dtype=tf.int64, name='movie_id'), }
 
   Function Name: 'serving_default_examples'
     Option #1
