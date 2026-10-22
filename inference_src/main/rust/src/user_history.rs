@@ -6,7 +6,7 @@ use arrow_array::{Int32Array, Int64Array};
 use futures::stream::StreamExt;
 use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::arrow::async_reader::ParquetRecordBatchStreamBuilder;
-use std::cmp::min;
+use std::cmp::{min};
 use std::path::Path;
 use futures::future::join_all;
 use crate::util;
@@ -18,18 +18,38 @@ pub struct UserMapEntry {
     pub timestamps: Vec<i64>,
 }
 
+/// Stores per-user interaction histories in flattened dense row-major arrays
+/// of shape `(n_users + 1, max_history)` where outer row index `i` maps directly
+/// to `user_id = i as i32`.
+///
+/// - Row `0` (`0..max_history`) is reserved for `user_id = 0` and out-of-range
+///   cold-start user IDs (`<= 0` or `> n_users`), and is permanently filled with
+///   `pad_value` (-1) and `ts_pad_value` (2524608000).
+/// - Valid catalog users `1..=n_users` index directly into row `user_id as usize`.
 #[derive(Debug, Clone)]
 pub struct UserHistory {
-    pub user_ids : Vec<i32>,
-    pub movie_ids : Vec<i32>,
-    pub ratings : Vec<i32>,
-    pub timestamps : Vec<i64>,
-    pub max_history : usize,
-    pub pad_value : i32,
-    pub ts_pad_value : i64
+    pub movie_ids: Vec<i32>,
+    pub ratings: Vec<i32>,
+    pub timestamps: Vec<i64>,
+    pub n_users: usize,
+    pub max_history: usize,
+    pub pad_value: i32,
+    pub ts_pad_value: i64,
 }
 
 impl UserHistory {
+    /// Maps a requested `user_id` to its dense row index in `0..=self.n_users`.
+    /// Any `user_id <= 0` or `user_id > self.n_users` is remapped to row `0`
+    /// (the permanent padded sentinel row).
+    #[inline]
+    pub fn resolve_user_idx(&self, user_id: i32) -> usize {
+        if user_id >= 1 && (user_id as usize) <= self.n_users {
+            user_id as usize
+        } else {
+            0
+        }
+    }
+
     /*
      * Retrieves up to `requested_max_hist` movies and ratings for given users where
      * the movie's timestamp is strictly less than the provided target timestamp.
@@ -43,52 +63,48 @@ impl UserHistory {
         timestamps: &[i64],
         requested_max_hist: usize
     ) -> (Vec<i32>, Vec<i32>) {
-
         let n_requests = user_ids.len();
 
-        // Pre-allocate the output arrays filled entirely with the pad_value.
-        // This instantly replaces the need for np.full(...)
+        // Pre-allocate output arrays filled with pad_value (-1)
         let mut ret_movie_ids = vec![self.pad_value; n_requests * requested_max_hist];
-        let mut ret_ratings : Vec<i32> = vec![self.pad_value; n_requests * requested_max_hist];
+        let mut ret_ratings: Vec<i32> = vec![self.pad_value; n_requests * requested_max_hist];
 
-        // Iterate through each requested user and their target timestamp
+        if self.max_history == 0 || requested_max_hist == 0 {
+            return (ret_movie_ids, ret_ratings);
+        }
+
+        // Iterate through each requested user_id and target timestamp
         for (i, (&target_uid, &target_ts)) in user_ids.iter().zip(timestamps.iter()).enumerate() {
+            // Remap out-of-range or 0 user_ids to row 0 (padded sentinel row)
+            let user_idx = self.resolve_user_idx(target_uid);
 
-            // np.searchsorted -> Rust's native binary_search
-            if let Ok(user_idx) = self.user_ids.binary_search(&target_uid) {
+            let start_idx = user_idx * self.max_history;
+            let end_idx = start_idx + self.max_history;
 
-                // Calculate where this specific user's data starts in our flattened arrays
-                let start_idx = user_idx * self.max_history;
-                let end_idx = start_idx + self.max_history;
+            let user_movies = &self.movie_ids[start_idx..end_idx];
+            let user_ratings = &self.ratings[start_idx..end_idx];
+            let user_timestamps = &self.timestamps[start_idx..end_idx];
 
-                // Create lightweight slices (views) into the data
-                let user_movies = &self.movie_ids[start_idx..end_idx];
-                let user_ratings = &self.ratings[start_idx..end_idx];
-                let user_timestamps = &self.timestamps[start_idx..end_idx];
+            let mut count = 0;
+            let out_offset = i * requested_max_hist;
 
-                let mut count = 0;
-                let out_offset = i * requested_max_hist;
+            for j in 0..self.max_history {
+                let ts = user_timestamps[j];
 
-                //  Filter and extract.
-                // Because Rust is compiled, this loop is vastly faster than NumPy's mask operations.
-                for j in 0..self.max_history {
-                    let ts = user_timestamps[j];
+                // Stop early if we hit padding (including row 0 at j=0) or collected enough history
+                if ts == self.ts_pad_value || count >= requested_max_hist {
+                    break;
+                }
 
-                    // Stop early if we hit padding or if we've collected enough history
-                    if ts == self.ts_pad_value || count >= requested_max_hist {
-                        break;
-                    }
-
-                    // Apply the timestamp mask condition
-                    if ts < target_ts {
-                        ret_movie_ids[out_offset + count] = user_movies[j];
-                        ret_ratings[out_offset + count] = user_ratings[j];
-                        count += 1;
-                    }
+                // Timestamps are sorted ascending; any ts >= target_ts means subsequent entries are also >= target_ts
+                if ts < target_ts {
+                    ret_movie_ids[out_offset + count] = user_movies[j];
+                    ret_ratings[out_offset + count] = user_ratings[j];
+                    count += 1;
+                } else {
+                    break;
                 }
             }
-            // If binary_search returns Err(), the user wasn't found.
-            // We do nothing, leaving that row in the output safely filled with pad_values.
         }
 
         debug_assert!(ret_movie_ids.len() == n_requests * requested_max_hist);
@@ -102,119 +118,35 @@ impl UserHistory {
         user_ids: &[i32],
         timestamps: &[i64],
     ) -> Vec<usize> {
-
         let n_requests = user_ids.len();
+        let mut ret_counts: Vec<usize> = vec![0; n_requests];
 
-        // Pre-allocate the output arrays filled entirely with 0's
-        let mut ret_counts : Vec<usize> = vec![0; n_requests];
+        if self.max_history == 0 {
+            return ret_counts;
+        }
 
-        // Iterate through each requested user and their target timestamp
         for (i, (&target_uid, &target_ts)) in user_ids.iter().zip(timestamps.iter()).enumerate() {
+            // Remap out-of-range or 0 user_ids to row 0 (padded sentinel row)
+            let user_idx = self.resolve_user_idx(target_uid);
 
-            // np.searchsorted -> Rust's native binary_search
-            if let Ok(user_idx) = self.user_ids.binary_search(&target_uid) {
+            let start_idx = user_idx * self.max_history;
+            let end_idx = start_idx + self.max_history;
+            let user_timestamps = &self.timestamps[start_idx..end_idx];
 
-                // Calculate where this specific user's data starts in our flattened arrays
-                let start_idx = user_idx * self.max_history;
-                let end_idx = start_idx + self.max_history;
-
-                // Create lightweight slice (view) into the data
-                let user_timestamps = &self.timestamps[start_idx..end_idx];
-
-                // rightmost index where user_timestamps <= target_ts
-
-                if user_timestamps.is_empty()
-                    || user_timestamps[0] == self.ts_pad_value
-                    || user_timestamps[0] > target_ts
-                {
-                    continue;
-                }
-
-                let count = util::ceiling_search(user_timestamps, target_ts);
-
-                ret_counts[i] = count + 1;
+            // Row 0 and empty users have user_timestamps[0] == self.ts_pad_value and exit immediately
+            if user_timestamps.is_empty()
+                || user_timestamps[0] == self.ts_pad_value
+                || user_timestamps[0] > target_ts
+            {
+                continue;
             }
+
+            let count = util::ceiling_search(user_timestamps, target_ts);
+            ret_counts[i] = count + 1;
         }
 
         ret_counts
     }
-
-    /// Creates and returns a new `UserHistory` containing all existing user histories
-    /// plus empty (padded) history slots for `new_user_ids`, maintaining sorted `user_ids`
-    /// order for binary search.
-    pub fn add_cold_starts(existing: &UserHistory, new_user_ids: &[i32]) -> UserHistory {
-
-        let max_hist = existing.max_history;
-
-        // Sort, deduplicate, and exclude any IDs already present in `existing`
-        let mut added_uids: Vec<i32> = new_user_ids
-            .iter()
-            .copied()
-            .filter(|uid| existing.user_ids.binary_search(uid).is_err())
-            .collect();
-        added_uids.sort_unstable();
-        added_uids.dedup();
-
-        let n_existing = existing.user_ids.len();
-        let n_added = added_uids.len();
-        let n_total = n_existing + n_added;
-
-        // Pre-allocate flattened buffers filled with pad values.
-        //    Cold-start users need no further writes to movie_ids/ratings/timestamps.
-        let mut user_ids = Vec::with_capacity(n_total);
-        let mut movie_ids = vec![existing.pad_value; n_total * max_hist];
-        let mut ratings = vec![existing.pad_value; n_total * max_hist];
-        let mut timestamps = vec![existing.ts_pad_value; n_total * max_hist];
-
-        // Two-pointer sorted merge of `existing.user_ids` and `added_uids`
-        let mut i = 0; // index into `existing`
-        let mut j = 0; // index into `added_uids`
-
-        while i < n_existing || j < n_added {
-            let take_existing = if i < n_existing && j < n_added {
-                existing.user_ids[i] < added_uids[j]
-            } else {
-                i < n_existing
-            };
-
-            let out_idx = user_ids.len();
-
-            if take_existing {
-                user_ids.push(existing.user_ids[i]);
-
-                if max_hist > 0 {
-                    let src_start = i * max_hist;
-                    let src_end = src_start + max_hist;
-                    let dst_start = out_idx * max_hist;
-                    let dst_end = dst_start + max_hist;
-
-                    movie_ids[dst_start..dst_end]
-                        .copy_from_slice(&existing.movie_ids[src_start..src_end]);
-                    ratings[dst_start..dst_end]
-                        .copy_from_slice(&existing.ratings[src_start..src_end]);
-                    timestamps[dst_start..dst_end]
-                        .copy_from_slice(&existing.timestamps[src_start..src_end]);
-                }
-                i += 1;
-            } else {
-                // Cold-start user: buffers at `out_idx * max_hist` are already filled
-                // with `pad_value` and `ts_pad_value`.
-                user_ids.push(added_uids[j]);
-                j += 1;
-            }
-        }
-
-        UserHistory {
-            user_ids,
-            movie_ids,
-            ratings,
-            timestamps,
-            max_history: max_hist,
-            pad_value: existing.pad_value,
-            ts_pad_value: existing.ts_pad_value,
-        }
-    }
-    
 }
 
 
@@ -225,47 +157,22 @@ pub async fn _testable_build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32,
     (map, longest_history)
 }
 
-/// given the uris for the ratings files, creates a hashmap with keys of user ids
-/// and values of UserMapEntry where the vectors in UserMapEntry are sorted
-/// by timestamps.
-///
-/// # Arguments
-///
-/// * `ratings_uris`: uris to the parquet files containing the user_id, movie_id, rating, timestamp entries
-///
-/// returns: (hashmap, max_history_length) as (HashMap<i32, UserMapEntry, FxBuildHasher, Global>, usize)  where
-/// the  vectors in UserMapEntry are sorted by timestamps
-///
-/// # Examples
-///
-/// ```
-///
-/// ```
+/// Given the URIs for the ratings files, creates a hashmap with keys of 1-based user_ids
+/// and values of `UserMapEntry` where the vectors in `UserMapEntry` are sorted
+/// ascending by timestamp.
 pub async fn build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEntry>, usize) {
-
-    // use semaphore to prevent memory swap thrashing from too many threads
     let semaphore = Arc::new(Semaphore::new(4));
-
     let mut tasks = Vec::new();
 
-    // The Map Phase: Spawn a concurrent task for each file
     for ratings_uri in ratings_uris {
-
         let _path = Path::new(ratings_uri);
-        // Resolve to absolute path
-        // If the path is relative, join it with current_dir to get a real location.
         let absolute_path = std::fs::canonicalize(_path)
             .expect("Failed to canonicalize path: File does not exist or access denied");
-
-        //println!("DEBUG: Attempting to access file at: {:?}", absolute_path);
 
         let sem = semaphore.clone();
 
         let task = tokio::spawn(async move {
-
             let _permit = sem.acquire_owned().await.unwrap();
-
-            // Each task gets its own independent HashMap (no locking needed!)
             let mut local_map: FxHashMap<i32, UserMapEntry> = FxHashMap::default();
 
             let (storage, path) = util::parse_uri(&absolute_path.to_str().expect("Path is not valid UTF-8"));
@@ -301,17 +208,14 @@ pub async fn build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEn
                 }
             }
 
-            // Return the populated map from this specific task
             local_map
         });
 
         tasks.push(task);
     }
 
-    //  Wait for all files to be downloaded and parsed CONCURRENTLY
     let results = join_all(tasks).await;
 
-    // The Reduce Phase: Merge all local maps into the user_history map
     let mut user_history_map: FxHashMap<i32, UserMapEntry> = FxHashMap::default();
 
     for res in results {
@@ -324,14 +228,12 @@ pub async fn build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEn
                 timestamps: Vec::new(),
             });
 
-            // .append() is highly optimized in Rust for moving data between vectors
             master_entry.movie_ids.append(&mut local_entry.movie_ids);
             master_entry.ratings.append(&mut local_entry.ratings);
             master_entry.timestamps.append(&mut local_entry.timestamps);
         }
     }
 
-    // Sort parallel arrays by timestamp
     let mut max_len: usize = 0;
 
     for entry in user_history_map.values_mut() {
@@ -351,91 +253,75 @@ pub async fn build_map_async(ratings_uris: &[&str]) -> (FxHashMap<i32, UserMapEn
     (user_history_map, max_len)
 }
 
-/// given the hashmap of user histories and a max history to extract,
-/// creates arrays of length max_history ordered by timestamps
-///
-/// # Arguments
-///
-/// * `lookup`: the hashmap of user histories
-/// * `max_history`:the length of most recent histories to extract per user.
-/// * `pad_value`:  value for an empty movie_id element which happens when the user's true history
-///                 is less than max_history
-/// * `ts_pad_value`: value for an empty timestamp element.  ideally, this should be far into
-///                 the future
-///
-/// returns:     (user_ids, movie_ids, ratings, timestamps)
-///               as (Vec<i32, Global>, Vec<i32, Global>, Vec<i32, Global>, Vec<i64, Global>)
-///               where user_ids is length num_users,
-///               movie_ids, ratings, and timestamps are all length  n_users * max_history.
-///               each user's range of movie_ids, ratings, and timestamps are ordered by
-///               timestamp are the max_history most recent of the user's history
-///               and when user's history is shorted than max_history the Vectors are
-///               padded with given pad_value or ts_pad_value.
-///
-/// # Examples
-///
+/// Given the hashmap of user histories and a `max_history` length to extract,
+/// creates dense flattened arrays of length `(n_users + 1) * max_history` indexed
+/// directly by `user_id as usize`, where row `0` is the permanent padded sentinel row
+/// and rows `1..=n_users` hold each user's up to `max_history` most recent interactions.
 fn prepare_user_data(
     lookup: &FxHashMap<i32, UserMapEntry>,
     max_history: usize,
     pad_value: i32,
     ts_pad_value: i64,
-) -> (Vec<i32>, Vec<i32>, Vec<i32>, Vec<i64>) {
-    let n_users = lookup.len();
+) -> (Vec<i32>, Vec<i32>, Vec<i64>, usize) {
+    let max_uid = lookup.keys().copied().max().unwrap_or(0);
+    let n_users = if max_uid > 0 { max_uid as usize } else { 0 };
+    let total_rows = n_users + 1;
 
-    // Sort entries by user_id first.
-    // This allows us to fill the final arrays in the correct sorted order,
-    // avoiding the need to sort the giant buffers later.
-    let mut items: Vec<(&i32, &UserMapEntry)> = lookup.iter().collect();
-    items.sort_by_key(|(uid, _)| **uid);
+    // Pre-allocate flattened 2D arrays of shape (n_users + 1, max_history).
+    // Row 0 (and any user_id in 1..=n_users absent from `lookup`) stays filled with pad_value / ts_pad_value.
+    let mut movie_ids: Vec<i32> = vec![pad_value; total_rows * max_history];
+    let mut ratings: Vec<i32> = vec![pad_value; total_rows * max_history];
+    let mut timestamps: Vec<i64> = vec![ts_pad_value; total_rows * max_history];
 
-    // Pre-allocate flattened 2D arrays.
-    // Memory layout: [user0_col0, user0_col1, ... user1_col0, user1_col1, ...]
-    let mut user_ids : Vec<i32> = Vec::with_capacity(n_users);
-    let mut movie_ids: Vec<i32> = vec![pad_value; n_users * max_history];
-    let mut ratings: Vec<i32> = vec![pad_value; n_users * max_history];
-    let mut timestamps: Vec<i64> = vec![ts_pad_value; n_users * max_history];
-
-    for (i, (&uid, entry)) in items.into_iter().enumerate() {
-        user_ids.push(uid);
+    for (&uid, entry) in lookup.iter() {
+        assert!(
+            uid >= 1,
+            "Expected 1-based user_id >= 1 (index 0 is reserved for padded sentinel), found user_id={}",
+            uid
+        );
+        let user_idx = uid as usize;
 
         let history_len = entry.movie_ids.len();
         let actual_history = min(history_len, max_history);
 
-        // Calculate the starting index of the most recent history in the user's data
-        let start_idx = history_len - actual_history;
+        if actual_history > 0 {
+            let start_idx = history_len - actual_history;
+            let offset = user_idx * max_history;
 
-        // Calculate the row offset in our flattened array
-        let offset = i * max_history;
-
-        // Efficiently copy the slice using memcpy
-        movie_ids[offset..offset + actual_history]
-            .copy_from_slice(&entry.movie_ids[start_idx..]);
-
-        ratings[offset..offset + actual_history]
-            .copy_from_slice(&entry.ratings[start_idx..]);
-
-        timestamps[offset..offset + actual_history]
-            .copy_from_slice(&entry.timestamps[start_idx..]);
+            movie_ids[offset..offset + actual_history]
+                .copy_from_slice(&entry.movie_ids[start_idx..]);
+            ratings[offset..offset + actual_history]
+                .copy_from_slice(&entry.ratings[start_idx..]);
+            timestamps[offset..offset + actual_history]
+                .copy_from_slice(&entry.timestamps[start_idx..]);
+        }
     }
 
-    (user_ids, movie_ids, ratings, timestamps)
+    (movie_ids, ratings, timestamps, n_users)
 }
 
-
-/// build the UserHistory from the given list of uris for the ratings parquet files
-/// # Arguments
-/// * `ratings_uris` -  vector of uris for ratings parquet files for building UserHistory hashmap
+/// Builds the dense `UserHistory` from the given list of URIs for the ratings parquet files.
 pub async fn build_user_history(ratings_uris: &[&str], max_history: usize) -> UserHistory {
+    let (map, longest_history) = build_map_async(ratings_uris).await;
 
-    // Block the thread until the map is built and sorted
-    let (map, longest_history)  = build_map_async(&ratings_uris).await;
+    println!(
+        "map length={}, longest history read has length={}",
+        map.len(),
+        longest_history
+    );
 
-    print!("map length={}, longest history read has length={}\n", map.len(), longest_history);
+    let pad_value: i32 = -1;
+    let ts_pad_value: i64 = 2524608000; // year 2050
+    let (movie_ids, ratings, timestamps, n_users) =
+        prepare_user_data(&map, max_history, pad_value, ts_pad_value);
 
-    let pad_value : i32 = -1;
-    let ts_pad_value: i64 = 2524608000; //year 2050
-    let (user_ids, movie_ids, ratings, timestamps)
-        = prepare_user_data(&map, max_history, pad_value, ts_pad_value);
-
-    UserHistory { user_ids, movie_ids, ratings, timestamps, max_history, pad_value, ts_pad_value}
+    UserHistory {
+        movie_ids,
+        ratings,
+        timestamps,
+        n_users,
+        max_history,
+        pad_value,
+        ts_pad_value,
+    }
 }
