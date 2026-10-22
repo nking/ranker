@@ -908,7 +908,7 @@ def _fake_gcs_server_connection(config):
     """
     #TODO: this could be improved to take a test read and test write uri in config
     from movie_lens_ranker.util import read_movies_array_record
-    gs_uri = "gs://data/movies-00000-of-00001.array_record"
+    gs_uri = "gs://data/movies.array_record"
     emb = read_movies_array_record(gs_uri, batch_size=1024)
     if emb is None or len(emb) == 0:
         raise ConnectionError(f"could not read from gcs server: {gs_uri}")

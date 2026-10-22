@@ -54,7 +54,7 @@ class TestDataLoading(unittest.TestCase):
             f"src/test/resources/data/bi-encoder/{two_tower_version}/user_emb-00000-of-00001.array_record")
         
         self.movie_ids_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/movies-00000-of-00001.array_record")
+            "src/test/resources/data/movies.array_record")
 
     def test_read_embeddings(self):
         

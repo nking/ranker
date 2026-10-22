@@ -136,7 +136,7 @@ def main(_):
             "latest_checkpoint_uri": "gs://checkpoint-bucket/latest",
             "best_checkpoint_uri": "gs://checkpoint-bucket/best",
             
-            "movies_uri": "gs://data/movies-00000-of-00001.array_record",
+            "movies_uri": "gs://data/movies.array_record",
             "recommendations_uri": "gs://data/recommended_movies.array_record",
             "recommendations_ts_uri": "gs://data/recommended_movies_timestamps.array_record",
             

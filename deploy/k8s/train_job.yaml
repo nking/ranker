@@ -24,7 +24,7 @@ spec:
       # for output hparams and metrics, use gs://hpo-results-bucket/<project_id>/<study_name>/<tune|train|test>/hpo_<hparams|metrics>.json
       - "--output_hyperparams_uri=gs://hpo-results-bucket/tune-kind-01/GraphRanker_tuning_kind/tune/hparams.json"
       - "--output_metrics_uri=gs://hpo-results-bucket/tune-kind-01/GraphRanker_tuning_kind/tune/metrics.json"
-      - "--movies_uri=gs://data/movies-00000-of-00001.array_record"
+      - "--movies_uri=gs://data/movies.array_record"
       - "--recommendations_uri=gs://data/recommended_movies.array_record"
       - "--recommendations_ts_uri=gs://data/recommended_movies_timestamps.array_record"
       - "--ratings_train_liked_uri=gs://data/small/ratings_train_liked.array_record"

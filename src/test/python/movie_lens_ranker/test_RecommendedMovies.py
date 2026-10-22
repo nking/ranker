@@ -38,7 +38,7 @@ class TestRecommendedMovies(unittest.TestCase):
             f"src/test/resources/data/bi-encoder/{two_tower_version}/user_emb-00000-of-00001.array_record")
         
         self.movie_ids_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/movies-00000-of-00001.array_record")
+            "src/test/resources/data/movies.array_record")
         
         # (user_id, int array of movie_ids as a tuple) is full catalog for each user, no history subtracted
         self.recommendations_uri = os.path.join(get_project_dir(),
@@ -48,7 +48,7 @@ class TestRecommendedMovies(unittest.TestCase):
         
         # (movie_id, title, genres)
         self.movies_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/movies-00000-of-00001.array_record")
+            "src/test/resources/data/movies.array_record")
 
         self.num_users, self.num_movies, self.emb_len = get_num_users_movies(
             user_embeddings_uri=self.user_embeddings_uri,

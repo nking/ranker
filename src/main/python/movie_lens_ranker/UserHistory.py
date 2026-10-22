@@ -1,4 +1,4 @@
-from typing import Union, List, Tuple
+from typing import Union, List, Tuple, Optional
 
 import numpy as np
 from array_record.python import array_record_module
@@ -7,131 +7,180 @@ from movie_lens_ranker.util import build_history_lookup
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-class UserHistory (object):
-    def __init__(self, ratings_uri_list: Union[str, List[str]], max_history:int):
+
+class UserHistory(object):
+    """
+    Stores per-user interaction histories (movie_ids, ratings, timestamps) in dense 2D arrays
+    of shape `(n_users + 1, max_history)` where outer row index `i` corresponds directly
+    to `user_id = i`.
+
+    - Row `0` (`user_id == 0`) is a permanent OOV / cold-start sentinel row filled with
+      `self.pad_value` (-1) and `self.ts_pad_value` (2524608000).
+    - Any request with `user_id <= 0` or `user_id > self.n_users` is remapped to index `0`,
+      automatically yielding an empty (padded) history in O(1) time.
+    """
+
+    def __init__(
+        self,
+        ratings_uri_list: Union[str, List[str]],
+        max_history: int,
+        n_users: Optional[int] = None,
+    ):
         self.pad_value = -1
-        self.ts_pad_value = 2524608000 #year 2050
+        self.ts_pad_value = 2524608000  # year 2050
         self.max_history = max_history
-        #each user's the movie_ids, ratings and timestamps is already sorted by timestamp
-        self.user_ids, self.movie_ids, self.ratings, self.timestamps = self._load_history(ratings_uri_list)
-        
-        
-    def _load_history(self, ratings_uri_list: Union[str, List[str]]) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        
-        #buildnumpy vectors, making padded lists of length fixed_history_length for movies, ratings, and timestamps
-        # lookup is tuple of dictionary of { user_id: {ts, movie_id, rating} } in which ts, movie_id
-        #     and rating values are numpy arrays sorted by timestamp
+        self.n_users = n_users
+        # Outer row index is `user_id` directly (0..=self.n_users), with row 0 as padded sentinel.
+        self.movie_ids, self.ratings, self.timestamps = self._load_history(
+            ratings_uri_list, n_users=n_users
+        )
+
+    def _load_history(
+        self,
+        ratings_uri_list: Union[str, List[str]],
+        n_users: Optional[int] = None,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Builds dense 2D NumPy arrays of shape `(self.n_users + 1, self.max_history)` for
+        movie_ids, ratings, and timestamps indexed directly by `user_id`.
+        Row 0 and any `user_id` absent from `ratings_uri_list` remain populated with
+        `self.pad_value` (-1) and `self.ts_pad_value`.
+        """
         lookup, max_history = build_history_lookup(ratings_uri_list)
-        logging.info(f"max of users' histories = {max_history}.  self.max_history={self.max_history}")
-        
-        n_users = len(lookup)
-        
-        #NOTE: results are sorted by timestamp
-        user_ids = []
-        movie_ids = np.full((n_users, self.max_history), self.pad_value, dtype=np.int32)
-        ratings = np.full((n_users, self.max_history), self.pad_value, dtype=np.int32)
-        timestamps = np.full((n_users, self.max_history), self.ts_pad_value, dtype=np.int64)
-        
-        for i, user_id in enumerate(lookup.keys()):
-            user_ids.append(user_id)
-            #these are ordered by timestamp already:
-            user_ts, user_movies, user_ratings = lookup[user_id]
-            
+        logging.info(
+            f"max of users' histories = {max_history}. self.max_history={self.max_history}"
+        )
+
+        max_uid = int(max(lookup.keys(), default=0))
+        total_users = max(max_uid, int(n_users) if n_users is not None else 0)
+        self.n_users = total_users
+
+        # Allocate +1 row so index 0 is the padded sentinel row and 1..=total_users map 1:1 to user_id
+        n_rows = total_users + 1
+        movie_ids = np.full(
+            (n_rows, self.max_history), self.pad_value, dtype=np.int32
+        )
+        ratings = np.full(
+            (n_rows, self.max_history), self.pad_value, dtype=np.int32
+        )
+        timestamps = np.full(
+            (n_rows, self.max_history), self.ts_pad_value, dtype=np.int64
+        )
+
+        for user_id, (user_ts, user_movies, user_ratings) in lookup.items():
+            uid = int(user_id)
+            if uid <= 0:
+                raise ValueError(
+                    f"Expected 1-based user_id >= 1 (index 0 is reserved for padded sentinel), found user_id={uid}"
+                )
             length = min(len(user_ts), self.max_history)
-            
-            #place the values at beginnings of arrays.
-            # any empty values at ends of arrays will be self.pad_value for move_id and self.ts_pad_value for timestamps
-            # BUT, we store the most recent history, which are at the end of the history arrays
-            timestamps[i][:length] = user_ts[-length:]
-            movie_ids[i][:length] = user_movies[-length:]
-            ratings[i][:length] = user_ratings[-length:]
-        
-        #sort by user_ids to enable np.searchsorted later
-        user_ids = np.array(user_ids, dtype=np.int32)
-        
-        sort_indices = np.argsort(user_ids)
-        
-        user_ids = user_ids[sort_indices]
-        movie_ids = movie_ids[sort_indices]
-        ratings = ratings[sort_indices]
-        timestamps = timestamps[sort_indices]
-        
-        return user_ids, movie_ids, ratings, timestamps
-    
-    def get_movieids_before_timestamp(self, user_id: np.ndarray, timestamp: Union[int, np.ndarray], max_hist:int) -> np.ndarray:
+            if length > 0:
+                # Store the most recent `length` interactions at the beginning of row `uid`
+                timestamps[uid, :length] = user_ts[-length:]
+                movie_ids[uid, :length] = user_movies[-length:]
+                ratings[uid, :length] = user_ratings[-length:]
+
+        return movie_ids, ratings, timestamps
+
+    def _resolve_user_indices(
+        self, user_id: Union[int, List[int], np.ndarray]
+    ) -> np.ndarray:
         """
-        given array of user_ids, return max_hist of movies < timestamp, padded by pad_value when not enough history.
-        :param user_id: input array of shape (None,), e.g. np.array([2,4])
-        :param timestamp: timestamp: timestamp representing current time or an array of timestamps representing current time for that user.
-        movies with timestamps < the current timestamp are returned.
-        :param max_hist: number of user rated movies to return
-        :return: user rated movies < timestamp, limited to max_hist number of movies.  shape of return is ( len(user_id), max_hist).
-            empty values are at end of array and have value self.pad_value=-1
+        Maps valid catalog `user_id`s in `1..=self.n_users` directly to their own index,
+        and remaps `user_id <= 0` or `user_id > self.n_users` to index `0` (the padded sentinel row).
         """
-        #transform user_ids into user_idxs.  can use searchsorted because already sorted by user_ids
-        user_idx = np.searchsorted(self.user_ids, user_id)
+        user_id_arr = np.asarray(user_id, dtype=np.int64).reshape(-1)
+        return np.where(
+            (user_id_arr >= 1) & (user_id_arr <= self.n_users), user_id_arr, 0
+        )
+
+    def get_movieids_before_timestamp(
+        self,
+        user_id: np.ndarray,
+        timestamp: Union[int, np.ndarray],
+        max_hist: int,
+    ) -> np.ndarray:
+        """
+        Given an array of user_ids, returns up to `max_hist` movie_ids with
+        timestamps strictly `< timestamp`, padded with `self.pad_value` (-1).
+        Out-of-range user_ids (`<= 0` or `> self.n_users`) are remapped to index `0`.
+
+        :param user_id: 1D array of user_ids, e.g. np.array([2, 4])
+        :param timestamp: scalar timestamp or 1D array of timestamps per user
+        :param max_hist: maximum number of rated movies to return per user
+        :return: array of shape `(len(user_id), max_hist)` padded with `self.pad_value` (-1)
+        """
+        user_idx = self._resolve_user_indices(user_id)
         n_user_selected = len(user_idx)
-        
-        sub_timestamps = self.timestamps[user_idx]  # Shape: (num_selected, n_movies)
-        sub_movie_ids = self.movie_ids[user_idx]  # Shape: (num_selected, n_movies)
-        
-        #can use comparison partition because timestamps are already sorted
-        if len(np.shape(timestamp)) == 0:
-            mask = sub_timestamps < timestamp
+
+        ret_movie_ids = np.full(
+            (n_user_selected, max_hist), self.pad_value, dtype=self.movie_ids.dtype
+        )
+        if n_user_selected == 0 or max_hist <= 0:
+            return ret_movie_ids
+
+        sub_timestamps = self.timestamps[user_idx]  # Shape: (n_user_selected, max_history)
+        sub_movie_ids = self.movie_ids[user_idx]    # Shape: (n_user_selected, max_history)
+
+        if np.ndim(timestamp) == 0:
+            mask = (sub_timestamps < timestamp) & (sub_timestamps < self.ts_pad_value)
         else:
-            mask = sub_timestamps < timestamp[:, np.newaxis]
+            ts_col = np.asarray(timestamp, dtype=np.int64).reshape(-1, 1)
+            mask = (sub_timestamps < ts_col) & (sub_timestamps < self.ts_pad_value)
+
         occurrence_count = np.cumsum(mask, axis=1)
         final_mask = mask & (occurrence_count <= max_hist)
-        row_coords, col_coords = np.where(final_mask)
+        row_coords, _ = np.where(final_mask)
         new_col_coords = occurrence_count[final_mask] - 1
-        
-        ret_movie_ids = np.full((n_user_selected, max_hist), self.pad_value, dtype=sub_movie_ids.dtype)
+
         ret_movie_ids[row_coords, new_col_coords] = sub_movie_ids[final_mask]
-        
-        #returns array of shape (len(user_id), max_history) with missing values = -1
+
         return ret_movie_ids
-    
-    def get_history_before_timestamp(self, user_id: np.ndarray,
-            timestamp: Union[int, np.ndarray], max_hist: int) -> Tuple[np.ndarray, np.ndarray]:
+
+    def get_history_before_timestamp(
+        self,
+        user_id: np.ndarray,
+        timestamp: Union[int, np.ndarray],
+        max_hist: int,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        given array of user_ids, return max_hist of movies < timestamp, padded by pad_value when not enough history.  also returns
-        the ratings for those movies, also padded by -1 for missing values.
-        :param user_id: input array of shape (None,), e.g. np.array([2,4])
-        :param timestamp: timestamp representing current time or an array of timestamps representing current time for that user.
-          any user rated movies with timestamps < timestamp are returned
-           up to max_hist in length.
-        :param max_hist: number of user rated movies to return
-        :return: user rated movies < timestamp, limited to max_hist number of movies, ratings for those movies, and timestamps
-        shape of each of the returned np.ndarrays is ( len(user_id), max_hist).  empty values are at end of array and have value self.pad_value=-1
+        Given an array of user_ids, returns `(ret_movie_ids, ret_ratings)` for up to
+        `max_hist` interactions strictly `< timestamp`, padded with `self.pad_value` (-1).
+        Out-of-range user_ids (`<= 0` or `> self.n_users`) are remapped to index `0`.
+
+        :param user_id: 1D array of user_ids, e.g. np.array([2, 4])
+        :param timestamp: scalar timestamp or 1D array of timestamps per user
+        :param max_hist: maximum number of rated movies to return per user
+        :return: tuple `(ret_movie_ids, ret_ratings)` each of shape `(len(user_id), max_hist)`
         """
-        # transform user_ids into user_idxs
-        user_idx = np.searchsorted(self.user_ids, user_id)
+        user_idx = self._resolve_user_indices(user_id)
         n_user_selected = len(user_idx)
-        
-        sub_timestamps = self.timestamps[user_idx]  # Shape: (num_selected, n_movies)
-        sub_movie_ids = self.movie_ids[user_idx]  # Shape: (num_selected, n_movies)
-        sub_ratings = self.ratings[user_idx]  # Shape: (num_selected, n_movies)
-        
-        if len(np.shape(timestamp)) == 0:
-            mask = sub_timestamps < timestamp
+
+        ret_movie_ids = np.full(
+            (n_user_selected, max_hist), self.pad_value, dtype=self.movie_ids.dtype
+        )
+        ret_ratings = np.full(
+            (n_user_selected, max_hist), self.pad_value, dtype=self.ratings.dtype
+        )
+        if n_user_selected == 0 or max_hist <= 0:
+            return ret_movie_ids, ret_ratings
+
+        sub_timestamps = self.timestamps[user_idx]  # Shape: (n_user_selected, max_history)
+        sub_movie_ids = self.movie_ids[user_idx]    # Shape: (n_user_selected, max_history)
+        sub_ratings = self.ratings[user_idx]        # Shape: (n_user_selected, max_history)
+
+        if np.ndim(timestamp) == 0:
+            mask = (sub_timestamps < timestamp) & (sub_timestamps < self.ts_pad_value)
         else:
-            mask = sub_timestamps < timestamp[:, np.newaxis]
+            ts_col = np.asarray(timestamp, dtype=np.int64).reshape(-1, 1)
+            mask = (sub_timestamps < ts_col) & (sub_timestamps < self.ts_pad_value)
+
         occurrence_count = np.cumsum(mask, axis=1)
         final_mask = mask & (occurrence_count <= max_hist)
-        row_coords, col_coords = np.where(final_mask)
+        row_coords, _ = np.where(final_mask)
         new_col_coords = occurrence_count[final_mask] - 1
-        
-        ret_movie_ids = np.full((n_user_selected, max_hist), self.pad_value,
-            dtype=sub_movie_ids.dtype)
+
         ret_movie_ids[row_coords, new_col_coords] = sub_movie_ids[final_mask]
-        
-        ret_ratings = np.full((n_user_selected, max_hist), self.pad_value,
-            dtype=sub_ratings.dtype)
         ret_ratings[row_coords, new_col_coords] = sub_ratings[final_mask]
-        
-        #ret_ts = np.full((n_user_selected, max_hist), pad_value,
-        #    dtype=sub_timestamps.dtype)
-        #ret_ts[row_coords, new_col_coords] = sub_timestamps[final_mask]
-        
+
         return ret_movie_ids, ret_ratings
-       

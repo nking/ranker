@@ -257,7 +257,7 @@ class TestRanker(unittest.TestCase):
         
         # (movie_id, title, genres)
         self.movies_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/movies-00000-of-00001.array_record")
+            "src/test/resources/data/movies.array_record")
         
         STUDY_NAME = "GraphRanker_tuning_unittest3"
 

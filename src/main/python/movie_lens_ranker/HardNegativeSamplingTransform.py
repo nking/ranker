@@ -111,7 +111,7 @@ class HardNegativeSamplingTransform(pgrain.RandomMapTransform):
             user_id=batch['user_id'], timestamp=batch['timestamp'],
             max_hist=self.history_lookup.max_history)
         
-        # empty values are -1
+        # empty values are -1 for movie and ratings. rmpty timestamps are 2524608000 #year 2050
         movie_histories_disliked = self.history_lookup_disliked.get_movieids_before_timestamp(
             user_id=batch['user_id'], timestamp=batch['timestamp'],
             max_hist=self.history_lookup_disliked.max_history)

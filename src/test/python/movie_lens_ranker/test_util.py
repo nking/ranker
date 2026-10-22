@@ -22,7 +22,7 @@ class UtilTest(TestCase):
 
         #look up a popular movie and assert it is in head
         movies_uri = os.path.join(get_project_dir(),
-            "src/test/resources/data/movies-00000-of-00001.array_record")
+            "src/test/resources/data/movies.array_record")
 
         movie_dict = read_movies_array_record(movies_uri=movies_uri, ret_ids_only=False)
 

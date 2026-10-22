@@ -40,7 +40,7 @@ import requests
 import os
 host = os.getenv('STORAGE_EMULATOR_HOST', 'http://gcs:4443')
 # The internal path for fake-gcs-server to get a file:
-test_url = f'{host}/storage/v1/b/data/o/movies-00000-of-00001.array_record?alt=media'
+test_url = f'{host}/storage/v1/b/data/o/movies.array_record?alt=media'
 print(f'Attempting to reach: {test_url}')
 try:
     response = requests.get(test_url, timeout=5)
