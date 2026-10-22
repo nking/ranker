@@ -115,6 +115,10 @@ def init_fake_gcs_dirs():
     if not os.path.exists(c_dir):
         os.makedirs(c_dir)
 
+    r_dir = os.path.join(tmp_mounts_dir, "fake-gcs-server", "hpo-results-bucket")
+    if not os.path.exists(r_dir):
+        os.makedirs(r_dir)
+
     set_permissions_recursive(tmp_mounts_dir, 0o755, 0o755)
 
 

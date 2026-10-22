@@ -24,6 +24,22 @@ on Kaggle T4x2 GPUs:
 and the saved checkcpoint and exported saved model are present in
 this project's src/test/resource branch
 
+to initialize this project's data structures, you need to clone
+the recommender_systems github project in a sibline directory,
+then use the following scripts to generate data and copy it to ranker:
+   pre_training_data.sh
+   pre_training_data_copy_to_ranker.sh
+   post_training.sh
+   post_training2.sh
+ note that those are tailored to the results from having run
+ src/test/python/movie_lens_tfx/run_kaggle_pipelines.py to train a model.
+Then when have those data in this project,
+   initialize the tmp_mounts directory:
+     python3 scripts/init-tmp_mounts.py
+
+see "Running the code" below.
+
+
 --------------------------------------------------
 some details about the model
 
