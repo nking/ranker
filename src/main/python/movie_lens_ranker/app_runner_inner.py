@@ -189,8 +189,8 @@ def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in
     root.add_discrete_param("top_k", feasible_values=[top_k])
     root.add_discrete_param("embed_in_dim", feasible_values=[embed_in_dim])
 
-    root.add_discrete_param("use_focal_loss", feasible_values=[0])
-    root.add_discrete_param("use_ipw", feasible_values=[0])
+    root.add_discrete_param("use_focal_loss", feasible_values=[1])
+    root.add_discrete_param("use_ipw", feasible_values=[1])
 
     root.add_discrete_param("temperature", feasible_values=[0.2])
     #feasible_values=[0.07, 0.1, 0.25, 0.5])
