@@ -1,7 +1,7 @@
-2026-10-11 08:18:45.951421: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
-2026-10-11 08:18:46.001483: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+2026-10-26 16:38:47.886835: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2026-10-26 16:38:47.968217: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
 To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2026-10-11 08:18:48.605479: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+2026-10-26 16:38:50.418818: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
 
 MetaGraphDef with tag-set: 'serve' contains the following SignatureDefs:
 
@@ -34,7 +34,7 @@ signature_def['serving_batch']:
         name: serving_batch_node_candidate_mask:0
     inputs['node_embeddings'] tensor_info:
         dtype: DT_FLOAT
-        shape: (51520, 32)
+        shape: (51520, 16)
         name: serving_batch_node_embeddings:0
     inputs['node_ids'] tensor_info:
         dtype: DT_INT32
@@ -83,7 +83,7 @@ signature_def['serving_default']:
         name: serving_default_node_candidate_mask:0
     inputs['node_embeddings'] tensor_info:
         dtype: DT_FLOAT
-        shape: (256, 32)
+        shape: (256, 16)
         name: serving_default_node_embeddings:0
     inputs['node_ids'] tensor_info:
         dtype: DT_INT32
@@ -132,7 +132,7 @@ signature_def['serving_diagnostics']:
         name: serving_diagnostics_node_candidate_mask:0
     inputs['node_embeddings'] tensor_info:
         dtype: DT_FLOAT
-        shape: (51520, 32)
+        shape: (51520, 16)
         name: serving_diagnostics_node_embeddings:0
     inputs['node_ids'] tensor_info:
         dtype: DT_INT32
@@ -157,7 +157,7 @@ signature_def['serving_diagnostics']:
   The given SavedModel SignatureDef contains the following output(s):
     outputs['cand_reprs'] tensor_info:
         dtype: DT_FLOAT
-        shape: (25800, 32)
+        shape: (25800, 16)
         name: StatefulPartitionedCall_2:0
     outputs['outputs'] tensor_info:
         dtype: DT_FLOAT
@@ -165,9 +165,9 @@ signature_def['serving_diagnostics']:
         name: StatefulPartitionedCall_2:1
     outputs['user_reprs'] tensor_info:
         dtype: DT_FLOAT
-        shape: (258, 32)
+        shape: (258, 16)
         name: StatefulPartitionedCall_2:2
   Method name is: tensorflow/serving/predict
-The MetaGraph with tag set ['serve'] contains the following ops: {'Placeholder', 'AssignVariableOp', 'StringJoin', 'Pack', 'RestoreV2', 'PreventGradient', 'Const', 'SaveV2', 'StatefulPartitionedCall', 'MergeV2Checkpoints', 'Identity', 'DisableCopyOnRead', 'ReadVariableOp', 'StaticRegexFullMatch', 'ShardedFilename', 'VarHandleOp', 'XlaCallModule', 'Select', 'NoOp'}
+The MetaGraph with tag set ['serve'] contains the following ops: {'ShardedFilename', 'SaveV2', 'StaticRegexFullMatch', 'Select', 'Identity', 'Pack', 'RestoreV2', 'VarHandleOp', 'AssignVariableOp', 'XlaCallModule', 'NoOp', 'StatefulPartitionedCall', 'StringJoin', 'MergeV2Checkpoints', 'Placeholder', 'DisableCopyOnRead', 'ReadVariableOp', 'PreventGradient', 'Const'}
 
 Concrete Functions:

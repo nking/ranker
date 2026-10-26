@@ -1,5 +1,6 @@
 use std::{fs, io};
-use std::path::PathBuf;use polars::prelude::{LazyFrame, PolarsResult};
+use std::path::PathBuf;
+use polars::prelude::{LazyFrame, PolarsResult};
 
 // Assuming your UserRequest is accessible here
 pub mod helper {
@@ -186,7 +187,6 @@ mod post_training_analysis {
     use std::collections::HashMap;
     use std::error::Error;
     use std::fs::File;
-    use std::path::Path;
     use polars::df;
     use polars::prelude::*;
     use rayon::prelude::*; // Required for parallel slate comparisons in _diversity_metrics
@@ -196,13 +196,45 @@ mod post_training_analysis {
     // Bring everything from the outer scope (TestHarness, helper functions, etc.) into the test module
     use super::*;
 
+    use plotters::prelude::*;
+    use rustc_hash::FxHashMap;
+    use std::cmp::Ordering;
+    use std::path::{Path, PathBuf};
+    use serde::{Deserialize, Serialize};
     use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
     use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMoviesAndRepr, UsersRequest, MoviesRequest, RankedMovies};
     use inference_engine::pb::recommender_service_server::RecommenderService;
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
-    use inference_engine::user_history::UserHistory;
     use inference_engine::util::{get_top_k_desc_scores};
     use crate::helper::get_unique_user_and_first_timestamp;
+
+
+    /// Summary directional statistics on the unit hypersphere S^(d-1) quantifying
+    /// how faithfully the L2-normalized centroid represents an entity's multi-context
+    /// GATv2 embedding distribution.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct SphericalFidelitySummary {
+        pub n_unique_entities: usize,
+        pub n_multi_occurrence_entities: usize,
+        /// Mean Resultant Length R_bar = || (1/N) sum_k v_k ||_2 in [0, 1].
+        /// Mathematically equals the exact mean cosine similarity <v_k, mu> to the L2-normalized centroid!
+        pub mean_resultant_length_avg: f64,
+        pub mean_resultant_length_p10: f64,
+        /// Spherical Variance S = 1.0 - R_bar in [0, 1].
+        pub spherical_variance_avg: f64,
+        /// Median von Mises-Fisher concentration parameter kappa = R_bar * (d - R_bar^2) / (1 - R_bar^2).
+        pub vmf_kappa_median: f64,
+        /// Mean geodesic angular deviation arccos(<v_k, mu>) in degrees.
+        pub mean_angle_deg_avg: f64,
+        /// 90th-percentile geodesic angular deviation in degrees.
+        pub p90_angle_deg_avg: f64,
+        /// Robust spherical MAD: 1.4826 * median(|theta_k - median(theta)|) in degrees.
+        pub robust_mad_angle_deg_avg: f64,
+        /// Fraction of multi-occurrence entities with R_bar >= 0.90 (mean angle <= 25.8 deg).
+        pub pct_high_fidelity_r_ge_090: f64,
+        /// Fraction of multi-occurrence entities with R_bar < 0.70 (high context sensitivity / polysemy).
+        pub pct_context_polysemous_r_lt_070: f64,
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     pub async fn test_analysis() ->  Result<(), Box<dyn std::error::Error + Send + Sync>>{
@@ -507,6 +539,14 @@ mod post_training_analysis {
             summary_output_dir,
         ).await?;
 
+        // adding t-SNE, UMAP diagnostics
+        let embedding_diagnostics = calc_embedding_diagnostics(
+            harness,
+            query_model_version.clone(),
+            ranker_model_version.clone(),
+            &ranker_metadata,
+            summary_output_dir,
+        ).await?;
 
         let _ = cross_metric_analysis(
             &base_metrics, &coverage, &pop_bias, &diversity, &emb_hubness, &ctx_hubness,
@@ -2058,7 +2098,7 @@ mod post_training_analysis {
         Ok((agg_res, conclusions))
     }
 
-    fn _embedding_hubness(
+    pub fn _embedding_hubness(
         k: usize,                    // either num_candidates or top_k
         _catalog_size: usize,
         harness: &TestHarness,
@@ -3111,4 +3151,1210 @@ mod post_training_analysis {
 
         Ok(summary_payload)
     }
+
+    async fn calc_embedding_diagnostics(
+        harness: &TestHarness,
+        query_model_version:Option<VersionChoice>,
+        ranker_model_version:Option<VersionChoice>,
+        ranker_model_metadata: &Arc<RankerModelMetadata>,
+        summary_output_dir: &str)
+        -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+
+        // harness.pos_test_d has columns user_id, movie_id, rating, timestamp
+        let pos_test_tiered = harness.pos_test_df.clone()
+            .left_join(
+                harness.movie_tiers_df.clone(),
+                col("movie_id"),
+                col("movie_id")
+            )
+            .left_join(
+                harness.user_tiers_df.clone(),
+                col("user_id"),
+                col("user_id")
+            )
+            // Sort before materializing to guarantee deterministic index order
+            .sort(["user_id", "timestamp"], SortMultipleOptions::default())
+            .collect()?;
+
+        let user_ids: Vec<i32> = pos_test_tiered
+            .column("user_id")?
+            .cast(&DataType::Int32)? // Safe guard in case type inferred differently
+            .i32()?
+            .rechunk()
+            .cont_slice()
+            .expect("user_id column contained nulls; cannot slice contiguously")
+            .to_vec();
+
+        let timestamps: Vec<i64> = pos_test_tiered
+            .column("timestamp")?
+            .cast(&DataType::Int64)?
+            .i64()?
+            .rechunk()
+            .cont_slice()
+            .expect("timestamp column contained nulls; cannot slice contiguously")
+            .to_vec();
+
+        let tonic_req: Request<UsersRequest> = harness.orchestrator.get_users_request(
+            &user_ids,
+            &timestamps,
+            query_model_version.clone(),
+            ranker_model_version.clone()
+        ).await.expect("error while forming UsersRequest");
+
+        // returns harness.orchestrator.top_k results.  handles batching.
+        let results: Result<Response<RankedMoviesAndRepr>, tonic::Status> =
+            harness.orchestrator.predict_diagnostic(tonic_req).await;
+
+        let response_inner = results
+            .expect("Error while getting diagnostic predictions fromranker").into_inner();
+
+        //  `k` (top_k) items per user
+        let returned_k = response_inner.k as usize;
+        let out_features = ranker_model_metadata.out_features;
+        let tag = format!("ranker_contextual_k_{}", returned_k);
+
+        assert_eq!(response_inner.user_reprs.len(), out_features * user_ids.len());
+        assert_eq!(response_inner.cand_reprs.len(), out_features * user_ids.len() * returned_k,
+            "out_features={}, n_users={}, returned_k={}", out_features, user_ids.len(), returned_k);
+        assert_eq!(response_inner.movie_ids.len(), user_ids.len() * returned_k);
+
+        // make movie_id, movie_tier LazyFrame
+        let movie_df = harness.movie_tiers_df.clone().collect()?;
+        let movie_ids_ca = movie_df.column("movie_id")?.cast(&DataType::Int32)?;
+        let _movie_ids = movie_ids_ca.i32()?;
+        let movie_tiers_ca = movie_df.column("movie_tier")?.cast(&DataType::Int32)?;
+        let movie_tiers = movie_tiers_ca.i32()?;
+        // Pre-allocate the FxHashMap with the exact number of rows for zero reallocations
+        let mut movie_tier_map: FxHashMap<i32, i32> = FxHashMap::with_capacity_and_hasher(
+            movie_df.height(),
+            Default::default(),
+        );
+        for (mid_opt, tier_opt) in _movie_ids.iter().zip(movie_tiers.iter()) {
+            // Standard pattern to safely ignore any Polars Null values
+            if let (Some(mid), Some(tier)) = (mid_opt, tier_opt) {
+                movie_tier_map.insert(mid, tier);
+            }
+        }
+
+        // make user_id, user_tier LazyFrame
+        let user_df = harness.user_tiers_df.clone().collect()?;
+        let user_ids_ca = user_df.column("user_id")?.cast(&DataType::Int32)?;
+        let _user_ids = user_ids_ca.i32()?;
+        let user_tiers_ca = user_df.column("user_tier")?.cast(&DataType::Int32)?;
+        let user_tiers = user_tiers_ca.i32()?;
+        // Pre-allocate the FxHashMap with the exact number of rows for zero reallocations
+        let mut user_tier_map: FxHashMap<i32, i32> = FxHashMap::with_capacity_and_hasher(
+            user_df.height(),
+            Default::default(),
+        );
+        for (id_opt, tier_opt) in _user_ids.iter().zip(user_tiers.iter()) {
+            // Standard pattern to safely ignore any Polars Null values
+            if let (Some(id), Some(tier)) = (id_opt, tier_opt) {
+                user_tier_map.insert(id, tier);
+            }
+        }
+
+        let (user_repr_df, user_fidelity)
+            = deduplicate_and_eval_spherical_reprs(
+                &user_ids,
+                &response_inner.user_reprs,
+                out_features,
+                &user_tier_map,
+                "user_id",
+                "user_tier",
+        ).expect("Error while de-duplicating user_ids and embeddings");
+
+        let (movie_repr_df, movie_fidelity)
+            = deduplicate_and_eval_spherical_reprs(
+            &response_inner.movie_ids,
+            &response_inner.cand_reprs,
+            out_features,
+            &movie_tier_map,
+            "movie_id",
+            "movie_tier",
+        ).expect("Error while de-duplicating movie_ids and embeddings");
+
+        println!("GATv2 Movie Spherical Fidelity: {:#?}", movie_fidelity);
+
+        let output_json_file_name = "stratified_metrics_cold_start_movies.json";
+        let output_embed_dir = Path::new(summary_output_dir).join("embedding_plots");
+        //  Generate the 6 UMAP & t-SNE PNGs (User, Movie, and Joint Shared Hypersphere)
+        let saved_pngs = _create_umap_tsne_plots(
+            &user_repr_df,
+            &movie_repr_df,
+            &*output_embed_dir,
+            "gatv2_emb",
+        ).expect("error while creating tsne and umap plots");
+
+        let agg_res = serde_json::json!({
+            "GATv2_spherical_fidelity_movie": movie_fidelity,
+            "GATv2_spherical_fidelity_user": user_fidelity,
+        });
+
+        let output_json_file_name = "gatv2_spherical_fidelity.json";
+        let output_file_path = Path::new(summary_output_dir).join(output_json_file_name);
+        let file = File::create(&output_file_path)?;
+        serde_json::to_writer_pretty(file, &agg_res)?;
+
+        println!("wrote to {:?}", output_file_path);
+
+        Ok(agg_res)
+    }
+    
+    /// Deduplicates multiple unit-normalized GATv2 representations per entity (`movie_id` or `user_id`)
+    /// into a single L2-normalized centroid vector, returning:
+    ///   1. A Polars `DataFrame` with columns `[id_col, "embedding", tier_col, "n_occurrences",
+    ///      "mean_resultant_length", "spherical_variance", "vmf_kappa", "mean_angle_deg",
+    ///      "p90_angle_deg", "robust_mad_angle_deg"]` ready for `_create_umap_tsne_plots`.
+    ///   2. A `SphericalFidelitySummary` struct with global directional fidelity metrics.
+    fn deduplicate_and_eval_spherical_reprs(
+        entity_ids: &[i32],
+        raw_embeddings_flat: &[f32],
+        embed_dim: usize,
+        tier_lookup: &FxHashMap<i32, i32>,
+        id_col_name: &str,
+        tier_col_name: &str,
+    ) -> Result<(DataFrame, SphericalFidelitySummary), Box<dyn Error>> {
+        assert_eq!(
+            entity_ids.len() * embed_dim,
+            raw_embeddings_flat.len(),
+            "raw_embeddings_flat length must equal entity_ids.len() * embed_dim"
+        );
+
+        // Group row indices by entity_id
+        let mut groups: FxHashMap<i32, Vec<usize>> = FxHashMap::default();
+        for (row_idx, &eid) in entity_ids.iter().enumerate() {
+            groups.entry(eid).or_default().push(row_idx);
+        }
+
+        let mut sorted_eids: Vec<i32> = groups.keys().copied().collect();
+        sorted_eids.sort_unstable();
+        let n_unique = sorted_eids.len();
+
+        let mut out_ids: Vec<i32> = Vec::with_capacity(n_unique);
+        let mut out_tiers: Vec<i32> = Vec::with_capacity(n_unique);
+        let mut out_embs: Vec<Series> = Vec::with_capacity(n_unique);
+        let mut out_counts: Vec<u32> = Vec::with_capacity(n_unique);
+        let mut out_r_bars: Vec<f64> = Vec::with_capacity(n_unique);
+        let mut out_sph_vars: Vec<f64> = Vec::with_capacity(n_unique);
+        let mut out_kappas: Vec<f64> = Vec::with_capacity(n_unique);
+        let mut out_mean_angles: Vec<f64> = Vec::with_capacity(n_unique);
+        let mut out_p90_angles: Vec<f64> = Vec::with_capacity(n_unique);
+        let mut out_mad_angles: Vec<f64> = Vec::with_capacity(n_unique);
+
+        // Accumulators for multi-occurrence summary stats
+        let mut multi_r_bars: Vec<f64> = Vec::new();
+        let mut multi_kappas: Vec<f64> = Vec::new();
+        let mut multi_mean_angles: Vec<f64> = Vec::new();
+        let mut multi_p90_angles: Vec<f64> = Vec::new();
+        let mut multi_mad_angles: Vec<f64> = Vec::new();
+
+        let d_f64 = embed_dim as f64;
+
+        for eid in sorted_eids {
+            let row_indices = &groups[&eid];
+            let count = row_indices.len();
+            let count_f64 = count as f64;
+
+            // 1. Accumulate unit-normalized vectors for this entity
+            let mut sum_vec = vec![0.0_f64; embed_dim];
+            let mut unit_vecs: Vec<Vec<f64>> = Vec::with_capacity(count);
+
+            for &r_idx in row_indices {
+                let start = r_idx * embed_dim;
+                let slice = &raw_embeddings_flat[start..start + embed_dim];
+                let norm_sq: f64 = slice.iter().map(|&x| (x as f64) * (x as f64)).sum();
+                let inv_norm = 1.0 / norm_sq.sqrt().max(1e-12);
+                let mut u_vec = Vec::with_capacity(embed_dim);
+                for (d, &val) in slice.iter().enumerate() {
+                    let u_val = (val as f64) * inv_norm;
+                    sum_vec[d] += u_val;
+                    u_vec.push(u_val);
+                }
+                unit_vecs.push(u_vec);
+            }
+
+            // Mean vector v_bar and Mean Resultant Length R_bar = ||v_bar||_2
+            let mean_vec: Vec<f64> = sum_vec.into_iter().map(|s| s / count_f64).collect();
+            let r_bar_raw: f64 = mean_vec.iter().map(|&x| x * x).sum::<f64>().sqrt();
+            let r_bar = r_bar_raw.clamp(0.0, 1.0);
+            let sph_var = 1.0 - r_bar;
+
+            // L2-normalized centroid mu = mean_vec / ||mean_vec||_2
+            let inv_r = 1.0 / r_bar_raw.max(1e-12);
+            let centroid_f64: Vec<f64> = mean_vec.iter().map(|&x| x * inv_r).collect();
+            let centroid_f32: Vec<f32> = centroid_f64.iter().map(|&x| x as f32).collect();
+
+            let (kappa, mean_ang, p90_ang, mad_ang) = if count >= 2 {
+                // Banerjee et al. (2005) von Mises-Fisher concentration approximation
+                let r_safe = r_bar.min(0.9999);
+                let k_val = (r_safe * (d_f64 - r_safe * r_safe)) / (1.0 - r_safe * r_safe).max(1e-9);
+
+                // Geodesic angles theta_k = arccos(<v_k, mu>) in degrees
+                let mut angles_deg: Vec<f64> = unit_vecs
+                    .iter()
+                    .map(|u| {
+                        let dot: f64 = u
+                            .iter()
+                            .zip(centroid_f64.iter())
+                            .map(|(&a, &b)| a * b)
+                            .sum();
+                        dot.clamp(-1.0, 1.0).acos().to_degrees()
+                    })
+                    .collect();
+
+                angles_deg.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+                let m_ang = angles_deg.iter().sum::<f64>() / count_f64;
+                let p90_idx = ((0.90 * ((count - 1) as f64)).round() as usize).min(count - 1);
+                let p90 = angles_deg[p90_idx];
+                let med_ang = percentile_sorted(&angles_deg, 0.50);
+
+                let mut abs_devs: Vec<f64> = angles_deg.iter().map(|&a| (a - med_ang).abs()).collect();
+                abs_devs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+                let mad = 1.4826 * percentile_sorted(&abs_devs, 0.50);
+
+                multi_r_bars.push(r_bar);
+                multi_kappas.push(k_val);
+                multi_mean_angles.push(m_ang);
+                multi_p90_angles.push(p90);
+                multi_mad_angles.push(mad);
+
+                (k_val, m_ang, p90, mad)
+            } else {
+                (f64::NAN, 0.0, 0.0, 0.0)
+            };
+
+            out_ids.push(eid);
+            out_tiers.push(*tier_lookup.get(&eid).unwrap_or(&2));
+            out_embs.push(Series::new(PlSmallStr::EMPTY, centroid_f32));
+            out_counts.push(count as u32);
+            out_r_bars.push(r_bar);
+            out_sph_vars.push(sph_var);
+            out_kappas.push(kappa);
+            out_mean_angles.push(mean_ang);
+            out_p90_angles.push(p90_ang);
+            out_mad_angles.push(mad_ang);
+        }
+
+        let df = DataFrame::new(
+            n_unique,
+            vec![
+                Column::new(PlSmallStr::from_str(id_col_name), out_ids),
+                Column::new(PlSmallStr::from_static("embedding"), out_embs),
+                Column::new(PlSmallStr::from_str(tier_col_name), out_tiers),
+                Column::new(PlSmallStr::from_static("n_occurrences"), out_counts),
+                Column::new(PlSmallStr::from_static("mean_resultant_length"), out_r_bars),
+                Column::new(PlSmallStr::from_static("spherical_variance"), out_sph_vars),
+                Column::new(PlSmallStr::from_static("vmf_kappa"), out_kappas),
+                Column::new(PlSmallStr::from_static("mean_angle_deg"), out_mean_angles),
+                Column::new(PlSmallStr::from_static("p90_angle_deg"), out_p90_angles),
+                Column::new(PlSmallStr::from_static("robust_mad_angle_deg"), out_mad_angles),
+            ],
+        )?;
+
+        let n_multi = multi_r_bars.len();
+        let mut sorted_r = multi_r_bars.clone();
+        sorted_r.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+        let mut sorted_k = multi_kappas.clone();
+        sorted_k.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+
+        let r_avg = if n_multi > 0 {
+            multi_r_bars.iter().sum::<f64>() / (n_multi as f64)
+        } else {
+            1.0
+        };
+        let summary = SphericalFidelitySummary {
+            n_unique_entities: n_unique,
+            n_multi_occurrence_entities: n_multi,
+            mean_resultant_length_avg: r_avg,
+            mean_resultant_length_p10: if n_multi > 0 {
+                percentile_sorted(&sorted_r, 0.10)
+            } else {
+                1.0
+            },
+            spherical_variance_avg: 1.0 - r_avg,
+            vmf_kappa_median: if n_multi > 0 {
+                percentile_sorted(&sorted_k, 0.50)
+            } else {
+                0.0
+            },
+            mean_angle_deg_avg: if n_multi > 0 {
+                multi_mean_angles.iter().sum::<f64>() / (n_multi as f64)
+            } else {
+                0.0
+            },
+            p90_angle_deg_avg: if n_multi > 0 {
+                multi_p90_angles.iter().sum::<f64>() / (n_multi as f64)
+            } else {
+                0.0
+            },
+            robust_mad_angle_deg_avg: if n_multi > 0 {
+                multi_mad_angles.iter().sum::<f64>() / (n_multi as f64)
+            } else {
+                0.0
+            },
+            pct_high_fidelity_r_ge_090: if n_multi > 0 {
+                (multi_r_bars.iter().filter(|&&r| r >= 0.90).count() as f64) / (n_multi as f64)
+            } else {
+                1.0
+            },
+            pct_context_polysemous_r_lt_070: if n_multi > 0 {
+                (multi_r_bars.iter().filter(|&&r| r < 0.70).count() as f64) / (n_multi as f64)
+            } else {
+                0.0
+            },
+        };
+
+        Ok((df, summary))
+    }
+
+
+    /// Generates 6 high-resolution PNG projection plots (3 UMAP + 3 t-SNE) in pure Rust:
+    ///   1. User embeddings stratified by `user_tier` (t-SNE & UMAP)
+    ///   2. Movie embeddings stratified by `movie_tier` (t-SNE & UMAP)
+    ///   3. Joint User + Movie embeddings co-projected in the SAME shared hypersphere
+    ///      (t-SNE & UMAP using geodesic cosine distance), stratified by entity & tier.
+    ///
+    /// # Arguments
+    /// * `user_repr_df` - Polars `DataFrame` with columns `["user_id", "embedding", "user_tier"]`
+    /// * `movie_repr_df` - Polars `DataFrame` with columns `["movie_id", "embedding", "movie_tier"]`
+    /// * `output_dir` - Directory path where PNG files will be written
+    /// * `output_filename_root` - Prefix/root string for saved PNG filenames
+    pub fn _create_umap_tsne_plots(
+        user_repr_df: &DataFrame,
+        movie_repr_df: &DataFrame,
+        output_dir: &Path,
+        output_filename_root: &str,
+    ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+        std::fs::create_dir_all(output_dir)?;
+        let mut saved_files: Vec<PathBuf> = Vec::with_capacity(6);
+
+        let (x_users, y_users) =
+            extract_unit_embeddings_and_tiers(user_repr_df, "embedding", "user_tier")?;
+        let (x_movies, y_movies) =
+            extract_unit_embeddings_and_tiers(movie_repr_df, "embedding", "movie_tier")?;
+
+        // 1. User Embeddings (tier-stratified t-SNE & UMAP)
+        let user_tsne_coords = run_cosine_tsne(&x_users, 30.0, 500, 42);
+        let user_tsne_path = output_dir.join(format!(
+            "{}_tsne_users_user_tier.png",
+            output_filename_root
+        ));
+        render_tier_scatter_png(
+            &user_tsne_coords,
+            &y_users,
+            &format!(
+                "{}: User Embedding t-SNE by user_tier (N={})",
+                output_filename_root,
+                x_users.len()
+            ),
+            "t-SNE 1",
+            "t-SNE 2",
+            "user_tier",
+            &user_tsne_path,
+        )?;
+        saved_files.push(user_tsne_path);
+
+        let user_umap_coords = run_cosine_umap(&x_users, 15, 0.1, 200, 42);
+        let user_umap_path = output_dir.join(format!(
+            "{}_umap_users_user_tier.png",
+            output_filename_root
+        ));
+        render_tier_scatter_png(
+            &user_umap_coords,
+            &y_users,
+            &format!(
+                "{}: User Embedding UMAP by user_tier (N={})",
+                output_filename_root,
+                x_users.len()
+            ),
+            "UMAP 1",
+            "UMAP 2",
+            "user_tier",
+            &user_umap_path,
+        )?;
+        saved_files.push(user_umap_path);
+
+        // 2. Movie Embeddings (tier-stratified t-SNE & UMAP)
+        let movie_tsne_coords = run_cosine_tsne(&x_movies, 30.0, 500, 42);
+        let movie_tsne_path = output_dir.join(format!(
+            "{}_tsne_movies_movie_tier.png",
+            output_filename_root
+        ));
+        render_tier_scatter_png(
+            &movie_tsne_coords,
+            &y_movies,
+            &format!(
+                "{}: Movie Embedding t-SNE by movie_tier (N={})",
+                output_filename_root,
+                x_movies.len()
+            ),
+            "t-SNE 1",
+            "t-SNE 2",
+            "movie_tier",
+            &movie_tsne_path,
+        )?;
+        saved_files.push(movie_tsne_path);
+
+        let movie_umap_coords = run_cosine_umap(&x_movies, 15, 0.1, 200, 42);
+        let movie_umap_path = output_dir.join(format!(
+            "{}_umap_movies_movie_tier.png",
+            output_filename_root
+        ));
+        render_tier_scatter_png(
+            &movie_umap_coords,
+            &y_movies,
+            &format!(
+                "{}: Movie Embedding UMAP by movie_tier (N={})",
+                output_filename_root,
+                x_movies.len()
+            ),
+            "UMAP 1",
+            "UMAP 2",
+            "movie_tier",
+            &movie_umap_path,
+        )?;
+        saved_files.push(movie_umap_path);
+
+        // 3. Joint User + Movie Embeddings in the SAME Shared Hypersphere
+        let n_u = x_users.len();
+        let mut x_joint: Vec<Vec<f32>> = Vec::with_capacity(n_u + x_movies.len());
+        x_joint.extend_from_slice(&x_users);
+        x_joint.extend_from_slice(&x_movies);
+
+        let joint_tsne_coords = run_cosine_tsne(&x_joint, 30.0, 500, 42);
+        let joint_tsne_path = output_dir.join(format!(
+            "{}_tsne_joint_users_movies.png",
+            output_filename_root
+        ));
+        render_joint_scatter_png(
+            &joint_tsne_coords[..n_u],
+            &y_users,
+            &joint_tsne_coords[n_u..],
+            &y_movies,
+            &format!(
+                "{}: Joint User & Movie Shared Hypersphere t-SNE (Users={}, Movies={})",
+                output_filename_root,
+                n_u,
+                x_movies.len()
+            ),
+            "t-SNE 1",
+            "t-SNE 2",
+            &joint_tsne_path,
+        )?;
+        saved_files.push(joint_tsne_path);
+
+        let joint_umap_coords = run_cosine_umap(&x_joint, 15, 0.1, 200, 42);
+        let joint_umap_path = output_dir.join(format!(
+            "{}_umap_joint_users_movies.png",
+            output_filename_root
+        ));
+        render_joint_scatter_png(
+            &joint_umap_coords[..n_u],
+            &y_users,
+            &joint_umap_coords[n_u..],
+            &y_movies,
+            &format!(
+                "{}: Joint User & Movie Shared Hypersphere UMAP (Users={}, Movies={})",
+                output_filename_root,
+                n_u,
+                x_movies.len()
+            ),
+            "UMAP 1",
+            "UMAP 2",
+            &joint_umap_path,
+        )?;
+        saved_files.push(joint_umap_path);
+
+        Ok(saved_files)
+    }
+
+
+    // ============================================================================
+    // Internal Helpers: Polars Extraction, Cosine UMAP, Cosine t-SNE, Plotters PNG
+    // ============================================================================
+
+    fn percentile_sorted(sorted: &[f64], q: f64) -> f64 {
+        if sorted.is_empty() {
+            return 0.0;
+        }
+        let pos = q.clamp(0.0, 1.0) * ((sorted.len() - 1) as f64);
+        let lo = pos.floor() as usize;
+        let hi = pos.ceil() as usize;
+        if lo == hi {
+            sorted[lo]
+        } else {
+            let weight = pos - (lo as f64);
+            sorted[lo] * (1.0 - weight) + sorted[hi] * weight
+        }
+    }
+
+    /// Extracts unit-normalized embedding vectors and integer tier labels from a Polars `DataFrame`.
+    /// Supports both `DataType::List(Float32/Float64)` and `DataType::Array(Float32/Float64, _)`.
+    fn extract_unit_embeddings_and_tiers(
+        df: &DataFrame,
+        emb_col: &str,
+        tier_col: &str,
+    ) -> Result<(Vec<Vec<f32>>, Vec<i32>), Box<dyn Error>> {
+        let n_rows = df.height();
+        let tier_series = df.column(tier_col)?.cast(&DataType::Int32)?;
+        let tier_ca = tier_series.i32()?;
+        let tiers: Vec<i32> = (0..n_rows).map(|i| tier_ca.get(i).unwrap_or(0)).collect();
+
+        let emb_series = df.column(emb_col)?;
+        let mut embeddings: Vec<Vec<f32>> = Vec::with_capacity(n_rows);
+
+        if let Ok(list_ca) = emb_series.list() {
+            for i in 0..n_rows {
+                let sub = list_ca
+                    .get_as_series(i)
+                    .ok_or("Missing embedding row in List column")?;
+                let sub_f32 = sub.cast(&DataType::Float32)?;
+                let ca = sub_f32.f32()?;
+                let mut vec_i: Vec<f32> = (0..ca.len()).map(|j| ca.get(j).unwrap_or(0.0)).collect();
+                l2_normalize_in_place(&mut vec_i);
+                embeddings.push(vec_i);
+            }
+        } else {
+            // Fallback if stored as FixedSizeList / Array
+            let list_series = emb_series.cast(&DataType::List(Box::new(DataType::Float32)))?;
+            let list_ca = list_series.list()?;
+            for i in 0..n_rows {
+                let sub = list_ca
+                    .get_as_series(i)
+                    .ok_or("Missing embedding row in Array column")?;
+                let ca = sub.f32()?;
+                let mut vec_i: Vec<f32> = (0..ca.len()).map(|j| ca.get(j).unwrap_or(0.0)).collect();
+                l2_normalize_in_place(&mut vec_i);
+                embeddings.push(vec_i);
+            }
+        }
+
+        Ok((embeddings, tiers))
+    }
+
+    #[inline]
+    fn l2_normalize_in_place(v: &mut [f32]) {
+        let norm_sq: f32 = v.iter().map(|&x| x * x).sum();
+        let inv = 1.0 / norm_sq.sqrt().max(1e-12);
+        for x in v.iter_mut() {
+            *x *= inv;
+        }
+    }
+
+    #[inline]
+    fn cosine_dist(a: &[f32], b: &[f32]) -> f32 {
+        let dot: f32 = a.iter().zip(b.iter()).map(|(&x, &y)| x * y).sum();
+        (1.0 - dot).max(0.0)
+    }
+
+    /// Computes exact top-k nearest neighbors under cosine distance for each row in `x`.
+    fn compute_cosine_knn(x: &[Vec<f32>], k: usize) -> (Vec<Vec<usize>>, Vec<Vec<f32>>) {
+        let n = x.len();
+        let k_actual = k.min(n.saturating_sub(1));
+        let mut knn_indices = vec![Vec::with_capacity(k_actual); n];
+        let mut knn_dists = vec![Vec::with_capacity(k_actual); n];
+
+        for i in 0..n {
+            let mut row_dists: Vec<(usize, f32)> = (0..n)
+                .filter(|&j| j != i)
+                .map(|j| (j, cosine_dist(&x[i], &x[j])))
+                .collect();
+
+            if k_actual > 0 && row_dists.len() > k_actual {
+                row_dists.select_nth_unstable_by(k_actual, |a, b| {
+                    a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal)
+                });
+                row_dists.truncate(k_actual);
+            }
+            row_dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
+
+            knn_indices[i] = row_dists.iter().map(|&(idx, _)| idx).collect();
+            knn_dists[i] = row_dists.iter().map(|&(_, d)| d).collect();
+        }
+
+        (knn_indices, knn_dists)
+    }
+
+    /// Deterministic 2D power-iteration PCA initialization so UMAP and t-SNE start from a
+    /// globally aligned coordinate frame.
+    fn pca_2d_init(x: &[Vec<f32>], scale: f32) -> Vec<[f32; 2]> {
+        let n = x.len();
+        if n == 0 {
+            return Vec::new();
+        }
+        let d = x[0].len();
+        let mut mean = vec![0.0_f64; d];
+        for row in x {
+            for (j, &v) in row.iter().enumerate() {
+                mean[j] += v as f64;
+            }
+        }
+        for m in mean.iter_mut() {
+            *m /= n as f64;
+        }
+
+        // Covariance matrix C = X_centered^T X_centered (d x d, where d = 16)
+        let mut cov = vec![vec![0.0_f64; d]; d];
+        for row in x {
+            for r in 0..d {
+                let xr = (row[r] as f64) - mean[r];
+                for c in r..d {
+                    cov[r][c] += xr * ((row[c] as f64) - mean[c]);
+                }
+            }
+        }
+        for r in 0..d {
+            for c in 0..r {
+                cov[r][c] = cov[c][r];
+            }
+        }
+
+        // Power iteration for top 2 eigenvectors
+        let mut v1 = (0..d).map(|j| ((j + 1) as f64).sin()).collect::<Vec<f64>>();
+        for _ in 0..40 {
+            let mut next = vec![0.0_f64; d];
+            for r in 0..d {
+                for c in 0..d {
+                    next[r] += cov[r][c] * v1[c];
+                }
+            }
+            let norm = next.iter().map(|&z| z * z).sum::<f64>().sqrt().max(1e-12);
+            for z in next.iter_mut() {
+                *z /= norm;
+            }
+            v1 = next;
+        }
+
+        // Deflate cov by v1
+        let mut lambda1 = 0.0_f64;
+        for r in 0..d {
+            for c in 0..d {
+                lambda1 += v1[r] * cov[r][c] * v1[c];
+            }
+        }
+        for r in 0..d {
+            for c in 0..d {
+                cov[r][c] -= lambda1 * v1[r] * v1[c];
+            }
+        }
+
+        let mut v2 = (0..d).map(|j| ((j + 2) as f64).cos()).collect::<Vec<f64>>();
+        for _ in 0..40 {
+            let mut next = vec![0.0_f64; d];
+            for r in 0..d {
+                for c in 0..d {
+                    next[r] += cov[r][c] * v2[c];
+                }
+            }
+            let norm = next.iter().map(|&z| z * z).sum::<f64>().sqrt().max(1e-12);
+            for z in next.iter_mut() {
+                *z /= norm;
+            }
+            v2 = next;
+        }
+
+        let mut coords = Vec::with_capacity(n);
+        let mut max_abs = 1e-6_f32;
+        for row in x {
+            let mut c0 = 0.0_f64;
+            let mut c1 = 0.0_f64;
+            for j in 0..d {
+                let centered = (row[j] as f64) - mean[j];
+                c0 += centered * v1[j];
+                c1 += centered * v2[j];
+            }
+            let p0 = c0 as f32;
+            let p1 = c1 as f32;
+            max_abs = max_abs.max(p0.abs()).max(p1.abs());
+            coords.push([p0, p1]);
+        }
+
+        for p in coords.iter_mut() {
+            p[0] = (p[0] / max_abs) * scale;
+            p[1] = (p[1] / max_abs) * scale;
+        }
+        coords
+    }
+
+    /// Self-contained Cosine UMAP implementation in pure Rust (fuzzy simplicial set + SGD layout).
+    pub fn run_cosine_umap(
+        x: &[Vec<f32>],
+        n_neighbors: usize,
+        min_dist: f32,
+        n_epochs: usize,
+        seed: u64,
+    ) -> Vec<[f32; 2]> {
+        let n = x.len();
+        if n <= 2 {
+            return vec![[0.0, 0.0]; n];
+        }
+
+        let (knn_idx, knn_dists) = compute_cosine_knn(x, n_neighbors);
+        let target_log2 = (n_neighbors as f32).ln() / std::f32::consts::LN_2;
+
+        // 1. Smooth kNN distances: find rho_i (distance to nearest neighbor) and sigma_i via binary search
+        let mut directed_edges: FxHashMap<(usize, usize), f32> =
+            FxHashMap::with_capacity_and_hasher(n * n_neighbors * 2, Default::default());
+
+        for i in 0..n {
+            let dists = &knn_dists[i];
+            if dists.is_empty() {
+                continue;
+            }
+            let rho = dists[0].max(0.0);
+            let mut lo = 1e-5_f32;
+            let mut hi = 10.0_f32;
+            let mut sigma = 1.0_f32;
+
+            for _ in 0..32 {
+                sigma = 0.5 * (lo + hi);
+                let sum_p: f32 = dists
+                    .iter()
+                    .map(|&d| (-(d - rho).max(0.0) / sigma).exp())
+                    .sum();
+                if sum_p > target_log2 {
+                    hi = sigma;
+                } else {
+                    lo = sigma;
+                }
+            }
+
+            for (&j, &d) in knn_idx[i].iter().zip(dists.iter()) {
+                let w = (-(d - rho).max(0.0) / sigma).exp();
+                directed_edges.insert((i, j), w);
+            }
+        }
+
+        // 2. Fuzzy set union: w_sym(i, j) = w_ij + w_ji - w_ij * w_ji
+        let mut edges: Vec<(usize, usize, f32)> = Vec::with_capacity(directed_edges.len());
+        for (&(i, j), &w_ij) in directed_edges.iter() {
+            let w_ji = *directed_edges.get(&(j, i)).unwrap_or(&0.0);
+            if i < j || w_ji == 0.0 {
+                let w_sym = w_ij + w_ji - w_ij * w_ji;
+                if w_sym > 1e-3 {
+                    edges.push((i, j, w_sym));
+                    edges.push((j, i, w_sym));
+                }
+            }
+        }
+
+        // UMAP curve parameters (a, b) for min_dist = 0.1, spread = 1.0
+        let (a, b) = if (min_dist - 0.1).abs() < 0.05 {
+            (1.576943_f32, 0.8950609_f32)
+        } else {
+            (1.929_f32, 0.7915_f32)
+        };
+
+        let mut coords = pca_2d_init(x, 6.0);
+        let mut rng_state = seed ^ 0x9E3779B97F4A7C15;
+        let neg_sample_rate = 5usize;
+
+        for epoch in 0..n_epochs {
+            let alpha = 1.0_f32 * (1.0 - (epoch as f32) / (n_epochs as f32));
+            for &(i, j, w) in &edges {
+                // Sample edge with probability w
+                rng_state ^= rng_state << 13;
+                rng_state ^= rng_state >> 7;
+                rng_state ^= rng_state << 17;
+                let u_rand = ((rng_state >> 40) as f32) / ((1u64 << 24) as f32);
+                if u_rand > w {
+                    continue;
+                }
+
+                let dx = coords[i][0] - coords[j][0];
+                let dy = coords[i][1] - coords[j][1];
+                let dist_sq = (dx * dx + dy * dy).max(1e-4);
+                let dist_pow_b = dist_sq.powf(b);
+
+                // Attractive gradient
+                let grad_coeff = (-2.0 * a * b * dist_pow_b / dist_sq) / (1.0 + a * dist_pow_b);
+                let gx = (grad_coeff * dx).clamp(-4.0, 4.0) * alpha;
+                let gy = (grad_coeff * dy).clamp(-4.0, 4.0) * alpha;
+                coords[i][0] += gx;
+                coords[i][1] += gy;
+                coords[j][0] -= gx;
+                coords[j][1] -= gy;
+
+                // Negative sampling repulsive gradient
+                for _ in 0..neg_sample_rate {
+                    rng_state ^= rng_state << 13;
+                    rng_state ^= rng_state >> 7;
+                    rng_state ^= rng_state << 17;
+                    let k = (rng_state as usize) % n;
+                    if k == i {
+                        continue;
+                    }
+                    let ndx = coords[i][0] - coords[k][0];
+                    let ndy = coords[i][1] - coords[k][1];
+                    let ndist_sq = (ndx * ndx + ndy * ndy).max(1e-3);
+                    let ndist_pow_b = ndist_sq.powf(b);
+                    let rep_coeff =
+                        (2.0 * b) / ((0.001 + ndist_sq) * (1.0 + a * ndist_pow_b));
+                    let rgx = (rep_coeff * ndx).clamp(-4.0, 4.0) * alpha;
+                    let rgy = (rep_coeff * ndy).clamp(-4.0, 4.0) * alpha;
+                    coords[i][0] += rgx;
+                    coords[i][1] += rgy;
+                }
+            }
+        }
+
+        coords
+    }
+
+    /// Self-contained Cosine t-SNE in pure Rust (sparse k-NN Gaussian affinities + Student-t KL descent).
+    pub fn run_cosine_tsne(
+        x: &[Vec<f32>],
+        perplexity: f32,
+        n_iter: usize,
+        seed: u64,
+    ) -> Vec<[f32; 2]> {
+        let n = x.len();
+        if n <= 2 {
+            return vec![[0.0, 0.0]; n];
+        }
+
+        let k_neighbors = ((3.0 * perplexity) as usize).clamp(15, 90).min(n - 1);
+        let (knn_idx, knn_dists) = compute_cosine_knn(x, k_neighbors);
+        let target_entropy = perplexity.ln();
+
+        // 1. Compute conditional probabilities p_{j|i} via binary search for beta_i = 1 / (2 * sigma_i^2)
+        let mut p_directed: FxHashMap<(usize, usize), f32> =
+            FxHashMap::with_capacity_and_hasher(n * k_neighbors * 2, Default::default());
+
+        for i in 0..n {
+            let dists = &knn_dists[i];
+            let mut beta = 1.0_f32;
+            let mut beta_min = 0.0_f32;
+            let mut beta_max = f32::INFINITY;
+            let mut probs = vec![0.0_f32; dists.len()];
+
+            for _ in 0..40 {
+                let mut sum_p = 0.0_f32;
+                for (m, &d) in dists.iter().enumerate() {
+                    let p = (-beta * d * d).exp();
+                    probs[m] = p;
+                    sum_p += p;
+                }
+                sum_p = sum_p.max(1e-12);
+                let mut h = 0.0_f32;
+                for p in probs.iter_mut() {
+                    *p /= sum_p;
+                    if *p > 1e-12 {
+                        h -= *p * p.ln();
+                    }
+                }
+                let diff = h - target_entropy;
+                if diff.abs() < 1e-4 {
+                    break;
+                }
+                if diff > 0.0 {
+                    beta_min = beta;
+                    beta = if beta_max.is_infinite() {
+                        beta * 2.0
+                    } else {
+                        0.5 * (beta + beta_max)
+                    };
+                } else {
+                    beta_max = beta;
+                    beta = 0.5 * (beta + beta_min);
+                }
+            }
+
+            for (&j, &p) in knn_idx[i].iter().zip(probs.iter()) {
+                p_directed.insert((i, j), p);
+            }
+        }
+
+        // Symmetrize P_{ij} = (p_{j|i} + p_{i|j}) / (2N)
+        let mut sym_edges: Vec<(usize, usize, f32)> = Vec::with_capacity(p_directed.len());
+        let denom = 2.0 * (n as f32);
+        for (&(i, j), &p_ij) in p_directed.iter() {
+            let p_ji = *p_directed.get(&(j, i)).unwrap_or(&0.0);
+            if i < j || p_ji == 0.0 {
+                let p_sym = ((p_ij + p_ji) / denom).max(1e-12);
+                sym_edges.push((i, j, p_sym));
+            }
+        }
+
+        let mut y = pca_2d_init(x, 1.0);
+        let mut vel = vec![[0.0_f32; 2]; n];
+        let mut gains = vec![[1.0_f32; 2]; n];
+        let mut grad = vec![[0.0_f32; 2]; n];
+        let mut rng_state = seed ^ 0x517CC1B727220A95;
+        let rep_samples = 64usize.min(n - 1);
+        let lr = 200.0_f32;
+
+        for iter in 0..n_iter {
+            let exaggeration = if iter < 125 { 4.0_f32 } else { 1.0_f32 };
+            let momentum = if iter < 125 { 0.5_f32 } else { 0.8_f32 };
+
+            for g in grad.iter_mut() {
+                g[0] = 0.0;
+                g[1] = 0.0;
+            }
+
+            // Estimate normalization Z and repulsive forces via Monte Carlo sampling over all N nodes
+            let mut z_sum = 0.0_f64;
+            let sample_scale = ((n - 1) as f32) / (rep_samples as f32);
+
+            for i in 0..n {
+                for _ in 0..rep_samples {
+                    rng_state ^= rng_state << 13;
+                    rng_state ^= rng_state >> 7;
+                    rng_state ^= rng_state << 17;
+                    let j = (rng_state as usize) % n;
+                    if j == i {
+                        continue;
+                    }
+                    let dx = y[i][0] - y[j][0];
+                    let dy = y[i][1] - y[j][1];
+                    let q_num = 1.0 / (1.0 + dx * dx + dy * dy);
+                    z_sum += (q_num * sample_scale) as f64;
+                }
+            }
+            let z_inv = (1.0 / z_sum.max(1e-9)) as f32;
+
+            // Attractive forces along sparse k-NN edges: 4 * (exaggeration * P_ij) * q_num * (y_i - y_j)
+            for &(i, j, p_ij) in &sym_edges {
+                let dx = y[i][0] - y[j][0];
+                let dy = y[i][1] - y[j][1];
+                let q_num = 1.0 / (1.0 + dx * dx + dy * dy);
+                let f_attr = 4.0 * (p_ij * exaggeration) * q_num;
+                let fx = f_attr * dx;
+                let fy = f_attr * dy;
+                grad[i][0] += fx;
+                grad[i][1] += fy;
+                grad[j][0] -= fx;
+                grad[j][1] -= fy;
+            }
+
+            // Repulsive forces: -4 * (q_num / Z) * q_num * (y_i - y_j)
+            for i in 0..n {
+                for _ in 0..rep_samples {
+                    rng_state ^= rng_state << 13;
+                    rng_state ^= rng_state >> 7;
+                    rng_state ^= rng_state << 17;
+                    let j = (rng_state as usize) % n;
+                    if j == i {
+                        continue;
+                    }
+                    let dx = y[i][0] - y[j][0];
+                    let dy = y[i][1] - y[j][1];
+                    let q_num = 1.0 / (1.0 + dx * dx + dy * dy);
+                    let f_rep = 4.0 * (q_num * z_inv) * q_num * sample_scale;
+                    grad[i][0] -= f_rep * dx;
+                    grad[i][1] -= f_rep * dy;
+                }
+            }
+
+            // Update with adaptive gains and momentum
+            let mut mean_x = 0.0_f32;
+            let mut mean_y = 0.0_f32;
+            for i in 0..n {
+                for d in 0..2 {
+                    let same_sign = (grad[i][d] > 0.0) == (vel[i][d] > 0.0);
+                    gains[i][d] = if same_sign {
+                        (gains[i][d] * 0.8).max(0.01)
+                    } else {
+                        gains[i][d] + 0.2
+                    };
+                    vel[i][d] = momentum * vel[i][d] - lr * gains[i][d] * grad[i][d];
+                    y[i][d] += vel[i][d];
+                }
+                mean_x += y[i][0];
+                mean_y += y[i][1];
+            }
+            mean_x /= n as f32;
+            mean_y /= n as f32;
+            for p in y.iter_mut() {
+                p[0] -= mean_x;
+                p[1] -= mean_y;
+            }
+        }
+
+        y
+    }
+
+    fn compute_axis_bounds(coords: &[[f32; 2]]) -> (f32, f32, f32, f32) {
+        let mut min_x = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+
+        for &[x, y] in coords {
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+        }
+        let pad_x = ((max_x - min_x) * 0.07).max(0.5);
+        let pad_y = ((max_y - min_y) * 0.07).max(0.5);
+        (min_x - pad_x, max_x + pad_x, min_y - pad_y, max_y + pad_y)
+    }
+
+    /// Renders a single-modality tier-stratified scatter plot to PNG using `plotters`.
+    fn render_tier_scatter_png(
+        coords: &[[f32; 2]],
+        tiers: &[i32],
+        title: &str,
+        x_label: &str,
+        y_label: &str,
+        legend_title: &str,
+        out_path: &Path,
+    ) -> Result<(), Box<dyn Error>> {
+        let root = BitMapBackend::new(out_path, (1200, 960)).into_drawing_area();
+        root.fill(&WHITE)?;
+
+        let (min_x, max_x, min_y, max_y) = compute_axis_bounds(coords);
+
+        let mut chart = ChartBuilder::on(&root)
+            .caption(title, ("sans-serif", 24).into_font())
+            .margin(25)
+            .x_label_area_size(45)
+            .y_label_area_size(55)
+            .build_cartesian_2d(min_x..max_x, min_y..max_y)?;
+
+        chart
+            .configure_mesh()
+            .x_desc(x_label)
+            .y_desc(y_label)
+            .axis_desc_style(("sans-serif", 18))
+            .label_style(("sans-serif", 14))
+            .light_line_style(RGBColor(235, 235, 235))
+            .draw()?;
+
+        // Tab10 palette matching Python seaborn ("tab10": 0=Blue, 1=Orange, 2=Green)
+        let tier_colors: [(i32, RGBColor); 3] = [
+            (0, RGBColor(31, 119, 180)),
+            (1, RGBColor(255, 127, 14)),
+            (2, RGBColor(44, 160, 44)),
+        ];
+
+        for (tier_val, color) in tier_colors {
+            let pts: Vec<(f32, f32)> = coords
+                .iter()
+                .zip(tiers.iter())
+                .filter(|&(_, &t)| t == tier_val)
+                .map(|(&[x, y], _)| (x, y))
+                .collect();
+
+            let label = format!("{} {}", legend_title, tier_val);
+            chart
+                .draw_series(
+                    pts.into_iter()
+                        .map(|(x, y)| Circle::new((x, y), 3, color.mix(0.80).filled())),
+                )?
+                .label(label)
+                .legend(move |(x, y)| Circle::new((x + 8, y), 5, color.filled()));
+        }
+
+        chart
+            .configure_series_labels()
+            .position(SeriesLabelPosition::UpperRight)
+            .background_style(WHITE.mix(0.9))
+            .border_style(BLACK.mix(0.4))
+            .label_font(("sans-serif", 15))
+            .draw()?;
+
+        root.present()?;
+        Ok(())
+    }
+
+    /// Renders the Joint User + Movie Shared-Hypersphere scatter plot to PNG using `plotters`.
+    fn render_joint_scatter_png(
+        user_coords: &[[f32; 2]],
+        user_tiers: &[i32],
+        movie_coords: &[[f32; 2]],
+        movie_tiers: &[i32],
+        title: &str,
+        x_label: &str,
+        y_label: &str,
+        out_path: &Path,
+    ) -> Result<(), Box<dyn Error>> {
+        let root = BitMapBackend::new(out_path, (1300, 980)).into_drawing_area();
+        root.fill(&WHITE)?;
+
+        let mut all_coords: Vec<[f32; 2]> = Vec::with_capacity(user_coords.len() + movie_coords.len());
+        all_coords.extend_from_slice(user_coords);
+        all_coords.extend_from_slice(movie_coords);
+        let (min_x, max_x, min_y, max_y) = compute_axis_bounds(&all_coords);
+
+        let mut chart = ChartBuilder::on(&root)
+            .caption(title, ("sans-serif", 23).into_font())
+            .margin(25)
+            .x_label_area_size(45)
+            .y_label_area_size(55)
+            .build_cartesian_2d(min_x..max_x, min_y..max_y)?;
+
+        chart
+            .configure_mesh()
+            .x_desc(x_label)
+            .y_desc(y_label)
+            .axis_desc_style(("sans-serif", 18))
+            .label_style(("sans-serif", 14))
+            .light_line_style(RGBColor(235, 235, 235))
+            .draw()?;
+
+        // 1. Draw Users first (Circles in cool blue shades)
+        let user_styles: [(i32, &str, RGBColor); 3] = [
+            (0, "User Tier 0 (Power)", RGBColor(31, 119, 180)),
+            (1, "User Tier 1 (Mid)", RGBColor(107, 174, 214)),
+            (2, "User Tier 2 (Light)", RGBColor(158, 202, 225)),
+        ];
+
+        for (t_val, label_str, color) in user_styles {
+            let pts: Vec<(f32, f32)> = user_coords
+                .iter()
+                .zip(user_tiers.iter())
+                .filter(|&(_, &t)| t == t_val)
+                .map(|(&[x, y], _)| (x, y))
+                .collect();
+
+            chart
+                .draw_series(
+                    pts.into_iter()
+                        .map(|(x, y)| Circle::new((x, y), 3, color.mix(0.45).filled())),
+                )?
+                .label(label_str)
+                .legend(move |(x, y)| Circle::new((x + 8, y), 5, color.filled()));
+        }
+
+        // 2. Draw Movies on top (Triangles in high-contrast Red / Orange / Green)
+        let movie_styles: [(i32, &str, RGBColor); 3] = [
+            (1, "Movie Tier 1 (Torso)", RGBColor(255, 127, 14)),
+            (2, "Movie Tier 2 (Tail)", RGBColor(44, 160, 44)),
+            (0, "Movie Tier 0 (Head)", RGBColor(214, 39, 40)),
+        ];
+
+        for (t_val, label_str, color) in movie_styles {
+            let pts: Vec<(f32, f32)> = movie_coords
+                .iter()
+                .zip(movie_tiers.iter())
+                .filter(|&(_, &t)| t == t_val)
+                .map(|(&[x, y], _)| (x, y))
+                .collect();
+
+            chart
+                .draw_series(
+                    pts.into_iter()
+                        .map(|(x, y)| TriangleMarker::new((x, y), 5, color.mix(0.85).filled())),
+                )?
+                .label(label_str)
+                .legend(move |(x, y)| TriangleMarker::new((x + 8, y), 6, color.filled()));
+        }
+
+        chart
+            .configure_series_labels()
+            .position(SeriesLabelPosition::UpperRight)
+            .background_style(WHITE.mix(0.92))
+            .border_style(BLACK.mix(0.4))
+            .label_font(("sans-serif", 15))
+            .draw()?;
+
+        root.present()?;
+        Ok(())
+    }
+
+
 }

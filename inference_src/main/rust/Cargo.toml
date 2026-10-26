@@ -58,6 +58,15 @@ polars = { version = "0.54.4", features = ["lazy", "strings", "parquet", "polars
 serial_test = "4.0.1"
 safetensors = "0.8.0"
 
+plotters = { version = "0.3.7", default-features = false, features = [
+    "bitmap_backend",
+    "bitmap_encoder",
+    "svg_backend",
+    "all_series",
+    "all_elements",
+    "ab_glyph", # Pure-Rust font rendering (replaces "ttf" / fontconfig)
+] }
+
 # Force Cargo to look outside its project root for the test file
 [[test]]
 name = "integration_tests"

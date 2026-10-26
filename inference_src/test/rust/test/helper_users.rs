@@ -41,7 +41,7 @@ pub fn get_movie_tiers_df(
 
 pub fn _get_key_tiers_df(
     ratings_history_df: &LazyFrame,
-    user_catalog_df: &LazyFrame,
+    catalog_df: &LazyFrame,
     key : &str
 ) -> LazyFrame {
 
@@ -72,7 +72,7 @@ pub fn _get_key_tiers_df(
         .fill_null(lit(0.0));
 
     // Construct the final LazyFrame graph
-    user_catalog_df.clone()
+    catalog_df.clone()
         .select([col(&key_id)])
         .left_join(
             counts_lf,

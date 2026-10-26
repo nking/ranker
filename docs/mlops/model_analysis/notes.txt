@@ -1,0 +1,14 @@
+these notes will be revised to point to the postr training analysis
+and model comparison results.
+
+
+Embedding and the t-SNE, UMAPs:
+   The GATv2 layer outputs are node represenations
+   from which user and candidate represenations are extracted.
+
+   Expected well-fitting:
+      Expect bi-modal polarization:  the top 1-5 results
+      are close to the positive and the rest are far away.
+      Expect  L_unif=-1.8 to -2.5 where L_unif is hypersphere
+      uniformity from Wang & Isola, 2020
+ 
