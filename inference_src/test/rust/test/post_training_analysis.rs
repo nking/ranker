@@ -11,7 +11,7 @@ pub mod helper {
 use inference_engine::app_config::AppConfig;
 use inference_engine::orchestrator::Orchestrator;
 use inference_engine::movie_db::MovieDb;
-use helper::{get_train_val_test_liked_uris, DataSize};
+use helper::{get_train_val_test_liked_uris, DataSize, ensure_plotters_font_registered};
 use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
 use crate::helper::{get_bin_dir, get_config_json_uri, get_movie_tiers_df, get_user_tiers_df, load_and_concat_parquet};
 
@@ -3526,6 +3526,9 @@ mod post_training_analysis {
         output_dir: &Path,
         output_filename_root: &str,
     ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+
+        ensure_plotters_font_registered();
+
         std::fs::create_dir_all(output_dir)?;
         let mut saved_files: Vec<PathBuf> = Vec::with_capacity(6);
 
@@ -4203,7 +4206,7 @@ mod post_training_analysis {
         legend_title: &str,
         out_path: &Path,
     ) -> Result<(), Box<dyn Error>> {
-        let root = BitMapBackend::new(out_path, (1200, 960)).into_drawing_area();
+        let root = SVGBackend::new(out_path, (1200, 960)).into_drawing_area();
         root.fill(&WHITE)?;
 
         let (min_x, max_x, min_y, max_y) = compute_axis_bounds(coords);
@@ -4272,7 +4275,8 @@ mod post_training_analysis {
         y_label: &str,
         out_path: &Path,
     ) -> Result<(), Box<dyn Error>> {
-        let root = BitMapBackend::new(out_path, (1300, 980)).into_drawing_area();
+
+        let root = SVGBackend::new(out_path, (1300, 980)).into_drawing_area();
         root.fill(&WHITE)?;
 
         let mut all_coords: Vec<[f32; 2]> = Vec::with_capacity(user_coords.len() + movie_coords.len());
@@ -4355,6 +4359,5 @@ mod post_training_analysis {
         root.present()?;
         Ok(())
     }
-
 
 }

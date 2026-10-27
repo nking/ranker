@@ -5,11 +5,18 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use clap::Parser;
-use plotters::prelude::{BitMapBackend, ChartBuilder, LineSeries, PathElement, RGBColor, BLACK, WHITE, Color, Rectangle, IntoDrawingArea, IntoFont};
+use plotters::prelude::{SVGBackend, ChartBuilder, LineSeries, PathElement, RGBColor, BLACK, WHITE, Color, Rectangle, IntoDrawingArea, IntoFont};
 use polars::prelude::*;
 //use plotters::prelude::*;
 use serde::Serialize;
 use serde_json::{json, Value};
+
+pub mod helper {
+    // Tell Rust to literally include the code from helper.rs here
+    include!("helper.rs");
+    include!("helper_users.rs");
+}
+use helper::{ensure_plotters_font_registered};
 
 /// Command-line arguments for comparing two post-training analysis runs
 #[derive(Parser, Debug, Clone)]
@@ -1047,6 +1054,9 @@ pub fn generate_comparison_graphics(
     label_a: &str,
     label_b: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+
+    ensure_plotters_font_registered();
+
     fs::create_dir_all(output_dir)?;
 
     // 1. Render Lorenz Curve Comparison
@@ -1057,7 +1067,7 @@ pub fn generate_comparison_graphics(
         let curve_b: Vec<f64> = serde_json::from_reader(BufReader::new(File::open(l_b_path)?))?;
 
         let file_path = output_dir.join("lorenz_curve_comparison.png");
-        let root = BitMapBackend::new(&file_path, (800, 800)).into_drawing_area();
+        let root = SVGBackend::new(&file_path, (800, 800)).into_drawing_area();
         root.fill(&WHITE)?;
 
         let mut chart = ChartBuilder::on(&root)
@@ -1144,7 +1154,7 @@ pub fn generate_comparison_graphics(
                 // Render User Tier Grouped Bar Chart
                 if joined.schema().contains("user_tier") {
                     let file_path = output_dir.join("user_tier_stratification.png");
-                    let root = BitMapBackend::new(&file_path, (900, 500)).into_drawing_area();
+                    let root = SVGBackend::new(&file_path, (900, 500)).into_drawing_area();
                     root.fill(&WHITE)?;
 
                     let mut mean_ndcg_a = [0.0; 3];

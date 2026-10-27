@@ -292,3 +292,31 @@ pub fn get_python_path() -> PathBuf {
 
     python_path
 }
+
+pub fn ensure_plotters_font_registered() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        // Standard Linux paths for pre-installed TrueType fonts
+        let candidate_paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        ];
+        for path in candidate_paths {
+            if let Ok(bytes) = std::fs::read(path) {
+                let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
+                let _ = plotters::style::register_font(
+                    "sans-serif",
+                    plotters::style::FontStyle::Normal,
+                    leaked,
+                );
+                println!("[Plotters] Registered system TTF font from {}", path);
+                return;
+            }
+        }
+        eprintln!("[Plotters] Warning: No system .ttf found in standard paths; use SVGBackend instead.");
+    });
+}
