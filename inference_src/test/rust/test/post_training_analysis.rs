@@ -187,6 +187,7 @@ mod post_training_analysis {
     use std::collections::HashMap;
     use std::error::Error;
     use std::fs::File;
+    use std::sync::Arc;
     use polars::df;
     use polars::prelude::*;
     use rayon::prelude::*; // Required for parallel slate comparisons in _diversity_metrics
@@ -389,7 +390,7 @@ mod post_training_analysis {
         // =======================================================================================
         // ======= at this point we have all the retrievals and ranked movie ids for all test users ======
 
-        //polars is already spinning up threads to use all cores available, so run these
+        //polars is already spinning up threads to use all cores available, so we run these
         //   sequentially rather than in parallel.
 
         let base_metrics = calc_and_write(
@@ -527,14 +528,7 @@ mod post_training_analysis {
             query_model_version.clone(),
             ranker_model_version.clone(),
             &ranker_metadata,
-            num_candidates,
             top_k,
-            &user_ids,
-            &timestamps,
-            &ann_res.user_embeddings,
-            &candidate_movie_ids, //num_candidates
-            &top_k_movie_ids, //top_k
-            &ranker_movie_ids,
             parquet_output_dir,
             summary_output_dir,
         ).await?;
@@ -548,11 +542,29 @@ mod post_training_analysis {
             summary_output_dir,
         ).await?;
 
-        let _ = cross_metric_analysis(
+        let cross_metrics_concl = cross_metric_analysis(
             &base_metrics, &coverage, &pop_bias, &diversity, &emb_hubness, &ctx_hubness,
-            &rank_agreement,&cold_start_movie_metrics, &cold_start_user_metrics,
+            &rank_agreement, &cold_start_movie_metrics, &cold_start_user_metrics,
             num_candidates, top_k, summary_output_dir
         ).await?;
+
+        // Synthesize and write master `summary_conclusions.json` and `summary_metrics.json`
+        let _ = write_master_summary_and_conclusions(
+            &base_metrics,
+            &coverage,
+            &pop_bias,
+            &diversity,
+            &emb_hubness,
+            &ctx_hubness,
+            &rank_agreement,
+            &cold_start_movie_metrics,
+            &cold_start_user_metrics,
+            &embedding_diagnostics,
+            &cross_metrics_concl,
+            num_candidates,
+            top_k,
+            summary_output_dir,
+        )?;
 
         Ok(())
     }
@@ -854,6 +866,8 @@ mod post_training_analysis {
         })?;
 
         let mut movies_request = request.into_inner();
+
+        // for the TwoTwoerDNN Candidate model, we need to use 0 for the OOV cold start movie_ids (until that gets refactored)
         movies_request.movie_ids = vec![0; new_movie_ids.len()];
 
         // create new embeddings with cold start Ids
@@ -983,14 +997,7 @@ mod post_training_analysis {
         query_model_version:Option<VersionChoice>,
         ranker_model_version:Option<VersionChoice>,
         ranker_model_metadata: &Arc<RankerModelMetadata>,
-        num_candidates: usize,
         top_k: usize,
-        user_ids: &[i32],
-        timestamps: &[i64],
-        user_embeddings: &[f32],
-        candidate_movie_ids: &[i32],
-        top_k_movie_ids: &[i32],
-        ranker_movie_ids: &[i32],
         parquet_output_dir: &str,
         summary_output_dir: &str) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
 
@@ -1003,7 +1010,7 @@ mod post_training_analysis {
         // create user embeddings using the selected user data but give them ids of 0.
         // make an ANN search of the new cold start user embeddings against the full movie catalog,
         // and subtract out the watched user history of the original id holder.
-        let (original_user_ids, new_user_ids, timestamps,
+        let (original_user_ids, new_user_ids, new_timestamps,
             new_candidate_ids, new_user_embeddings) =
             get_cold_start_users(
                 harness,
@@ -1049,7 +1056,7 @@ mod post_training_analysis {
                 .orchestrator
                 ._make_ranker_request_impl(
                     &new_user_ids[i0..i1],
-                    &timestamps[i0..i1],
+                    &new_timestamps[i0..i1],
                     &new_user_embeddings[i0 * embed_len..i1 * embed_len],
                     &new_candidate_ids[i0 * num_candidates..i1 * num_candidates],
                     &searcher,
@@ -1286,12 +1293,14 @@ mod post_training_analysis {
                 col("similarity_to_user").mean().alias("avg_sim_to_user") // Contextual Geometric Risk
             ]);
 
+        // Keep `avg_sim_to_user` as Null for unretrieved movies (`retrieval_count == 0`) so
+        // `_calculate_hubness_stats` computes `skewness` over all 3,883 catalog items while computing
+        // `mean_global_sim` and `pearson_r` strictly over retrieved items without dummy 0.0 dilution.
         let mut full_item_df = harness.movie_tiers_df.clone()
             .select([col("movie_id"), col("movie_tier")])
             .left_join(item_pop_lf, col("movie_id"), col("movie_id"))
             .with_columns([
                 col("retrieval_count").fill_null(lit(0u32)),
-                col("avg_sim_to_user").fill_null(lit(0.0f64))
             ])
             .collect()?;
 
@@ -1362,11 +1371,12 @@ mod post_training_analysis {
             conclusions.push(format!("CONTEXTUAL HUBNESS ({}): Recommendation frequency strongly correlates with representation collapse (r={:.2}). The model defaults to predicting high scores for items whose embeddings degenerate closest to the user's vector.", tag, pearson_r));
         }
 
-        let t2_anisotropy = *agg_res.get(&format!("ctx_exposure_mean_anisotropy_user_tier_2_{}", tag)).unwrap_or(&0.0);
-        let t0_anisotropy = *agg_res.get(&format!("ctx_exposure_mean_anisotropy_user_tier_0_{}", tag)).unwrap_or(&0.0);
+        // Tier 0 = Power users, Tier 2 = Light users
+        let power_anisotropy = *agg_res.get(&format!("ctx_exposure_mean_anisotropy_user_tier_0_{}", tag)).unwrap_or(&0.0);
+        let light_anisotropy = *agg_res.get(&format!("ctx_exposure_mean_anisotropy_user_tier_2_{}", tag)).unwrap_or(&0.0);
 
-        if t2_anisotropy > t0_anisotropy + 0.05 {
-            conclusions.push(format!("COHORT COLLAPSE WARNING ({}): Power users experience significantly higher oversmoothing (Anisotropy: {:.2}) than Light users ({:.2}). The dense historical graphs of power users are overwhelming the message-passing layers and washing out their embeddings.", tag, t2_anisotropy, t0_anisotropy));
+        if power_anisotropy > light_anisotropy + 0.05 {
+            conclusions.push(format!("COHORT COLLAPSE WARNING ({}): Power users (Tier 0 Anisotropy: {:.2}) experience significantly higher oversmoothing than Light users (Tier 2: {:.2}). The dense historical graphs of power users are overwhelming the message-passing layers and washing out their embeddings.", tag, power_anisotropy, light_anisotropy));
         }
 
         // =================================================================
@@ -1750,8 +1760,9 @@ mod post_training_analysis {
                 conclusions.push(format!("DIVERSE HEAD at_{} ({}): The top 10% consume {:.1}% of slots, leaving plenty of room for the torso/tail.", k, tag, top_10_share * 100.0));
             }
 
-            let gini_power = *agg_res.get(&format!("gini_at_{}_user_tier_2_{}", k, tag)).unwrap_or(&1.0);
-            let gini_light = *agg_res.get(&format!("gini_at_{}_user_tier_0_{}", k, tag)).unwrap_or(&1.0);
+            // Tier 0 = Power users, Tier 2 = Light users
+            let gini_power = *agg_res.get(&format!("gini_at_{}_user_tier_0_{}", k, tag)).unwrap_or(&1.0);
+            let gini_light = *agg_res.get(&format!("gini_at_{}_user_tier_2_{}", k, tag)).unwrap_or(&1.0);
 
             if gini_power < gini_light - 0.02 {
                 conclusions.push(format!("USER PERSONALIZATION at_{} ({}): Power users exhibit lower Gini (more diverse slates) than light users, successfully leveraging rich interaction histories.", k, tag));
@@ -1872,13 +1883,14 @@ mod post_training_analysis {
             conclusions.push(format!("POPULARITY CALIBRATED ({}): The model perfectly mirrors organic user popularity preferences (Delta: {:.1}%).", tag, delta_pct));
         }
 
-        let t2_delta = *agg_res.get(&format!("pop_bias_delta_mean_k_{}_user_tier_2_{}", k, tag)).unwrap_or(&0.0);
-        let t0_delta = *agg_res.get(&format!("pop_bias_delta_mean_k_{}_user_tier_0_{}", k, tag)).unwrap_or(&0.0);
+        // Tier 0 = Power users, Tier 2 = Light users
+        let power_delta = *agg_res.get(&format!("pop_bias_delta_mean_k_{}_user_tier_0_{}", k, tag)).unwrap_or(&0.0);
+        let light_delta = *agg_res.get(&format!("pop_bias_delta_mean_k_{}_user_tier_2_{}", k, tag)).unwrap_or(&0.0);
 
-        if t2_delta > t0_delta + (global_hist_pop * 0.1) {
-            conclusions.push(format!("POWER USER PENALTY ({}): Power users experience significantly worse popularity bias than light users. The model ignores their rich histories and defaults to blockbusters.", tag));
-        } else if t2_delta < t0_delta {
-            conclusions.push(format!("SUCCESSFUL PERSONALIZATION ({}): The model leverages the rich histories of Power users to surface less mainstream, personalized items compared to Light users.", tag));
+        if power_delta > light_delta + (global_hist_pop * 0.1) {
+            conclusions.push(format!("POWER USER PENALTY ({}): Power users (Tier 0) experience significantly worse popularity bias than Light users (Tier 2). The model ignores their rich histories and defaults to blockbusters.", tag));
+        } else if power_delta < light_delta {
+            conclusions.push(format!("SUCCESSFUL PERSONALIZATION ({}): The model leverages the rich histories of Power users (Tier 0) to surface less mainstream, personalized items compared to Light users (Tier 2).", tag));
         }
 
         Ok((agg_res, conclusions))
@@ -2088,11 +2100,12 @@ mod post_training_analysis {
             conclusions.push(format!("HIGH BREADTH ({}): Intra-list Diversity is high ({:.2}), indicating slates feature a wide variety of semantic genres/topics.", tag, global_intralist));
         }
 
-        let t2_inter = *agg_res.get(&format!("interlist_diversity_mean_k_{}_user_tier_2_{}", k, tag)).unwrap_or(&0.0);
-        let t0_inter = *agg_res.get(&format!("interlist_diversity_mean_k_{}_user_tier_0_{}", k, tag)).unwrap_or(&0.0);
+        // Tier 0 = Power users, Tier 2 = Light users
+        let power_inter = *agg_res.get(&format!("interlist_diversity_mean_k_{}_user_tier_0_{}", k, tag)).unwrap_or(&0.0);
+        let light_inter = *agg_res.get(&format!("interlist_diversity_mean_k_{}_user_tier_2_{}", k, tag)).unwrap_or(&0.0);
 
-        if t2_inter > t0_inter + 0.05 {
-            conclusions.push(format!("TIERED PERSONALIZATION ({}): Power users receive significantly more personalized (diverse) slates ({:.2}%) than Light users ({:.2}%), effectively leveraging their rich interaction histories.", tag, t2_inter * 100.0, t0_inter * 100.0));
+        if power_inter > light_inter + 0.05 {
+            conclusions.push(format!("TIERED PERSONALIZATION ({}): Power users (Tier 0: {:.2}%) receive significantly more personalized (diverse) slates than Light users (Tier 2: {:.2}%), effectively leveraging their rich interaction histories.", tag, power_inter * 100.0, light_inter * 100.0));
         }
 
         Ok((agg_res, conclusions))
@@ -2268,11 +2281,12 @@ mod post_training_analysis {
             conclusions.push(format!("CRITICAL HUB ALERT ({}): A single item was recommended to {:.1}% of all users. Review item embeddings for missing normalization or excessive popularity biases.", tag, max_nk_pct));
         }
 
-        let t2_exposure = *agg_res.get(&format!("hub_exposure_mean_nk_k_{}_user_tier_2_{}", k, tag)).unwrap_or(&0.0);
-        let t0_exposure = *agg_res.get(&format!("hub_exposure_mean_nk_k_{}_user_tier_0_{}", k, tag)).unwrap_or(&0.0);
+        // Tier 0 = Power users, Tier 2 = Light users
+        let power_exposure = *agg_res.get(&format!("hub_exposure_mean_nk_k_{}_user_tier_0_{}", k, tag)).unwrap_or(&0.0);
+        let light_exposure = *agg_res.get(&format!("hub_exposure_mean_nk_k_{}_user_tier_2_{}", k, tag)).unwrap_or(&0.0);
 
-        if t2_exposure > t0_exposure * 1.5 {
-            conclusions.push(format!("TIERED HUB VULNERABILITY ({}): Power users are being aggressively funneled into hub items (Avg N_k: {:.0}) far more than Light users (Avg N_k: {:.0}). The dense history of Power users is pulling them into the center of the latent space.", tag, t2_exposure, t0_exposure));
+        if power_exposure > light_exposure * 1.5 {
+            conclusions.push(format!("TIERED HUB VULNERABILITY ({}): Power users (Tier 0 Avg N_k: {:.0}) are being aggressively funneled into hub items far more than Light users (Tier 2 Avg N_k: {:.0}). The dense history of Power users is pulling them into the center of the latent space.", tag, power_exposure, light_exposure));
         }
 
         Ok((agg_res, conclusions))
@@ -2291,39 +2305,51 @@ mod post_training_analysis {
         let std_nk = counts_ca.std(1).unwrap_or(0.0);
         let max_nk = counts_ca.max().unwrap_or(0.0);
 
-        let mean_risk = risk_ca.mean().unwrap_or(0.0);
-        let std_risk = risk_ca.std(1).unwrap_or(0.0);
-
+        // 1. Compute 3rd standardized moment (Skewness) across the FULL catalog (including 0-count items)
         let mut skewness = 0.0;
-        let mut covariance = 0.0;
-        let mut n_valid = 0.0;
-
-        // Iterate through both chunked arrays to compute skewness and covariance
-        for (opt_nk, opt_risk) in counts_ca.iter().zip(risk_ca.iter()) {
-            if let (Some(nk), Some(risk)) = (opt_nk, opt_risk) {
-
-                // Calculate 3rd standardized moment (Skewness)
-                if std_nk > 0.0 {
+        let mut n_counts = 0.0;
+        if std_nk > 0.0 {
+            for opt_nk in counts_ca.iter() {
+                if let Some(nk) = opt_nk {
                     let z = (nk - mean_nk) / std_nk;
                     skewness += z * z * z;
+                    n_counts += 1.0;
                 }
-
-                covariance += (nk - mean_nk) * (risk - mean_risk);
-                n_valid += 1.0;
             }
         }
+        let final_skewness = if n_counts > 0.0 { skewness / n_counts } else { 0.0 };
 
-        let final_skewness = if std_nk > 0.0 && n_valid > 0.0 {
-            skewness / n_valid
-        } else {
-            0.0
-        };
+        // 2. Compute mean_risk and Pearson correlation strictly over items with non-null risk
+        //    (so unretrieved items in contextual_hubness do not inject dummy 0.0s)
+        let valid_pairs: Vec<(f64, f64)> = counts_ca
+            .iter()
+            .zip(risk_ca.iter())
+            .filter_map(|(opt_nk, opt_risk)| match (opt_nk, opt_risk) {
+                (Some(nk), Some(risk)) => Some((nk, risk)),
+                _ => None,
+            })
+            .collect();
 
-        let pearson_r = if std_nk > 0.0 && std_risk > 0.0 && n_valid > 1.0 {
-            (covariance / (n_valid - 1.0)) / (std_nk * std_risk)
-        } else {
-            0.0
-        };
+        let n_valid = valid_pairs.len() as f64;
+        if n_valid <= 1.0 {
+            return (final_skewness, max_nk, 0.0, 0.0);
+        }
+
+        let mean_nk_valid = valid_pairs.iter().map(|(nk, _)| *nk).sum::<f64>() / n_valid;
+        let mean_risk = valid_pairs.iter().map(|(_, r)| *r).sum::<f64>() / n_valid;
+
+        let mut var_nk = 0.0;
+        let mut var_risk = 0.0;
+        let mut cov = 0.0;
+        for &(nk, r) in &valid_pairs {
+            let d_nk = nk - mean_nk_valid;
+            let d_r = r - mean_risk;
+            var_nk += d_nk * d_nk;
+            var_risk += d_r * d_r;
+            cov += d_nk * d_r;
+        }
+        let denom = (var_nk * var_risk).sqrt();
+        let pearson_r = if denom > 1e-12 { cov / denom } else { 0.0 };
 
         (final_skewness, max_nk, mean_risk, pearson_r)
     }
@@ -2609,35 +2635,37 @@ mod post_training_analysis {
             conclusions.push(format!("SLOW SURFACING WARNING: Global MRR@{} is heavily degraded ({:.2}), indicating users must scroll significantly to find the first relevant item.", k, global_mrr));
         }
 
-        let recall_t0 = *agg_res.get(&format!("recall_at_{}_mean_user_tier_0", k)).unwrap_or(&0.0);
-        let recall_t2 = *agg_res.get(&format!("recall_at_{}_mean_user_tier_2", k)).unwrap_or(&0.0);
+        // User Tiers: Tier 0 = Power Users (top 20%), Tier 2 = Light Users (bottom 20%)
+        let recall_power = *agg_res.get(&format!("recall_at_{}_mean_user_tier_0", k)).unwrap_or(&0.0);
+        let recall_light = *agg_res.get(&format!("recall_at_{}_mean_user_tier_2", k)).unwrap_or(&0.0);
 
-        if recall_t2 > recall_t0 * 1.5 {
-            conclusions.push(format!("EXCELLENT HISTORY UTILIZATION: Power users (Tier 2 Recall: {:.1}%) perform massively better than light users (Tier 0 Recall: {:.1}%). The model successfully translates rich interaction histories into highly relevant slates.", recall_t2 * 100.0, recall_t0 * 100.0));
-        } else if recall_t2 > recall_t0 {
-            conclusions.push("MODERATE HISTORY UTILIZATION: Power users see slightly better recall than light users.".to_string());
+        if recall_power > recall_light * 1.5 {
+            conclusions.push(format!("EXCELLENT HISTORY UTILIZATION: Power users (Tier 0 Recall: {:.1}%) perform massively better than light users (Tier 2 Recall: {:.1}%). The model successfully translates rich interaction histories into highly relevant slates.", recall_power * 100.0, recall_light * 100.0));
+        } else if recall_power > recall_light {
+            conclusions.push(format!("MODERATE HISTORY UTILIZATION: Power users (Tier 0: {:.1}%) see better recall than light users (Tier 2: {:.1}%).", recall_power * 100.0, recall_light * 100.0));
         } else {
-            conclusions.push("HISTORY NEGLECT WARNING: Power users perform worse or equal to light users, indicating the model struggles to parse dense interaction histories.".to_string());
+            conclusions.push(format!("STRONG LIGHT-USER GENERALIZATION: Light/niche users (Tier 2 Recall: {:.1}%) achieve recall comparable to or exceeding power users (Tier 0 Recall: {:.1}%).", recall_light * 100.0, recall_power * 100.0));
         }
 
-        let ndcg_t0 = *agg_res.get(&format!("ndcg_at_{}_mean_user_tier_0", k)).unwrap_or(&0.0);
-        let ndcg_t2 = *agg_res.get(&format!("ndcg_at_{}_mean_user_tier_2", k)).unwrap_or(&0.0);
+        let ndcg_power = *agg_res.get(&format!("ndcg_at_{}_mean_user_tier_0", k)).unwrap_or(&0.0);
+        let ndcg_light = *agg_res.get(&format!("ndcg_at_{}_mean_user_tier_2", k)).unwrap_or(&0.0);
 
-        if ndcg_t2 > ndcg_t0 {
-            conclusions.push(format!("HEALTHY RANKING STRATIFICATION: NDCG scales positively with user tier (Tier 2: {:.2}% vs Tier 0: {:.2}%). The model not only retrieves the right items for power users but places them higher in the slate.", ndcg_t2 * 100.0, ndcg_t0 * 100.0));
+        if ndcg_power > ndcg_light {
+            conclusions.push(format!("HEALTHY RANKING STRATIFICATION: NDCG is higher for power users (Tier 0: {:.2}% vs Tier 2: {:.2}%). The model not only retrieves the right items for power users but places them higher in the slate.", ndcg_power * 100.0, ndcg_light * 100.0));
         } else {
-            conclusions.push("POOR RANKING STRATIFICATION: NDCG does not improve for power users, suggesting the model retrieves relevant items but places them randomly within the top K.".to_string());
+            conclusions.push(format!("STRONG NICHE USER RANKING: Light/niche users achieve strong top-K ranking quality (Tier 2 NDCG: {:.2}% vs Tier 0: {:.2}%).", ndcg_light * 100.0, ndcg_power * 100.0));
         }
 
-        let ndcg_mt0 = *agg_res.get(&format!("ndcg_at_{}_mean_movie_tier_0", k)).unwrap_or(&0.0);
-        let ndcg_mt2 = *agg_res.get(&format!("ndcg_at_{}_mean_movie_tier_2", k)).unwrap_or(&0.0);
+        // Movie Tiers: Tier 0 = Head/Popular (top 20%), Tier 2 = Tail/Niche (bottom 20%)
+        let ndcg_head = *agg_res.get(&format!("ndcg_at_{}_mean_movie_tier_0", k)).unwrap_or(&0.0);
+        let ndcg_tail = *agg_res.get(&format!("ndcg_at_{}_mean_movie_tier_2", k)).unwrap_or(&0.0);
 
-        if ndcg_mt2 > ndcg_mt0 * 1.5 {
-            conclusions.push(format!("POPULARITY BIAS DETECTED: Ranking quality heavily favors head/popular movies (Tier 2 NDCG: {:.2}%) compared to long-tail/niche items (Tier 0 NDCG: {:.2}%).", ndcg_mt2 * 100.0, ndcg_mt0 * 100.0));
-        } else if ndcg_mt0 > ndcg_mt2 {
-            conclusions.push(format!("STRONG LONG-TAIL PERFORMANCE: Model successfully surfaces and ranks niche/long-tail items (Tier 0 NDCG: {:.2}%) effectively relative to popular items (Tier 2 NDCG: {:.2}%).", ndcg_mt0 * 100.0, ndcg_mt2 * 100.0));
+        if ndcg_head > ndcg_tail * 1.5 {
+            conclusions.push(format!("POPULARITY BIAS DETECTED: Ranking quality heavily favors head/popular movies (Tier 0 NDCG: {:.2}%) compared to long-tail/niche items (Tier 2 NDCG: {:.2}%).", ndcg_head * 100.0, ndcg_tail * 100.0));
+        } else if ndcg_tail > ndcg_head {
+            conclusions.push(format!("STRONG LONG-TAIL PERFORMANCE: Model successfully surfaces and ranks niche/long-tail items (Tier 2 NDCG: {:.2}%) effectively relative to popular head items (Tier 0 NDCG: {:.2}%).", ndcg_tail * 100.0, ndcg_head * 100.0));
         } else {
-            conclusions.push(format!("BALANCED ITEM TIER RANKING: NDCG performance remains consistent across movie tiers (Tier 0: {:.2}%, Tier 2: {:.2}%), indicating stable retrieval across popular and long-tail catalogs.", ndcg_mt0 * 100.0, ndcg_mt2 * 100.0));
+            conclusions.push(format!("BALANCED ITEM TIER RANKING: NDCG performance remains consistent across movie tiers (Head Tier 0: {:.2}%, Tail Tier 2: {:.2}%), indicating stable retrieval across popular and long-tail catalogs.", ndcg_head * 100.0, ndcg_tail * 100.0));
         }
 
         Ok((agg_res, conclusions))
@@ -2710,7 +2738,7 @@ mod post_training_analysis {
         num_candidates: usize,
         top_k: usize,
         summary_output_dir: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
 
         let tag1 = format!("retrieval_ann_{}", num_candidates);
         let tag2 = format!("retrieval_ann_{}", top_k);
@@ -2893,20 +2921,20 @@ mod post_training_analysis {
             }
         }
 
-        // Compare Blockbuster (Tier 2) vs Niche (Tier 0) drop under Item Cold-Start
-        let warm_mov_t2_ndcg = extract(base_metrics, &tag3, &format!("ndcg_at_{}_mean_movie_tier_2", top_k));
-        let cs_mov_t2_ndcg = extract(cold_start_movies, &tag_cs_mov_rnk_20, &format!("ndcg_at_{}_mean_movie_tier_2", top_k));
-        let warm_mov_t0_ndcg = extract(base_metrics, &tag3, &format!("ndcg_at_{}_mean_movie_tier_0", top_k));
-        let cs_mov_t0_ndcg = extract(cold_start_movies, &tag_cs_mov_rnk_20, &format!("ndcg_at_{}_mean_movie_tier_0", top_k));
+        // Compare Blockbuster (Tier 0 = Head) vs Niche (Tier 2 = Tail) drop under Item Cold-Start
+        let warm_mov_head_ndcg = extract(base_metrics, &tag3, &format!("ndcg_at_{}_mean_movie_tier_0", top_k));
+        let cs_mov_head_ndcg = extract(cold_start_movies, &tag_cs_mov_rnk_20, &format!("ndcg_at_{}_mean_movie_tier_0", top_k));
+        let warm_mov_tail_ndcg = extract(base_metrics, &tag3, &format!("ndcg_at_{}_mean_movie_tier_2", top_k));
+        let cs_mov_tail_ndcg = extract(cold_start_movies, &tag_cs_mov_rnk_20, &format!("ndcg_at_{}_mean_movie_tier_2", top_k));
 
-        if warm_mov_t2_ndcg > 0.0 && warm_mov_t0_ndcg > 0.0 {
-            let t2_drop_pct = ((warm_mov_t2_ndcg - cs_mov_t2_ndcg) / warm_mov_t2_ndcg) * 100.0;
-            let t0_drop_pct = ((warm_mov_t0_ndcg - cs_mov_t0_ndcg) / warm_mov_t0_ndcg) * 100.0;
+        if warm_mov_head_ndcg > 0.0 && warm_mov_tail_ndcg > 0.0 {
+            let head_drop_pct = ((warm_mov_head_ndcg - cs_mov_head_ndcg) / warm_mov_head_ndcg) * 100.0;
+            let tail_drop_pct = ((warm_mov_tail_ndcg - cs_mov_tail_ndcg) / warm_mov_tail_ndcg) * 100.0;
 
-            if t2_drop_pct > t0_drop_pct + 10.0 {
+            if head_drop_pct > tail_drop_pct + 10.0 {
                 conclusions.push(format!(
-                    "HEAD ITEM ID DEPENDENCY: Under cold-start movie simulation, Tier 2 (head) NDCG@{} drops by {:.1}% ({:.2}% -> {:.2}%), compared to a {:.1}% change for Tier 0 (long-tail) items. Popular items rely heavily on memorized collaborative ID weights rather than metadata.",
-                    top_k, t2_drop_pct, warm_mov_t2_ndcg * 100.0, cs_mov_t2_ndcg * 100.0, t0_drop_pct
+                    "HEAD ITEM ID DEPENDENCY: Under cold-start movie simulation, Tier 0 (head) NDCG@{} drops by {:.1}% ({:.2}% -> {:.2}%), compared to a {:.1}% change for Tier 2 (long-tail) items. Popular items rely heavily on memorized collaborative ID weights rather than metadata.",
+                    top_k, head_drop_pct, warm_mov_head_ndcg * 100.0, cs_mov_head_ndcg * 100.0, tail_drop_pct
                 ));
             }
         }
@@ -2973,14 +3001,14 @@ mod post_training_analysis {
             }
         }
 
-        // Power User (Tier 2) vs Light User (Tier 0) History Ablation
-        let warm_usr_t2_recall_20 = extract(base_metrics, &tag3, &format!("recall_at_{}_mean_user_tier_2", top_k));
-        let cs_usr_t2_recall_20 = extract(cold_start_users, &tag_cs_usr_rnk_20, &format!("recall_at_{}_mean_user_tier_2", top_k));
-        if warm_usr_t2_recall_20 > 0.0 && cs_usr_t2_recall_20 > 0.0 {
-            let history_value_lift = ((warm_usr_t2_recall_20 - cs_usr_t2_recall_20) / cs_usr_t2_recall_20) * 100.0;
+        // Power User (Tier 0) History Ablation
+        let warm_usr_power_recall_20 = extract(base_metrics, &tag3, &format!("recall_at_{}_mean_user_tier_0", top_k));
+        let cs_usr_power_recall_20 = extract(cold_start_users, &tag_cs_usr_rnk_20, &format!("recall_at_{}_mean_user_tier_0", top_k));
+        if warm_usr_power_recall_20 > 0.0 && cs_usr_power_recall_20 > 0.0 {
+            let history_value_lift = ((warm_usr_power_recall_20 - cs_usr_power_recall_20) / cs_usr_power_recall_20) * 100.0;
             conclusions.push(format!(
-                "POWER USER HISTORY ABLATION: Stripping Power Users (Tier 2) of their interaction history and user ID reduces Ranker Recall@{} from {:.2}% to {:.2}% (confirming that learned history + ID provides a {:+.1}% relative lift over raw demographics).",
-                top_k, warm_usr_t2_recall_20 * 100.0, cs_usr_t2_recall_20 * 100.0, history_value_lift
+                "POWER USER HISTORY ABLATION: Stripping Power Users (Tier 0) of their interaction history and user ID reduces Ranker Recall@{} from {:.2}% to {:.2}% (confirming that learned history + ID provides a {:+.1}% relative lift over raw demographics).",
+                top_k, warm_usr_power_recall_20 * 100.0, cs_usr_power_recall_20 * 100.0, history_value_lift
             ));
         }
 
@@ -3021,7 +3049,224 @@ mod post_training_analysis {
         serde_json::to_writer_pretty(file, &payload)?;
         println!("Wrote cross-metric analysis to {:?}", out_path);
 
-        Ok(())
+        Ok(payload)
+    }
+
+    fn write_master_summary_and_conclusions(
+        base_metrics: &serde_json::Value,
+        coverage: &serde_json::Value,
+        pop_bias: &serde_json::Value,
+        diversity: &serde_json::Value,
+        emb_hubness: &serde_json::Value,
+        ctx_hubness: &serde_json::Value,
+        rank_agreement: &serde_json::Value,
+        cold_start_movies: &serde_json::Value,
+        cold_start_users: &serde_json::Value,
+        embedding_diagnostics: &serde_json::Value,
+        cross_metrics_concl: &serde_json::Value,
+        num_candidates: usize,
+        top_k: usize,
+        summary_output_dir: &str,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        let tag_ret_100 = format!("retrieval_ann_{}", num_candidates);
+        let tag_ret_20 = format!("retrieval_ann_{}", top_k);
+        let tag_rnk_20 = format!("ranker_{}", top_k);
+
+        let extract_metric = |json: &serde_json::Value, tag: &str, key: &str| -> f64 {
+            json.get(tag)
+                .and_then(|t| t.get("metrics"))
+                .and_then(|m| m.get(key))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0)
+        };
+
+        let extract_conclusions = |json: &serde_json::Value, tag: &str| -> Vec<String> {
+            json.get(tag)
+                .and_then(|t| t.get("automated_conclusions"))
+                .and_then(|c| c.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        let extract_direct_conclusions = |json: &serde_json::Value, key: &str| -> Vec<String> {
+            json.get(key)
+                .and_then(|c| c.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        // 1. Compute Executive Two-Stage Funnel & GATv2 Geometry Verdicts
+        let mut executive_summary: Vec<String> = Vec::new();
+
+        let rec_100 = extract_metric(base_metrics, &tag_ret_100, &format!("recall_at_{}_mean", num_candidates));
+        let rec_ret_20 = extract_metric(base_metrics, &tag_ret_20, &format!("recall_at_{}_mean", top_k));
+        let rec_rnk_20 = extract_metric(base_metrics, &tag_rnk_20, &format!("recall_at_{}_mean", top_k));
+
+        let ndcg_ret_20 = extract_metric(base_metrics, &tag_ret_20, &format!("ndcg_at_{}_mean", top_k));
+        let ndcg_rnk_20 = extract_metric(base_metrics, &tag_rnk_20, &format!("ndcg_at_{}_mean", top_k));
+
+        let mrr_ret_20 = extract_metric(base_metrics, &tag_ret_20, &format!("mrr_at_{}_mean", top_k));
+        let mrr_rnk_20 = extract_metric(base_metrics, &tag_rnk_20, &format!("mrr_at_{}_mean", top_k));
+
+        if rec_100 > 0.0 && rec_ret_20 > 0.0 {
+            let ret_capture_pct = (rec_ret_20 / rec_100) * 100.0;
+            let rnk_capture_pct = (rec_rnk_20 / rec_100) * 100.0;
+            let recall_lift_pct = ((rec_rnk_20 - rec_ret_20) / rec_ret_20) * 100.0;
+            let ndcg_lift_pct = if ndcg_ret_20 > 0.0 {
+                ((ndcg_rnk_20 - ndcg_ret_20) / ndcg_ret_20) * 100.0
+            } else {
+                0.0
+            };
+            let mrr_lift_pct = if mrr_ret_20 > 0.0 {
+                ((mrr_rnk_20 - mrr_ret_20) / mrr_ret_20) * 100.0
+            } else {
+                0.0
+            };
+
+            executive_summary.push(format!(
+                "TWO-STAGE FUNNEL SUMMARY (@{} -> @{}): Stage-1 ANN Recall@{} is {:.2}%. Unranked ANN Recall@{} retains {:.1}% of that pool ({:.2}%), while Stage-2 GATv2 Ranker@{} captures {:.1}% of the pool ({:.2}%), delivering {:+.1}% Recall@{}, {:+.1}% NDCG@{} ({:.4} -> {:.4}), and {:+.1}% MRR@{} ({:.4} -> {:.4}) lift over ANN@{}.",
+                num_candidates, top_k, num_candidates, rec_100 * 100.0,
+                top_k, ret_capture_pct, rec_ret_20 * 100.0,
+                top_k, rnk_capture_pct, rec_rnk_20 * 100.0,
+                recall_lift_pct, top_k, ndcg_lift_pct, top_k, ndcg_ret_20, ndcg_rnk_20,
+                mrr_lift_pct, top_k, mrr_ret_20, mrr_rnk_20, top_k
+            ));
+        }
+
+        // Composite Tier-Balanced NDCG@20 (0.33 * Head + 0.33 * Torso + 0.33 * Tail)
+        let ret_t0_ndcg = extract_metric(base_metrics, &tag_ret_20, &format!("ndcg_at_{}_mean_movie_tier_0", top_k));
+        let ret_t1_ndcg = extract_metric(base_metrics, &tag_ret_20, &format!("ndcg_at_{}_mean_movie_tier_1", top_k));
+        let ret_t2_ndcg = extract_metric(base_metrics, &tag_ret_20, &format!("ndcg_at_{}_mean_movie_tier_2", top_k));
+        let rnk_t0_ndcg = extract_metric(base_metrics, &tag_rnk_20, &format!("ndcg_at_{}_mean_movie_tier_0", top_k));
+        let rnk_t1_ndcg = extract_metric(base_metrics, &tag_rnk_20, &format!("ndcg_at_{}_mean_movie_tier_1", top_k));
+        let rnk_t2_ndcg = extract_metric(base_metrics, &tag_rnk_20, &format!("ndcg_at_{}_mean_movie_tier_2", top_k));
+
+        let comp_ndcg_ret = 0.33 * (ret_t0_ndcg + ret_t1_ndcg + ret_t2_ndcg);
+        let comp_ndcg_rnk = 0.33 * (rnk_t0_ndcg + rnk_t1_ndcg + rnk_t2_ndcg);
+        executive_summary.push(format!(
+            "TIER-STRATIFIED RANKING BREAKDOWN (@{}): Composite NDCG@{} shifted from {:.4} (Retriever) to {:.4} (Ranker) | Head (Tier 0): {:.4} -> {:.4} | Torso (Tier 1): {:.4} -> {:.4} | Tail (Tier 2): {:.4} -> {:.4}.",
+            top_k, top_k, comp_ndcg_ret, comp_ndcg_rnk,
+            ret_t0_ndcg, rnk_t0_ndcg, ret_t1_ndcg, rnk_t1_ndcg, ret_t2_ndcg, rnk_t2_ndcg
+        ));
+
+        // GATv2 Spherical Fidelity Conclusions
+        let mut gatv2_fidelity_conclusions: Vec<String> = Vec::new();
+        for (entity_label, json_key) in [
+            ("Movie Candidate", "GATv2_spherical_fidelity_movie"),
+            ("User Query", "GATv2_spherical_fidelity_user"),
+        ] {
+            if let Some(fid) = embedding_diagnostics.get(json_key) {
+                let r_bar = fid.get("mean_resultant_length_avg").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                let r_p10 = fid.get("mean_resultant_length_p10").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                let kappa = fid.get("vmf_kappa_median").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let mean_ang = fid.get("mean_angle_deg_avg").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let p90_ang = fid.get("p90_angle_deg_avg").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let mad_ang = fid.get("robust_mad_angle_deg_avg").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let pct_hi = fid.get("pct_high_fidelity_r_ge_090").and_then(|v| v.as_f64()).unwrap_or(1.0) * 100.0;
+                let pct_poly = fid.get("pct_context_polysemous_r_lt_070").and_then(|v| v.as_f64()).unwrap_or(0.0) * 100.0;
+
+                let status = if r_bar >= 0.90 {
+                    "HIGH SPHERICAL STABILITY"
+                } else if r_bar >= 0.75 {
+                    "MODERATE CONTEXTUAL ADAPTATION"
+                } else {
+                    "HIGH CONTEXTUAL POLYSEMY"
+                };
+
+                let msg = format!(
+                    "{} ({}): Mean Resultant Length R_bar = {:.4} (P10 = {:.4}, Median vMF kappa = {:.1}), Mean Geodesic Deviation = {:.1} deg (P90 = {:.1} deg, Robust MAD = {:.1} deg). {:.1}% of entities have tight centroids (R_bar >= 0.90), while {:.1}% exhibit strong context shift (R_bar < 0.70).",
+                    status, entity_label, r_bar, r_p10, kappa, mean_ang, p90_ang, mad_ang, pct_hi, pct_poly
+                );
+                gatv2_fidelity_conclusions.push(msg.clone());
+                executive_summary.push(msg);
+            }
+        }
+
+        // 2. Assemble the Master `summary_conclusions.json` Payload
+        let tag_cs_mov_ret_100 = format!("retrieval_ann_{}_cold_start_movies", num_candidates);
+        let tag_cs_mov_ret_20 = format!("retrieval_ann_{}_cold_start_movies", top_k);
+        let tag_cs_mov_rnk_20 = format!("ranker_{}_cold_start_movies", top_k);
+
+        let tag_cs_usr_ret_100 = format!("retrieval_ann_{}_cold_start_users", num_candidates);
+        let tag_cs_usr_ret_20 = format!("retrieval_ann_{}_cold_start_users", top_k);
+        let tag_cs_usr_rnk_20 = format!("ranker_{}_cold_start_users", top_k);
+
+        let summary_conclusions_payload = serde_json::json!({
+            "executive_summary": executive_summary,
+            "cross_metric_analysis": extract_direct_conclusions(cross_metrics_concl, "cross_metric_conclusions"),
+            "stratified_metrics": {
+                &tag_ret_100: extract_conclusions(base_metrics, &tag_ret_100),
+                &tag_ret_20: extract_conclusions(base_metrics, &tag_ret_20),
+                &tag_rnk_20: extract_conclusions(base_metrics, &tag_rnk_20),
+            },
+            "coverage_and_gini": {
+                &tag_ret_100: extract_conclusions(coverage, &tag_ret_100),
+                &tag_ret_20: extract_conclusions(coverage, &tag_ret_20),
+                &tag_rnk_20: extract_conclusions(coverage, &tag_rnk_20),
+            },
+            "popularity_bias": {
+                &tag_ret_100: extract_conclusions(pop_bias, &tag_ret_100),
+                &tag_ret_20: extract_conclusions(pop_bias, &tag_ret_20),
+                &tag_rnk_20: extract_conclusions(pop_bias, &tag_rnk_20),
+            },
+            "diversity_metrics": {
+                &tag_ret_100: extract_conclusions(diversity, &tag_ret_100),
+                &tag_ret_20: extract_conclusions(diversity, &tag_ret_20),
+                &tag_rnk_20: extract_conclusions(diversity, &tag_rnk_20),
+            },
+            "embedding_hubness": {
+                &tag_ret_100: extract_conclusions(emb_hubness, &tag_ret_100),
+                &tag_ret_20: extract_conclusions(emb_hubness, &tag_ret_20),
+                &tag_rnk_20: extract_conclusions(emb_hubness, &tag_rnk_20),
+            },
+            "contextual_hubness": extract_direct_conclusions(ctx_hubness, "automated_conclusions"),
+            "rank_agreement_and_churn": extract_direct_conclusions(rank_agreement, "automated_conclusions"),
+            "gatv2_spherical_fidelity": gatv2_fidelity_conclusions,
+            "cold_start_movies": {
+                &tag_cs_mov_ret_100: extract_conclusions(cold_start_movies, &tag_cs_mov_ret_100),
+                &tag_cs_mov_ret_20: extract_conclusions(cold_start_movies, &tag_cs_mov_ret_20),
+                &tag_cs_mov_rnk_20: extract_conclusions(cold_start_movies, &tag_cs_mov_rnk_20),
+            },
+            "cold_start_users": {
+                &tag_cs_usr_ret_100: extract_conclusions(cold_start_users, &tag_cs_usr_ret_100),
+                &tag_cs_usr_ret_20: extract_conclusions(cold_start_users, &tag_cs_usr_ret_20),
+                &tag_cs_usr_rnk_20: extract_conclusions(cold_start_users, &tag_cs_usr_rnk_20),
+            }
+        });
+
+        let conclusions_path = Path::new(summary_output_dir).join("summary_conclusions.json");
+        let conclusions_file = File::create(&conclusions_path)?;
+        serde_json::to_writer_pretty(conclusions_file, &summary_conclusions_payload)?;
+        println!("Wrote master conclusions to {:?}", conclusions_path);
+
+        // 3. Also export consolidated `summary_metrics.json` for easy model-to-model comparison
+        let summary_metrics_payload = serde_json::json!({
+            "stratified_metrics": base_metrics,
+            "coverage": coverage,
+            "popularity_bias": pop_bias,
+            "diversity_metrics": diversity,
+            "embedding_hubness": emb_hubness,
+            "contextual_hubness": ctx_hubness.get("metrics"),
+            "rank_agreement": rank_agreement.get("metrics"),
+            "gatv2_spherical_fidelity": embedding_diagnostics,
+            "cold_start_movies": cold_start_movies,
+            "cold_start_users": cold_start_users,
+        });
+
+        let metrics_path = Path::new(summary_output_dir).join("summary_metrics.json");
+        let metrics_file = File::create(&metrics_path)?;
+        serde_json::to_writer_pretty(metrics_file, &summary_metrics_payload)?;
+        println!("Wrote master metrics to {:?}", metrics_path);
+
+        Ok(summary_conclusions_payload)
     }
 
     async fn rank_agreement_and_churn(
@@ -3160,19 +3405,12 @@ mod post_training_analysis {
         summary_output_dir: &str)
         -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
 
-        // harness.pos_test_d has columns user_id, movie_id, rating, timestamp
+        // Deduplicate (user_id, timestamp) pairs before calling predict_diagnostic so multi-item
+        // rating sessions at the exact same timestamp are not queried redundantly (which would
+        // artificially inflate user spherical fidelity R_bar toward 1.0).
         let pos_test_tiered = harness.pos_test_df.clone()
-            .left_join(
-                harness.movie_tiers_df.clone(),
-                col("movie_id"),
-                col("movie_id")
-            )
-            .left_join(
-                harness.user_tiers_df.clone(),
-                col("user_id"),
-                col("user_id")
-            )
-            // Sort before materializing to guarantee deterministic index order
+            .select([col("user_id"), col("timestamp")])
+            .unique(None, UniqueKeepStrategy::First)
             .sort(["user_id", "timestamp"], SortMultipleOptions::default())
             .collect()?;
 
@@ -3275,8 +3513,8 @@ mod post_training_analysis {
         ).expect("Error while de-duplicating movie_ids and embeddings");
 
         println!("GATv2 Movie Spherical Fidelity: {:#?}", movie_fidelity);
+        println!("GATv2 User Spherical Fidelity: {:#?}", user_fidelity);
 
-        let output_json_file_name = "stratified_metrics_cold_start_movies.json";
         let output_embed_dir = Path::new(summary_output_dir).join("embedding_plots");
         //  Generate the 6 UMAP & t-SNE PNGs (User, Movie, and Joint Shared Hypersphere)
         let saved_pngs = _create_umap_tsne_plots(
