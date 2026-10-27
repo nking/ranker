@@ -2985,7 +2985,7 @@ mod post_training_analysis {
         }
 
         // =================================================================
-        // 7. SYSTEMIC COLD-START ASYMMETRY (Users vs. Movies)
+        // SYSTEMIC COLD-START ASYMMETRY (Users vs. Movies)
         // =================================================================
         if ndcg_rnk_20 > 0.0 && cs_mov_ndcg_rnk_20 > 0.0 && cs_usr_ndcg_rnk_20 > 0.0 {
             let mov_rnk_retention = (cs_mov_ndcg_rnk_20 / ndcg_rnk_20) * 100.0;
@@ -3619,11 +3619,38 @@ mod post_training_analysis {
         )?;
         saved_files.push(movie_umap_path);
 
-        // 3. Joint User + Movie Embeddings in the SAME Shared Hypersphere
+        // 3a. Bipartite Catalog-Anchored Joint UMAP:
+        //     Project each User directly onto the Movie UMAP coordinates as a softmax-weighted
+        //     barycenter of its top-15 nearest Movies in cosine similarity!
+        //     This uses strictly User -> Movie cross-edges and eliminates the User-User k-NN ring artifact.
+        let user_on_movie_umap_coords =
+            project_users_onto_movie_manifold(&x_users, &x_movies, &movie_umap_coords, 15);
+        let bipartite_umap_path = output_dir.join(format!(
+            "{}_umap_catalog_anchored_joint_users_movies.png",
+            output_filename_root
+        ));
+        render_joint_scatter_png(
+            &user_on_movie_umap_coords,
+            &y_users,
+            &movie_umap_coords,
+            &y_movies,
+            &format!(
+                "{}: Catalog-Anchored Bipartite UMAP (Users Projected via Top-15 Movie Cross-Edges)",
+                output_filename_root
+            ),
+            "Movie UMAP 1",
+            "Movie UMAP 2",
+            &bipartite_umap_path,
+        )?;
+        saved_files.push(bipartite_umap_path);
+
+        // 3b. Modality-Centered Joint User + Movie Embeddings in the Shared Hypersphere
         let n_u = x_users.len();
+        let x_users_centered = center_and_renormalize(&x_users);
+        let x_movies_centered = center_and_renormalize(&x_movies);
         let mut x_joint: Vec<Vec<f32>> = Vec::with_capacity(n_u + x_movies.len());
-        x_joint.extend_from_slice(&x_users);
-        x_joint.extend_from_slice(&x_movies);
+        x_joint.extend_from_slice(&x_users_centered);
+        x_joint.extend_from_slice(&x_movies_centered);
 
         let joint_tsne_coords = run_cosine_tsne(&x_joint, 30.0, 500, 42);
         let joint_tsne_path = output_dir.join(format!(
@@ -3671,7 +3698,6 @@ mod post_training_analysis {
 
         Ok(saved_files)
     }
-
 
     // ============================================================================
     // Internal Helpers: Polars Extraction, Cosine UMAP, Cosine t-SNE, Plotters PNG
@@ -4206,7 +4232,7 @@ mod post_training_analysis {
         legend_title: &str,
         out_path: &Path,
     ) -> Result<(), Box<dyn Error>> {
-        let root = SVGBackend::new(out_path, (1200, 960)).into_drawing_area();
+        let root = BitMapBackend::new(out_path, (1200, 960)).into_drawing_area();
         root.fill(&WHITE)?;
 
         let (min_x, max_x, min_y, max_y) = compute_axis_bounds(coords);
@@ -4275,8 +4301,7 @@ mod post_training_analysis {
         y_label: &str,
         out_path: &Path,
     ) -> Result<(), Box<dyn Error>> {
-
-        let root = SVGBackend::new(out_path, (1300, 980)).into_drawing_area();
+        let root = BitMapBackend::new(out_path, (1300, 980)).into_drawing_area();
         root.fill(&WHITE)?;
 
         let mut all_coords: Vec<[f32; 2]> = Vec::with_capacity(user_coords.len() + movie_coords.len());
@@ -4358,6 +4383,81 @@ mod post_training_analysis {
 
         root.present()?;
         Ok(())
+    }
+
+
+    /// Centers a modality's unit vectors by subtracting their mean direction and re-normalizing to S^(d-1).
+    /// Removes any constant modality-cone translation offset (Liang et al., NeurIPS 2022).
+    fn center_and_renormalize(x: &[Vec<f32>]) -> Vec<Vec<f32>> {
+        let n = x.len();
+        if n == 0 {
+            return Vec::new();
+        }
+        let d = x[0].len();
+        let mut mean = vec![0.0_f32; d];
+        for row in x {
+            for (j, &v) in row.iter().enumerate() {
+                mean[j] += v;
+            }
+        }
+        for m in mean.iter_mut() {
+            *m /= n as f32;
+        }
+        let mut out = Vec::with_capacity(n);
+        for row in x {
+            let mut v: Vec<f32> = row.iter().zip(mean.iter()).map(|(&a, &m)| a - m).collect();
+            l2_normalize_in_place(&mut v);
+            out.push(v);
+        }
+        out
+    }
+
+    /// Projects each user directly into the 2D Movie UMAP coordinate frame using strictly
+    /// bipartite User -> Movie cosine k-NN edges (matching `reducer_movie.transform(X_users)`).
+    fn project_users_onto_movie_manifold(
+        x_users: &[Vec<f32>],
+        x_movies: &[Vec<f32>],
+        movie_coords_2d: &[[f32; 2]],
+        k: usize,
+    ) -> Vec<[f32; 2]> {
+        let n_u = x_users.len();
+        let n_m = x_movies.len();
+        if n_u == 0 || n_m == 0 {
+            return vec![[0.0, 0.0]; n_u];
+        }
+        let k_actual = k.min(n_m).max(1);
+        let mut user_coords = Vec::with_capacity(n_u);
+
+        for u_vec in x_users {
+            let mut dists: Vec<(usize, f32)> = (0..n_m)
+                .map(|m_idx| (m_idx, cosine_dist(u_vec, &x_movies[m_idx])))
+                .collect();
+
+            if dists.len() > k_actual {
+                dists.select_nth_unstable_by(k_actual, |a, b| {
+                    a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal)
+                });
+                dists.truncate(k_actual);
+            }
+            dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
+
+            let rho = dists[0].1.max(0.0);
+            let sigma = (dists[k_actual - 1].1 - rho).max(1e-3);
+            let mut w_sum = 0.0_f32;
+            let mut cx = 0.0_f32;
+            let mut cy = 0.0_f32;
+
+            for &(m_idx, d) in &dists {
+                let w = (-(d - rho).max(0.0) / sigma).exp();
+                cx += w * movie_coords_2d[m_idx][0];
+                cy += w * movie_coords_2d[m_idx][1];
+                w_sum += w;
+            }
+            w_sum = w_sum.max(1e-9);
+            user_coords.push([cx / w_sum, cy / w_sum]);
+        }
+
+        user_coords
     }
 
 }
