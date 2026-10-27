@@ -1022,7 +1022,7 @@ mod post_training_analysis {
         assert_eq!(new_candidate_ids.len(), n_cold_users * num_candidates);
         assert_eq!(new_user_embeddings.len(), n_cold_users * embed_len);
 
-        // 2. Slice out ANN Retrieval @ top_k (e.g. 20) per cold-start user
+        // Slice out ANN Retrieval @ top_k (e.g. 20) per cold-start user
         let mut new_top_k_movie_ids: Vec<i32> = Vec::with_capacity(n_cold_users * top_k);
         for i in 0..n_cold_users {
             let i0 = i * num_candidates;
@@ -1054,7 +1054,7 @@ mod post_training_analysis {
                     &new_candidate_ids[i0 * num_candidates..i1 * num_candidates],
                     &searcher,
                     &user_history,
-                    new_num_catalog_users,
+                    ranker_model_metadata.num_catalog_users,
                     ranker_model_version.clone(),
                 )
                 .await
@@ -3300,7 +3300,7 @@ mod post_training_analysis {
 
         Ok(agg_res)
     }
-    
+
     /// Deduplicates multiple unit-normalized GATv2 representations per entity (`movie_id` or `user_id`)
     /// into a single L2-normalized centroid vector, returning:
     ///   1. A Polars `DataFrame` with columns `[id_col, "embedding", tier_col, "n_occurrences",
