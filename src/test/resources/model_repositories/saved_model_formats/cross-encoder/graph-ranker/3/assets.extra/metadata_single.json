@@ -1,0 +1,1 @@
+{"signature_name": "serving_default", "batch_size": 1, "max_nodes": 256, "max_edges": 256, "max_graphs": 3, "git_commit_hash": "ca72e5f4f6b903542b017e927fe4f4a24c25d87c", "embed_len": 16, "trained_at_timestamp": 1793167882, "num_candidates": 100, "model_version": "0.1.0", "max_history": 100, "num_catalog_users": 6040, "num_catalog_movies": 3883, "out_features": 24}
