@@ -112,59 +112,50 @@ def extract_correct_vizier_param_types_dict(params:Union[ParameterDict, Dict]):
 def get_vizier_for_hpo_tier(hpo_tier:int, embed_in_dim:int, top_k:int) -> Dict[str, Union[float, int, str]]:
 
     # Safe range calculation: Ensures at least one valid value even if top_k >= 50
-    history_cand_range = list(range(100, 250, 50))#100, 150, 250
+    #history_cand_range = list(range(100, 250, 50))#100, 150, 250
 
     if hpo_tier==0:
         return dict({
-            #"tier_weights" : "[0.33, 0.33, 0.33]",
-            #"temperature" : 0.25,
-            #"top_k" : top_k,
             "num_layers" : 2,
             "hidden_dim" : 64,
             "num_heads" : 2,
-            "dropout_rate" : 0.1,
+            "dropout_rate" : 0.15,
             "learning_rate" : 1e-3,
             "weight_decay" : 1e-3,
             "out_dim" : embed_in_dim,
             "edge_embed_dim" : 8,
-            "max_history" : history_cand_range[0],      #40
-            "num_candidates" : history_cand_range[0],   #40
+            "max_history" :100,
+            "num_candidates" : 100,
             "mlp_hidden_dim" : 1.0,
-            "focal_loss_gamma" : 2.0})
+            "focal_loss_gamma" : 1.0})
     elif hpo_tier==1:
         return {
-            #"tier_weights" : "[0.33, 0.33, 0.33]",
-            #"temperature" : 0.25,
-            #"top_k" : top_k,
             "num_layers" : 2,
-            "hidden_dim" : 128,
+            "hidden_dim" : 96,
             "num_heads" : 4,
-            "dropout_rate" : 0.2,
-            "learning_rate": 5e-4,
-            "weight_decay": 1e-4,
+            "dropout_rate" : 0.18,
+            "learning_rate": 8e-4,
+            "weight_decay": 1e-3,
             "out_dim": int(1.5*embed_in_dim),
             "edge_embed_dim": 16,
-            "max_history": history_cand_range[len(history_cand_range)//2],
-            "num_candidates": history_cand_range[len(history_cand_range)//2],
-            "mlp_hidden_dim": 1.0,
-            "focal_loss_gamma": 2.0}
+            "max_history" :100,
+            "num_candidates" : 100,
+            "mlp_hidden_dim": 1.5,
+            "focal_loss_gamma": 1.25}
     else:
         return {
-            #"tier_weights" : "[0.33, 0.33, 0.33]",
-            #"temperature" : 0.25,
-            #"top_k" : top_k,
-            "num_layers": 3,
-            "hidden_dim": 256,
-            "num_heads": 8,
-            "dropout_rate": 0.35,
-            "learning_rate": 1e-4,
-            "weight_decay": 1e-5,
-            "out_dim": int(2*embed_in_dim),
-            "edge_embed_dim": 24,
-            "max_history": history_cand_range[-1],
-            "num_candidates": history_cand_range[-1],
+            "num_layers": 2,
+            "hidden_dim": 64,
+            "num_heads": 4,
+            "dropout_rate": 0.22,
+            "learning_rate": 1.2e-3,
+            "weight_decay": 2e-3,
+            "out_dim": int(1.5*embed_in_dim),
+            "edge_embed_dim": 12,
+            "max_history" :100,
+            "num_candidates" : 100,
             "mlp_hidden_dim": 1.0,
-            "focal_loss_gamma": 2.0}
+            "focal_loss_gamma": 0.75}
 
 def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in_dim:int=32):
     """
@@ -192,9 +183,9 @@ def _get_vizier_study_config(top_k:int=20, use_batching_alg:bool=False, embed_in
     root.add_discrete_param("use_focal_loss", feasible_values=[1])
     root.add_discrete_param("use_ipw", feasible_values=[1])
 
-    root.add_discrete_param("temperature", feasible_values=[0.2])
+    root.add_discrete_param("temperature", feasible_values=[0.18])
     #feasible_values=[0.07, 0.1, 0.25, 0.5])
-    root.add_categorical_param("tier_weights", feasible_values=["[0.33, 0.33, 0.33]"])
+    root.add_categorical_param("tier_weights", feasible_values=["[0.27,0.35,0.38]"])
 
     root.add_discrete_param("hpo_tier", feasible_values=[0, 1, 2])
 
