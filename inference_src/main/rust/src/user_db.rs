@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::Result;
 use std::path::Path;
 use tonic::Request;
-use crate::model_client::tf_serving::model_spec::VersionChoice;
+use crate::tensorflow::serving::model_spec::VersionChoice;
 
 #[derive(Debug, Clone)]
 pub struct UserDb {

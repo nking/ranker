@@ -5,24 +5,28 @@ use tonic::transport::{Channel, Endpoint};
 // use crate:: means look inside this project
 use crate::graph_builder::{JraphGraph};
 use crate::pb::{UsersRequest, MoviesRequest};
+use crate::ranker_model_metadata::RankerModelMetadata;
+
+use crate::tensorflow::{
+    TensorProto, DataType, TensorShapeProto,
+    tensor_shape_proto::Dim,
+    serving::{
+        prediction_service_client::PredictionServiceClient,
+        PredictRequest, GetModelStatusRequest, ModelSpec, GetModelStatusResponse,
+    },
+    error::Code,
+};
+use crate::tensorflow::serving::model_service_client::ModelServiceClient;
+use crate::tensorflow::serving::model_spec::VersionChoice;
+use crate::tensorflow::serving::model_version_status::State;
 
 const CLIENT_CONNECT_TIMEOUT: u64 = 5;
-
-pub mod tf_serving {
-    tonic::include_proto!("tensorflow.serving");
-}
-pub mod tf_core {
-    tonic::include_proto!("tensorflow");
-}
-use tf_core::{Example, SignatureDef, TensorProto, DataType, TensorShapeProto, tensor_shape_proto::Dim};
-use tf_serving::{prediction_service_client::PredictionServiceClient, PredictRequest, ModelSpec};
-use crate::model_client::tf_serving::model_spec::VersionChoice;
-use crate::ranker_model_metadata::RankerModelMetadata;
 
 #[derive(Debug)]
 pub struct QueryModelClient {
     pub client: PredictionServiceClient<Channel>,
-    pub embed_len: usize
+    pub model_service_client: ModelServiceClient<Channel>,
+    pub embed_len: usize,
 }
 
 #[derive(Debug)]
@@ -35,10 +39,12 @@ pub struct CandidateModelClient {
 pub struct RankerModelClient {
     pub client: PredictionServiceClient<Channel>,
     pub metadata: RankerModelMetadata,
+    pub model_service_client: ModelServiceClient<Channel>,
 }
 
 impl QueryModelClient {
     pub async fn new(uri: String, embed_len: usize) -> Self {
+
         let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
 
         let channel = endpoint
@@ -46,9 +52,27 @@ impl QueryModelClient {
             .connect()
             .await
             .expect("Failed to connect to TFS for query model");
+
         Self {
-            client: PredictionServiceClient::new(channel), embed_len: embed_len
+            // Channel is an Arc-backed handle; cloning it shares the exact same TCP connection
+            client: PredictionServiceClient::new(channel.clone()),
+            model_service_client: ModelServiceClient::new(channel),
+            embed_len,
         }
+
+    }
+
+    pub async fn get_latest_model_version(
+        &self,
+    ) -> Result<i64, Box<dyn Error + Send + Sync>> {
+
+        let client = self.model_service_client.clone();
+
+        let mut versions = get_all_model_versions("query", client).await
+            .expect("Failed to fetch query model versions");
+
+        versions.sort_unstable();
+        Ok(versions[versions.len() - 1])
     }
 
     pub async fn get_users_embeddings(&self, request: UsersRequest,
@@ -109,11 +133,29 @@ impl RankerModelClient {
 
         // this can handle a RankedMovies response from a UsersRequest of 700_000 user_ids
         const MAX_MESSAGE_SIZE: usize = 256 * 1024 * 1024;
-        let tfs_client = PredictionServiceClient::new(channel)
+        let tfs_client = PredictionServiceClient::new(channel.clone())
             .max_decoding_message_size(MAX_MESSAGE_SIZE)
             .max_encoding_message_size(MAX_MESSAGE_SIZE);
 
-        Self { client: tfs_client, metadata: metadata }
+        // Channel is an Arc-backed handle; cloning it shares the exact same TCP connection
+        Self {
+            client: tfs_client,
+            metadata: metadata,
+            model_service_client: ModelServiceClient::new(channel),
+        }
+    }
+
+    pub async fn get_latest_model_version(
+        &self,
+    ) -> Result<i64, Box<dyn Error + Send + Sync>> {
+
+        let mut client = self.model_service_client.clone();
+
+        let mut versions = get_all_model_versions("graph-ranker", client).await
+            .expect("Failed to fetch graph-ranker model versions");
+
+        versions.sort_unstable();
+        Ok(versions[versions.len()-1])
     }
 
     pub async fn get_candidate_ranks(&self, padded_super_graph: JraphGraph, embed_len : usize,
@@ -268,6 +310,44 @@ impl CandidateModelClient {
             Err("Error: TFS response from candidate model contained no outputs".into())
         }
     }
+}
+
+async fn get_all_model_versions(
+    model_name: &str,
+    mut client:  ModelServiceClient<Channel>,
+) -> Result<Vec<i64>, Box<dyn Error + Send + Sync>> {
+
+    let request = tonic::Request::new(GetModelStatusRequest {
+        model_spec: Some(ModelSpec {
+            name: model_name.to_string(),
+            version_choice: None, // Leaving this None fetches all version statuses
+            signature_name: String::new(),
+        }),
+    });
+
+    let status_resp =
+        client.get_model_status(request).await
+        .expect("Couldn't get model status");
+
+    let resp = status_resp.into_inner();
+
+    let mut versions: Vec<i64> = resp
+        .model_version_status
+        .into_iter()
+        .filter(|v| {
+            let is_available = v.state == (State::Available as i32);
+            let is_ok = v
+                .status
+                .as_ref()
+                .map(|s| s.error_code == (Code::Ok as i32))
+                .unwrap_or(true);
+            is_available && is_ok
+        })
+        .map(|v| v.version)
+        .collect();
+
+    versions.sort_unstable();
+    Ok(versions)
 }
 
 

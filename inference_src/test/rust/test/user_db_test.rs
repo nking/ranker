@@ -7,7 +7,7 @@ mod user_db_tests {
     }
 
     use inference_engine::app_config::AppConfig;
-    use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
+    use inference_engine::tensorflow::serving::model_spec::VersionChoice;
     use inference_engine::user_db::{UserDb};
 
     #[tokio::test]

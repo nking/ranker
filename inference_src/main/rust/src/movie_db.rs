@@ -7,7 +7,7 @@ use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::record::Field;
 use tonic::Request;
 
-use crate::model_client::tf_serving::model_spec::VersionChoice;
+use crate::tensorflow::serving::model_spec::VersionChoice;
 use crate::pb::MoviesRequest;
 
 #[derive(Debug)]

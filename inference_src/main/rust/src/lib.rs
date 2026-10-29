@@ -24,3 +24,13 @@ pub mod query_model_metadata;
 pub mod pb {
     tonic::include_proto!("recommender");
 }
+
+pub mod tensorflow {
+    pub mod error {
+        tonic::include_proto!("tensorflow.error");
+    }
+    pub mod serving {
+        tonic::include_proto!("tensorflow.serving");
+    }
+    tonic::include_proto!("tensorflow");
+}

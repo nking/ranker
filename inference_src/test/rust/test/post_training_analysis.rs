@@ -12,7 +12,7 @@ use inference_engine::app_config::AppConfig;
 use inference_engine::orchestrator::Orchestrator;
 use inference_engine::movie_db::MovieDb;
 use helper::{get_train_val_test_liked_uris, DataSize, ensure_plotters_font_registered};
-use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
+use inference_engine::tensorflow::serving::model_spec::VersionChoice;
 use crate::helper::{get_bin_dir, get_config_json_uri, get_movie_tiers_df, get_user_tiers_df, load_and_concat_parquet};
 
 struct TestHarness {
@@ -202,7 +202,7 @@ mod post_training_analysis {
     use std::cmp::Ordering;
     use std::path::{Path, PathBuf};
     use serde::{Deserialize, Serialize};
-    use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
+    use inference_engine::tensorflow::serving::model_spec::VersionChoice;
     use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMoviesAndRepr, UsersRequest, MoviesRequest, RankedMovies};
     use inference_engine::pb::recommender_service_server::RecommenderService;
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
@@ -244,7 +244,7 @@ mod post_training_analysis {
 
         //NOTE:  edit these for the models to analyze
         let q_ver: usize = 1;
-        let r_ver: usize = 1;
+        let r_ver: usize = 2;
 
         let query_model_version = Some(VersionChoice::Version(q_ver as i64));
         let ranker_model_version = Some(VersionChoice::Version(r_ver as i64));

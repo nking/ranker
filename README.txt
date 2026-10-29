@@ -149,6 +149,7 @@ inference_src    # code for the end-to-end inference using rust
     |   └── rust                      #rust src code for input graph and server code
     |        └── Cargo.toml
     |        └── src
+    |        └── proto
     ├── test
         └── rust                      #rust test code
              └── test

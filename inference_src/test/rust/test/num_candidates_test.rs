@@ -112,7 +112,7 @@ mod num_candidates_tests {
     //bring the gRPC trait into scope so its methods (.predict) are visible
     use inference_engine::pb::{ApproxNearestNeighborsResponse, UsersRequest};
     use tonic::{Request};
-    use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
+    use inference_engine::tensorflow::serving::model_spec::VersionChoice;
     use inference_engine::movie_tiers::load_from_file;
     use crate::helper::{get_unique_user_and_first_timestamp, get_user_movie_tier_map, load_and_concat_parquet};
 

@@ -28,7 +28,9 @@ Query Model deployment:
     }'
 - to communicate w/ the TFS server over gRPC, the tf proto files were copied from
   https://github.com/tensorflow/serving/tree/master/tensorflow_serving
-  https://github.com/tensorflow/tensorflow/tree/master/tensorflow/core/framework
+  https://github.com/tensorflow/tensorflow/tree/master/tensorflow/core/
+  curl -o tensorflow_serving/apis/model_service.proto \
+  https://github.com/tensorflow/serving/blob/master/tensorflow_serving/apis/model_service.proto
 - to compile the protocol buffers,
   install protobuf-compiler
   e.g. sudo apt protobuf-compiler, brew install protobuf, etc.
@@ -47,4 +49,9 @@ for GPU, can use NVIDIA's triton docker container:
    and different protocol buffer files that need to be added to
    proto directory and build.rs
     https://github.com/triton-inference-server/common/tree/main/protobuf
+
+NOTE: to prevent needing to rebuild libaries like numkong,
+instead of cargo clean
+   use:
+    cargo clean -p inference_engine
 

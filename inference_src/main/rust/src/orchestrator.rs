@@ -12,7 +12,7 @@ use crate::user_history::{build_user_history, UserHistory};
 use crate::pb::{UsersRequest, UsersRankOnlyRequest, RankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse, RankedMoviesAndRepr};
 use tonic::{Request, Response, Status};
 use usearch::ffi::Matches;
-use crate::model_client::tf_serving::model_spec::VersionChoice;
+use crate::tensorflow::serving::model_spec::VersionChoice;
 use crate::pb::recommender_service_server::RecommenderService;
 use crate::query_model_metadata::QueryModelMetadata;
 use crate::ranker_model_metadata::RankerModelMetadata;
@@ -25,6 +25,9 @@ use crate::util::{get_top_k_desc_diagnostic, get_top_k_desc_scores};
 pub struct Orchestrator {
     query_model: QueryModelClient,
     ranker_model: RankerModelClient,
+    //TODO: add quary_model_latest_version
+    //TODO: add ranker_model_latest_version
+    // they will be frequently read and infrequently written, so have to be thread safe for writes
 
     query_saved_models_uri : String,
     ranker_saved_models_uri : String,

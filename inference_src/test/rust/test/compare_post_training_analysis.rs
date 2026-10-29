@@ -2092,15 +2092,15 @@ mod compare_post_training_analysis {
     #[test]
     fn test_compare_two_runs() -> Result<(), Box<dyn Error + Send + Sync>> {
         let q_ver_a: usize = 1;
-        let r_ver_a: usize = 1;
+        let r_ver_a: usize = 2;
         let q_ver_b: usize = 1;
-        let r_ver_b: usize = 2;
+        let r_ver_b: usize = 3;
 
         let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../");
 
-        let base_dir_a = project_root.join("TMP01");
-        let base_dir_b = project_root.join("TMP02");
+        let base_dir_a = project_root.join("TMP02");
+        let base_dir_b = project_root.join("TMP03");
 
         let target_dir = project_root.join("bin");
         let output_dir = target_dir.join(

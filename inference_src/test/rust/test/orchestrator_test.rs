@@ -95,7 +95,7 @@ mod orchestrator_tests {
     use inference_engine::pb::recommender_service_server::RecommenderService;
     use inference_engine::pb::{ApproxNearestNeighborsResponse, RankedMovies, UsersRequest};
     use tonic::{Request, Response};
-    use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
+    use inference_engine::tensorflow::serving::model_spec::VersionChoice;
     use inference_engine::user_history::{_testable_build_map_async, UserMapEntry};
     use crate::helper::{get_unique_user_and_first_timestamp, load_and_concat_parquet};
 

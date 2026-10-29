@@ -2,6 +2,8 @@
 syntax = "proto3";
 package recommender;
 
+import "tensorflow_serving/apis/get_model_status.proto";
+
 // input for the query model
 
 // input requests identifying a list of user and time, supplemented with demographic information.
@@ -92,4 +94,5 @@ service RecommenderService {
   rpc ApproxNearestNeighbors(UsersRequest) returns (ApproxNearestNeighborsResponse);
 
   rpc PredictDiagnostic (UsersRequest) returns (RankedMoviesAndRepr);
+
 }

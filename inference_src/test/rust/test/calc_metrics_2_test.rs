@@ -51,7 +51,7 @@ mod calc_metrics_2_tests {
 
     use rand::seq::SliceRandom;
     use rand::thread_rng;
-    use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
+    use inference_engine::tensorflow::serving::model_spec::VersionChoice;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_calc_test_metrics() {

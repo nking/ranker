@@ -7,7 +7,7 @@ mod client_tests {
     use inference_engine::app_config::AppConfig;
     use inference_engine::model_client::{CandidateModelClient, QueryModelClient, RankerModelClient};
     use inference_engine::graph_builder::{create_fake_padded_super_batch, JraphGraph};
-    use inference_engine::model_client::tf_serving::model_spec::VersionChoice;
+    use inference_engine::tensorflow::serving::model_spec::VersionChoice;
     //use super::*;
     // Assuming your UserRequest is accessible here
     use inference_engine::pb::{UsersRequest, MoviesRequest};
@@ -18,7 +18,7 @@ mod client_tests {
         // Tell Rust to literally include the code from helper.rs here
         include!("helper.rs");
     }
-    use crate::client_tests::helper::{get_config_json_uri, get_embeddings_metadata_uris, get_embeddings_uris};
+    use crate::client_tests::helper::{get_config_json_uri, get_embeddings_metadata_uris, get_embeddings_uris, get_project_dir, DataSize};
 
     #[tokio::test]
     async fn test_query_model_connection() {
@@ -60,6 +60,28 @@ mod client_tests {
 
         // Assert the expected dimension length (e.g., 128)
         assert!(!embedding.is_empty(), "User Embedding vector is empty!");
+
+        let latest_version = client.get_latest_model_version().await.expect("Couldn't get latest model version");
+
+        let model_dir = get_project_dir()
+            .expect("Failed to get project directory")
+            .join("src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/");
+
+        let expected_latest_version: i64 = std::fs::read_dir(&model_dir)
+            .expect("Failed to read model repository directory")
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                // Ignore files; only keep directories
+                if !entry.file_type().ok()?.is_dir() {
+                    return None;
+                }
+                // Parse directory name into i64 (ignores non-numeric directory names)
+                entry.file_name().to_str()?.parse::<i64>().ok()
+            })
+            .max()
+            .expect("No valid numeric version subdirectories found");
+
+        assert_eq!(latest_version, expected_latest_version);
 
     }
 
@@ -199,6 +221,28 @@ mod client_tests {
         outputs.truncate(batch_size * num_candidates);
         user_reprs.truncate(batch_size * out_features);
         cand_reprs.truncate(batch_size * num_candidates * out_features);
+
+        let latest_version = client.get_latest_model_version().await.expect("Couldn't get latest model version");
+
+        let model_dir = get_project_dir()
+            .expect("Failed to get project directory")
+            .join("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/");
+
+        let expected_latest_version: i64 = std::fs::read_dir(&model_dir)
+            .expect("Failed to read model repository directory")
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                // Ignore files; only keep directories
+                if !entry.file_type().ok()?.is_dir() {
+                    return None;
+                }
+                // Parse directory name into i64 (ignores non-numeric directory names)
+                entry.file_name().to_str()?.parse::<i64>().ok()
+            })
+            .max()
+            .expect("No valid numeric version subdirectories found");
+
+        assert_eq!(latest_version, expected_latest_version);
 
         Ok(())
 
