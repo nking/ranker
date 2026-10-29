@@ -293,6 +293,7 @@ pub fn get_python_path() -> PathBuf {
     python_path
 }
 
+#[warn(dead_code)]
 pub fn ensure_plotters_font_registered() {
     use std::sync::Once;
     static INIT: Once = Once::new();

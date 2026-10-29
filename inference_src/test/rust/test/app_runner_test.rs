@@ -70,8 +70,8 @@ mod app_runner_tests {
             timestamps: vec![1620000000],
             n_users: 1,
             k : None,
-            query_model_version: 1,
-            ranker_model_version: 1
+            query_model_version: Some(1),
+            ranker_model_version: Some(1)
         });
 
         // Assert success

@@ -92,9 +92,9 @@ impl MovieDb {
 
         let n_movies = valid_movie_ids.len() as u32;
 
-        let version_num: i64 = match model_version {
-            Some(VersionChoice::Version(v)) => v,
-            _ => 1, // Default fallback version if None
+        let version_num: Option<i64> = match model_version {
+            Some(VersionChoice::Version(v)) => Some(v),
+            _ => None
         };
 
         Some(Request::new(MoviesRequest {

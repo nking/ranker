@@ -2,7 +2,7 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::{AtomicI64, Ordering}};
 use arc_swap::{ArcSwap, Guard};
 use crate::model_client::{QueryModelClient, RankerModelClient};
 use crate::embeddings_ann::Searcher;
@@ -25,9 +25,8 @@ use crate::util::{get_top_k_desc_diagnostic, get_top_k_desc_scores};
 pub struct Orchestrator {
     query_model: QueryModelClient,
     ranker_model: RankerModelClient,
-    //TODO: add quary_model_latest_version
-    //TODO: add ranker_model_latest_version
-    // they will be frequently read and infrequently written, so have to be thread safe for writes
+    query_model_latest_version: AtomicI64,
+    ranker_model_latest_version: AtomicI64,
 
     query_saved_models_uri : String,
     ranker_saved_models_uri : String,
@@ -119,12 +118,17 @@ impl Orchestrator {
         let query_client = QueryModelClient::new(query_uri, ranker_metadata.embed_len).await;
         let ranker_client = RankerModelClient::new(ranker_uri, ranker_metadata.clone()).await;
 
+        let query_latest_ver = query_client.get_latest_model_version().await?;
+        let ranker_latest_ver = ranker_client.get_latest_model_version().await?;
+
         let user_history: UserHistory = build_user_history(&ratings_uris, 2048).await;
         let user_db : UserDb = UserDb::new(user_db_path).expect("Failed to initialize UserDb from binary path");
 
         Ok(Self {
             query_model: query_client,
             ranker_model: ranker_client,
+            query_model_latest_version: AtomicI64::new(query_latest_ver),
+            ranker_model_latest_version: AtomicI64::new(ranker_latest_ver),
             query_saved_models_uri : query_saved_models_uri.clone(),
             ranker_saved_models_uri : ranker_saved_models_uri.clone(),
             ranker_serving_is_batched: ranker_serving_is_batched,
@@ -139,6 +143,34 @@ impl Orchestrator {
             top_k: top_k,
             user_db: user_db,
         })
+    }
+
+    /// Queries TensorFlow Serving for the latest available Query and Ranker model versions
+    /// and atomically updates the stored version numbers.
+    /// Returns `(latest_query_version, latest_ranker_version)`.
+    pub async fn update_latest_model_versions(
+        &self,
+    ) -> Result<(i64, i64), Box<dyn std::error::Error + Send + Sync>> {
+        // Query both TFS endpoints concurrently
+        let (query_ver, ranker_ver) = tokio::try_join!(
+            self.query_model.get_latest_model_version(),
+            self.ranker_model.get_latest_model_version()
+        )?;
+
+        self.query_model_latest_version.store(query_ver, Ordering::Release);
+        self.ranker_model_latest_version.store(ranker_ver, Ordering::Release);
+
+        Ok((query_ver, ranker_ver))
+    }
+
+    #[inline]
+    pub fn get_query_model_latest_version(&self) -> i64 {
+        self.query_model_latest_version.load(Ordering::Acquire)
+    }
+
+    #[inline]
+    pub fn get_ranker_model_latest_version(&self) -> i64 {
+        self.ranker_model_latest_version.load(Ordering::Acquire)
     }
 
     // filename can be a &str, String, &Path, or anything implementing AsRef<str> or Display
@@ -161,7 +193,7 @@ impl Orchestrator {
         //TODO: consider mapping Default version fallback to max version key in HashMap
         let query_version_num: i64 = match query_model_version_choice {
             Some(VersionChoice::Version(v)) => v,
-            _ => 1, // Default fallback version if None
+            _ => self.get_query_model_latest_version(),
         };
 
         // FAST Lock-free read.
@@ -211,7 +243,7 @@ impl Orchestrator {
         //TODO: consider mapping Default version fallback to max version key in HashMap
         let ranker_version_num: i64 = match ranker_model_version_choice {
             Some(VersionChoice::Version(v)) => v,
-            _ => 1, // Default fallback version if None
+            _ => self.get_ranker_model_latest_version(),
         };
 
         // FAST Lock-free read.
@@ -300,14 +332,14 @@ impl Orchestrator {
         ranker_model_version_choice: Option<VersionChoice>) -> UsersRankOnlyRequest {
 
         //TODO: consider mapping Default version fallback to max version key in HashMap
-
-        let ranker_version_num: i64 = match ranker_model_version_choice {
-            Some(VersionChoice::Version(v)) => v,
-            _ => 1, // Default fallback version if None
+        //   and if so, can get highest key in the metadata hashmap
+        let ranker_version_num: Option<i64> = match ranker_model_version_choice {
+            Some(VersionChoice::Version(v)) => Some(v),
+            _ => None,
         };
-        let query_version_num: i64 = match query_model_version_choice {
-            Some(VersionChoice::Version(v)) => v,
-            _ => 1, // Default fallback version if None
+        let query_version_num: Option<i64> = match query_model_version_choice {
+            Some(VersionChoice::Version(v)) => Some(v),
+            _ => None,
         };
 
         UsersRankOnlyRequest {
@@ -549,7 +581,10 @@ impl Orchestrator {
         // length: n_users * num_candidates
         let ann_movie_ids = ann_res.candidate_ids;
 
-        let ranker_model_version_choice = Some(VersionChoice::Version(user_reqs.ranker_model_version));
+        let ranker_model_version_choice: Option<VersionChoice> = match user_reqs.ranker_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            None => None,
+        };
 
         let mut ranked_movies = self._make_ranker_request_impl(
             &user_ids, &user_reqs.timestamps, &user_embeddings, &ann_movie_ids,
@@ -592,7 +627,10 @@ impl Orchestrator {
         // length: n_users * num_candidates
         let ann_movie_ids = ann_res.candidate_ids;
 
-        let ranker_model_version_choice = Some(VersionChoice::Version(user_reqs.ranker_model_version));
+        let ranker_model_version_choice: Option<VersionChoice> = match user_reqs.ranker_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            None => None,
+        };
 
         //println!("_predict: n_users={}, num_ann_movies={}, num_candidates={}, embed_len={}, n_user_embeddings={}",
         //    user_ids.len(), ann_movie_ids.len()/user_ids.len(), self.ranker_model_metadata.num_candidates,
@@ -652,7 +690,10 @@ impl Orchestrator {
         // length: n_users * num_candidates
         let ann_movie_ids = ann_res.candidate_ids;
 
-        let ranker_model_version_choice = Some(VersionChoice::Version(user_reqs.ranker_model_version));
+        let ranker_model_version_choice: Option<VersionChoice> = match user_reqs.ranker_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            _ => None
+        };
 
         // scores shape is    (n_users * num_candidates);
         // movie_ids is shape (n_users * num_candidates)
@@ -811,7 +852,14 @@ impl Orchestrator {
 
         let n_users = users_req.user_ids.len();
 
-        let query_model_version_choice = Some(VersionChoice::Version(users_req.query_model_version));
+        let query_model_version_choice: Option<VersionChoice> = match users_req.query_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            _ => None
+        };
+        let ranker_model_version_choice: Option<VersionChoice> = match users_req.ranker_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            _ => None
+        };
 
         // Get user_embeddings from TFS Query model.  flattenend into a single array
         // length is n_users * embed_len
@@ -837,8 +885,6 @@ impl Orchestrator {
         let n_hists : Vec<usize> = user_history.get_history_count_before_timestamp(
             &user_ids0, &users_req.timestamps
         );
-
-        let ranker_model_version_choice = Some(VersionChoice::Version(users_req.ranker_model_version));
 
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
             .map_err(|e| {
@@ -965,8 +1011,10 @@ impl RecommenderService for Orchestrator {
 
         let n_users = user_reqs.user_ids.len();
 
-        let ranker_model_version_choice = Some(VersionChoice::Version(user_reqs.ranker_model_version));
-
+        let ranker_model_version_choice: Option<VersionChoice> = match user_reqs.ranker_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            _ => None
+        };
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
             .map_err(|e| {
                 // Optional: log it so you can see the error in your server console
@@ -1035,8 +1083,10 @@ impl RecommenderService for Orchestrator {
 
         let n_users = user_reqs.user_ids.len();
 
-        let ranker_model_version_choice = Some(VersionChoice::Version(user_reqs.ranker_model_version));
-
+        let ranker_model_version_choice: Option<VersionChoice> = match user_reqs.ranker_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            _ => None
+        };
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
             .map_err(|e| {
                 // Optional: log it so you can see the error in your server console
@@ -1126,8 +1176,14 @@ impl RecommenderService for Orchestrator {
         let user_ids = vec![rank_req.user_id];
         let timestamps = vec![rank_req.timestamp];
 
-        let query_model_version_choice = Some(VersionChoice::Version(rank_req.query_model_version));
-        let ranker_model_version_choice = Some(VersionChoice::Version(rank_req.ranker_model_version));
+        let ranker_model_version_choice: Option<VersionChoice> = match rank_req.ranker_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            _ => None
+        };
+        let query_model_version_choice: Option<VersionChoice> = match rank_req.query_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            _ => None
+        };
 
         // populate a UserRequest with age, gender and occupation.  The UserRequest is needed to get a user_embedding
         let user_req_opt : Option<Request<UsersRequest>> = self.user_db.get_request(
@@ -1158,8 +1214,14 @@ impl RecommenderService for Orchestrator {
         let user_ids = rank_req.user_ids;
         let timestamps = rank_req.timestamps;
 
-        let query_model_version_choice = Some(VersionChoice::Version(rank_req.query_model_version));
-        let ranker_model_version_choice = Some(VersionChoice::Version(rank_req.ranker_model_version));
+        let query_model_version_choice: Option<VersionChoice> = match rank_req.query_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            _ => None
+        };
+        let ranker_model_version_choice: Option<VersionChoice> = match rank_req.ranker_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            _ => None
+        };
 
         // populate a UserRequest with age, gender and occupation.  The UserRequest is needed to get a user_embedding
         let user_req_opt : Option<Request<UsersRequest>> = self.user_db.get_request(

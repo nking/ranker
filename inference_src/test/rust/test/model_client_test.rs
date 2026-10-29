@@ -42,8 +42,8 @@ mod client_tests {
             timestamps: vec![1620000000],
             n_users: 1,
             k : None,
-            query_model_version:1,
-            ranker_model_version:1
+            query_model_version:Some(1),
+            ranker_model_version:Some(1)
         };
 
         let query_model_version_choice = Some(VersionChoice::Version(1));
@@ -104,7 +104,7 @@ mod client_tests {
             movie_ids: vec![6041],
             genres: vec!["Action|Sci-Fi".to_string()],
             n_movies : 1,
-            candidate_model_version:1,
+            candidate_model_version:Some(1),
         };
 
         let candidate_model_version_choice = Some(VersionChoice::Version(1));

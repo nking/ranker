@@ -17,8 +17,8 @@ message UsersRequest {
   repeated int64 timestamps = 5;
   uint32 n_users = 6;
   optional uint32 k = 7;
-  int64 query_model_version = 8;
-  int64 ranker_model_version = 9;
+  optional int64 query_model_version = 8;
+  optional int64 ranker_model_version = 9;
 }
 
 //input request for movie embeddings.
@@ -26,7 +26,7 @@ message MoviesRequest {
   repeated int32 movie_ids = 1;
   repeated string genres = 2;
   uint32 n_movies = 3;
-  int64 candidate_model_version = 4;
+  optional int64 candidate_model_version = 4;
 }
 
 // input for the graph ranker model
@@ -62,8 +62,8 @@ message UsersRankOnlyRequest {
   repeated int32 user_ids = 1;
   repeated int64 timestamps = 2;
   repeated int32 candidate_ids = 3;
-  int64 query_model_version = 4;
-  int64 ranker_model_version = 5;
+  optional int64 query_model_version = 4;
+  optional int64 ranker_model_version = 5;
 }
 
 // input request to return scored candidate_ids
@@ -71,8 +71,8 @@ message RankOnlyRequest {
   int32 user_id = 1;
   int64 timestamp = 2;
   repeated int32 candidate_ids = 3;
-  int64 query_model_version = 4;
-  int64 ranker_model_version = 5;
+  optional int64 query_model_version = 4;
+  optional int64 ranker_model_version = 5;
 }
 
 // Response message containing the user embedding and retrieved candidate IDs.  candidate_ids is currently a flat vector

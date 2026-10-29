@@ -12,7 +12,7 @@ use crate::tensorflow::{
     tensor_shape_proto::Dim,
     serving::{
         prediction_service_client::PredictionServiceClient,
-        PredictRequest, GetModelStatusRequest, ModelSpec, GetModelStatusResponse,
+        PredictRequest, GetModelStatusRequest, ModelSpec,
     },
     error::Code,
 };
@@ -149,7 +149,7 @@ impl RankerModelClient {
         &self,
     ) -> Result<i64, Box<dyn Error + Send + Sync>> {
 
-        let mut client = self.model_service_client.clone();
+        let client = self.model_service_client.clone();
 
         let mut versions = get_all_model_versions("graph-ranker", client).await
             .expect("Failed to fetch graph-ranker model versions");

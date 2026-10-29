@@ -226,8 +226,8 @@ mod orchestrator_tests {
             timestamps: vec![user_histories[0].timestamps[mid_points[0]]],
             n_users: 1,
             k : None,
-            query_model_version: 1,
-            ranker_model_version: 1
+            query_model_version: Some(1),
+            ranker_model_version: Some(1)
         };
 
         let tonic_req = tonic::Request::new(mock_single_request);
@@ -256,8 +256,8 @@ mod orchestrator_tests {
             timestamps: vec![user_histories[0].timestamps[mid_points[0]], user_histories[1].timestamps[mid_points[1]]],
             n_users: 2,
             k : None,
-            query_model_version: 1,
-            ranker_model_version: 1
+            query_model_version: Some(1),
+            ranker_model_version: Some(1)
         };
 
         let tonic_req = tonic::Request::new(mock_batch_request);

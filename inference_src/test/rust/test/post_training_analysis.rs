@@ -278,11 +278,6 @@ mod post_training_analysis {
         ranker_model_version:Option<VersionChoice>, summary_output_dir: &str, parquet_output_dir: &str)
         ->  Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
-        /*let ranker_version_num: i64 = match ranker_model_version {
-            Some(VersionChoice::Version(v)) => v,
-            _ => 1, // Default fallback version if None
-        };*/
-
         let ranker_metadata = harness.orchestrator.get_or_fetch_ranker_metadata(
             ranker_model_version.clone()
         ).expect("error fetching ranker metadata");

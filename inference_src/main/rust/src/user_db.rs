@@ -92,13 +92,13 @@ impl UserDb {
 
         //TODO: consider mapping Default version fallback to max version key in HashMap
 
-        let query_version_num: i64 = match query_model_version {
-            Some(VersionChoice::Version(v)) => v,
-            _ => 1, // Default fallback version if None
+        let query_version_num: Option<i64> = match query_model_version {
+            Some(VersionChoice::Version(v)) => Some(v),
+            _ => None
         };
-        let ranker_version_num: i64 = match ranker_model_version {
-            Some(VersionChoice::Version(v)) => v,
-            _ => 1, // Default fallback version if None
+        let ranker_version_num:  Option<i64> = match ranker_model_version {
+            Some(VersionChoice::Version(v)) => Some(v),
+            _ => None
         };
 
         Some(Request::new(UsersRequest {
