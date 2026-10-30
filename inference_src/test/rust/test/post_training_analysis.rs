@@ -119,7 +119,7 @@ impl TestHarness {
         let ranker_metadata =
             orchestrator.get_or_fetch_ranker_metadata(Some(VersionChoice::Version(1)))
                 .expect("error fetching ranker metadata");
-        let movies_offset = ranker_metadata.num_catalog_users + 1;
+        let movies_offset = ranker_metadata.num_catalog_users; // when subtracted from min(movie_ids), will be 1
         let num_catalog_movies = ranker_metadata.num_catalog_movies;
         let embed_len = ranker_metadata.embed_len;
 
@@ -845,8 +845,8 @@ mod post_training_analysis {
         let n_sampled = original_movie_ids.len();
 
         // Generate contiguous new_movie_ids
-        // movie catalog starts at offset, so begin new ids after all movies
-        let id0 = (harness.movies_offset + harness.num_catalog_movies) as i32;
+        //offset=6040, num_cat_users=6040, movie_id range is [offset+1, offset+3883], so id0 is offset + n_movies + 1
+        let id0 = (harness.movies_offset + harness.num_catalog_movies + 1) as i32;
         let new_movie_ids: Vec<i32> = (id0 .. id0 + (n_sampled as i32)).collect();
 
         // generate the MoviesRequests using the original movie_ids
@@ -932,9 +932,8 @@ mod post_training_analysis {
 
         let n_sampled = original_user_ids.len();
 
-        // Note: `movies_offset` is `num_catalog_users + 1`.
-        // To avoid colliding with existing user IDs (1..=num_catalog_users) or movie IDs,
-        // start after the movie catalog (or at `harness.movies_offset` if user/movie ID spaces are separate here):
+        //  existing range of user_ids is [1, num_catalog_userss]
+        // so start new user ids after last
         let id0 = (harness.num_catalog_users + 1) as i32;
         let new_user_ids: Vec<i32> = (id0 .. id0 + (n_sampled as i32)).collect();
 
@@ -999,7 +998,7 @@ mod post_training_analysis {
         let embed_len = ranker_model_metadata.embed_len;
         let num_candidates = ranker_model_metadata.num_candidates;
         let candidate_model_version = query_model_version.clone();
-        let movies_offset = ranker_model_metadata.num_catalog_users + 1;
+        let movies_offset = ranker_model_metadata.num_catalog_users; // 6041 - 6040 = 1, leaves 0 for OOV
 
         //select 167 randomly from each (user_tier=0, 1, and 2) of test dataset.
         // create user embeddings using the selected user data but give them ids of 0.

@@ -349,6 +349,7 @@ pub fn create_fake_padded_super_batch(
         candidate_ids[i * num_candidates] = movie_ids[i];
         labels[i * num_candidates] = 1;
 
+        //user_embedding implicit indices are the user_id-1
         let idx = (user_ids[i] -1) as usize;
         let idx_offset = idx * embed_len;
         let out_offset = i * embed_len;

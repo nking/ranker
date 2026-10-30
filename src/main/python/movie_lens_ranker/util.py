@@ -386,7 +386,7 @@ def read_movie_tiers_uri(movie_tiers_uri:str, batch_size:int=1024) -> Tuple[np.n
     :return: a numpy array sorted by movie_id, holding the movie tier values.
     The movie_id offset and number of movies are also returned.
     """
-    #    movie_id_offset:int=6041, num_catalog_movies:int=3883,
+    #    movie_id_offset:int=6040, num_catalog_movies:int=3883,
     sentinel = (1<<31)
     min_id = sentinel - 1
     max_id = -sentinel
@@ -414,7 +414,8 @@ def read_movie_tiers_uri(movie_tiers_uri:str, batch_size:int=1024) -> Tuple[np.n
     if n_records != n_expected:
         logging.warning("there are gaps in movie_ids, so missing value will default to tier==2")
 
-    offset = min_id
+    #movie id range [6041, 6041+3883] - offset becomes [1, 3883]
+    offset = min_id - 1
 
     movie_tiers = np.full((n_expected,), 2, dtype=np.int32)
     for m_id, t in d.items():

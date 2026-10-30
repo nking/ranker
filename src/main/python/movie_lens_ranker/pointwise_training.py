@@ -21,7 +21,7 @@ from movie_lens_ranker.train import score_and_shape_results
 @nnx.jit
 def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
                optimizer: nnx.Optimizer,
-               movie_tiers:np.ndarray, movie_offset:int = 6040+1,
+               movie_tiers:np.ndarray, movie_offset:int = 6040,
                tier_weights_config: Union[List, Array] = [0.33, 0.33, 0.33],
                focal_loss_gamma: float = 2.0,
                ) -> Array:
@@ -51,7 +51,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
         # IPW TIER WEIGHTING (Unchanged) ---
         # Look up tier weight based on target item ID.
         batch_target_ids = jnp.sum(cand_ids_2d * labels_2d, axis=1) - movie_offset
-        safe_target_ids = jnp.clip(batch_target_ids, 0, normalized_weights.shape[0] - 1)
+        safe_target_ids = jnp.clip(batch_target_ids, 0, normalized_weights.shape[0])
         batch_target_tiers = movie_tiers[safe_target_ids]
 
         # Shape: (batch_size, 1). This broadcasts the target's tier weight
@@ -101,10 +101,10 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     train step over a batch, where padded_graph contains super graph of the batch
     :param model:
     :param padded_graph:
-    :param movie_tiers: array of movie tiers where indicies are movie_id-movie_offset and values are 0, 1, 2 for
+    :param movie_tiers: array of movie tiers where indices are movie_id-movie_offset and values are 0, 1, 2 for
         head, torso, tail, respectively of the movie frequency distribution (where distribution
         was determined from train dataset).
-    :param movie_offset: offset from 0 of movie_ids
+    :param movie_offset: offset needed to subtract from min(movie_ids) to make it 1
     :param tier_weights_config : holds the weights of the tiers head, torso, and tail, respectively.  They will be normalized to sum to 1 if not already.
     :param top_k: the number of movie_ids that inference will return for a user
     :return: dictionary with keys:
@@ -171,7 +171,7 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     # Multiplying and summing across the row isolates the target ID.
     batch_target_ids = jnp.sum(cand_ids_2d * labels_2d, axis=1) - movie_offset
 
-    safe_target_ids = jnp.clip(batch_target_ids, 0, movie_tiers.shape[0] - 1)
+    safe_target_ids = jnp.clip(batch_target_ids, 0, movie_tiers.shape[0])
     #in safe_target_ids, all non-target candidates map to index=0
     batch_target_tiers = movie_tiers[safe_target_ids]
 

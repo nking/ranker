@@ -216,7 +216,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
                optimizer: nnx.Optimizer,
                movie_tiers:np.ndarray,
                max_history:int,
-               movie_offset:int = 6040+1,
+               movie_offset:int = 6040,
                tier_weights_config: Array = jnp.array([0.33, 0.33, 0.33]),
                use_focal_loss: int = 0,
                use_ipw: int = 0,
@@ -227,7 +227,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     :param max_history: the length of real history in a user's graph.
     :param use_ipw: if 1, use focal loss in weighting of loss
     :param use_focal_loss: if 1, use ipw in weightong of loss
-    :param movie_offset:  offset from 0 of movie_ids
+    :param movie_offset:  offset to subtract from min(movie_ids) to make it 1
     :param movie_tiers: 0, 1, 2 for head, torso, tail respectively
     :param tier_weights_config: weights for each movie_tier.  will be normalized to sum to 1.
     :param model: the GraphRankr model to be trained
@@ -290,7 +290,7 @@ def train_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
 
         if use_ipw:
             batch_target_ids = jnp.sum(cand_ids_2d * safe_labels_2d, axis=1) - movie_offset
-            safe_target_ids = jnp.clip(batch_target_ids, 0, movie_tiers.shape[0] - 1).astype(jnp.int32)
+            safe_target_ids = jnp.clip(batch_target_ids, 0, movie_tiers.shape[0]).astype(jnp.int32)
             batch_target_tiers = movie_tiers[safe_target_ids]
             ipw_weights = normalized_weights[batch_target_tiers][:, None]
             #shape (batch_size, 1)
@@ -355,7 +355,7 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     :param movie_tiers: array of movie tiers where indicies are movie_id-movie_offset and values are 0, 1, 2 for
         head, torso, tail, respectively of the movie frequency distribution (where distribution
         was determined from train dataset).
-    :param movie_offset: offset from 0 of movie_ids
+    :param movie_offset: offset to subtract from min(catalog movie_ids) to make it 1
     :param tier_weights_config : holds the weights of the tiers head, torso, and tail, respectively.  They will be normalized to sum to 1 if not already.
     :param top_k:  the number of movie_ids that inference will return for a user
     :return: dictionary with keys:
@@ -424,7 +424,7 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     # Multiplying and summing across the row isolates the target ID.
     batch_target_ids = jnp.sum(cand_ids_2d * labels_2d, axis=1) - movie_offset
 
-    safe_target_ids = jnp.clip(batch_target_ids, 0, movie_tiers.shape[0] - 1)
+    safe_target_ids = jnp.clip(batch_target_ids, 0, movie_tiers.shape[0])
     #in safe_target_ids, all non-target candidates map to index=0
     batch_target_tiers = movie_tiers[safe_target_ids]
 
