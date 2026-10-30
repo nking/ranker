@@ -586,7 +586,7 @@ mod post_training_analysis {
         let candidate_model_version = query_model_version.clone();
         let movies_offset = harness.movies_offset;
 
-        // Sample 167 movies per tier (501 total) and generate OOV=0 embeddings
+        // Sample 167 movies per tier (501 total) and generate OOV=0+offset embeddings
         let (old_movie_ids, new_movie_ids, new_movie_embeddings) = get_cold_start_movies(
             harness,
             candidate_model_version,
@@ -863,7 +863,8 @@ mod post_training_analysis {
         let mut movies_request = request.into_inner();
 
         // for the TwoTwoerDNN Candidate model, we need to use 0 for the OOV cold start movie_ids (until that gets refactored)
-        movies_request.movie_ids = vec![0; new_movie_ids.len()];
+        // movie_id with value offset with be 0 when offset is subtracted
+        movies_request.movie_ids = vec![harness.movies_offset as i32; new_movie_ids.len()];
 
         // create new embeddings with cold start Ids
         let client = CandidateModelClient::new(harness.candidate_uri.clone(), embed_len).await;

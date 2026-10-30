@@ -160,7 +160,7 @@ mod client_tests {
         //    the range of movie_id_range must be >= (num_history + num_candidates + 1)
         let batch_size = 1;
         let user_id_range = (1, 10);
-        let movie_id_range = (6041, 6041 + (max_history + num_candidates + 2));
+        let movie_id_range = (6041, 6040 + (max_history + num_candidates + 2));
         let n_local_devices = 1;
 
         let (user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris(Some(1));

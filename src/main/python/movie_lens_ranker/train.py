@@ -951,6 +951,7 @@ def build_model_optimizer_and_dataloaders(config:dict, rngs:nnx.Rngs) -> Dict[st
         
         #initialize the layers with same fake data
         user_id_range = (1, config['num_users'])
+        ##[6040+1, 6040+n_movies]=[6041,9923]
         movie_id_range = (config['num_users'] + 1, config['num_users'] + config['num_movies'])
         
         fake_batch = create_fake_jagged_batch(batch_size=config['batch_size'],

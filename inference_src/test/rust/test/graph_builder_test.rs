@@ -41,7 +41,8 @@ mod graph_builder_tests {
         let max_history: usize = 4;
         let num_candidates: usize = 5;
         let user_id_range : (usize, usize) = (1, 6040);
-        let movie_id_range : (usize, usize) = (6041, 6041+3883);
+        //[6040+1, 6040+n_movies]=[6041,9923]
+        let movie_id_range : (usize, usize) = (6041, 6040+3883);
 
         let n_local_devices : usize = 1;
 

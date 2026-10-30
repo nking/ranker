@@ -56,7 +56,8 @@ class TestGraph(unittest.TestCase):
         num_candidates = 5
 
         user_id_range = (1, 6040)
-        movie_id_range = (6041, 6041 + 3883)
+        ##[6040+1, 6040+n_movies]=[6041,9923]
+        movie_id_range = (6041, 6040 + 3883)
 
         jax_graph_comp_dict = calc_number_jax_graph_components(
             batch_size=batch_size, max_history=max_history,

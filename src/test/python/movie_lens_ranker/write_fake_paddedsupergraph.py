@@ -22,7 +22,8 @@ def write_fake_graph_safetensor(
         batch_size:int=2,
         num_candidates:int=5,
         user_id_range:Tuple[int, int]=(1, 6040),
-        movie_id_range:Tuple[int, int]=(6041, 6041 + 3883),
+        ##[6040+1, 6040+n_movies]=[6041,9923]
+        movie_id_range:Tuple[int, int]=(6041, 6040 + 3883),
         jax_n_local_devices:int=1
     ):
     """
