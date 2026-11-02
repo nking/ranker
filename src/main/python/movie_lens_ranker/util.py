@@ -384,7 +384,7 @@ def read_movie_tiers_uri(movie_tiers_uri:str, batch_size:int=1024) -> Tuple[np.n
     :param movie_tiers_uri: uri to the movie_tiers array record hodling movie_id, tier
     :param batch_size: batch size to use while reading the file
     :return: a numpy array sorted by movie_id, holding the movie tier values.
-    The movie_id offset and number of movies are also returned.
+    The movie_id offset and number of movies are also returned.  row 0 is for OOV movie_id=0
     """
     #    movie_id_offset:int=6040, num_catalog_movies:int=3883,
     sentinel = (1<<31)
@@ -410,7 +410,7 @@ def read_movie_tiers_uri(movie_tiers_uri:str, batch_size:int=1024) -> Tuple[np.n
         raise ValueError(f"file was empty")
     if min_id == (sentinel-1):
         raise ValueError(f"smallest movie_id == {sentinel-1}")
-    n_expected = max_id - min_id + 1
+    n_expected = max_id - min_id + 1 + 1 #extra +1 for row 0 for non-existent movie_id=0
     if n_records != n_expected:
         logging.warning("there are gaps in movie_ids, so missing value will default to tier==2")
 
@@ -454,8 +454,9 @@ def read_embeddings_length(embeddings_uri:str) -> int:
 def _read_embeddings(embeddings_uri:str, batch_size:int=1024) -> jnp.ndarray:
     """
     given the embedding uri return and the embeddings
-    as a 2D jnp array.
-    :param embeddings_uri:
+    as a 2D jnp array with implicit row indices of id - 1 (there is no padding row at index=0).
+    :param embeddings_uri: uri to file containing ids and embeddings.  it is assumed that all
+    catalog ids are present.  later lookups depend upon id range [1, num_ids].
     :param batch_size:
     :return: 2D array of embeddings
     """
