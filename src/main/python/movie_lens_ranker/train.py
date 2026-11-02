@@ -352,9 +352,9 @@ def eval_step(model: GraphRanker, padded_graph: jraph.GraphsTuple,
     :param max_history:  the length of real history in a user's graph
     :param model:
     :param padded_graph:
-    :param movie_tiers: array of movie tiers where indicies are movie_id-movie_offset and values are 0, 1, 2 for
+    :param movie_tiers: array of movie tiers where indices are movie_id-movie_offset and values are 0, 1, 2 for
         head, torso, tail, respectively of the movie frequency distribution (where distribution
-        was determined from train dataset).
+        was determined from train dataset).  row 0 is for OOV movie_id=0.
     :param movie_offset: offset to subtract from min(catalog movie_ids) to make it 1
     :param tier_weights_config : holds the weights of the tiers head, torso, and tail, respectively.  They will be normalized to sum to 1 if not already.
     :param top_k:  the number of movie_ids that inference will return for a user

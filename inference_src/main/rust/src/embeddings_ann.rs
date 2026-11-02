@@ -46,7 +46,7 @@ impl Searcher {
 
         let (movie_embeddings_catalog, num_movies, embed_len) = read_movie_embeddings(&movie_embeddings_uri);
 
-        println!("Movies embeddings embed_len: {}", embed_len);
+        println!("Number of movie embeddings = {}, embed_len: {}", num_movies, embed_len);
 
         let path_buf = persisted_index_path.as_ref().to_path_buf();
         let indexer = if path_buf.exists() {

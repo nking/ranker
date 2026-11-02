@@ -1,8 +1,8 @@
-2026-10-22 10:22:41.329232: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
-2026-10-22 10:22:41.389215: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+2026-11-02 13:43:22.211242: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2026-11-02 13:43:22.263030: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
 To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2026-10-22 10:22:42.981919: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
-2026-10-22 10:22:44.804267: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+2026-11-02 13:43:23.777660: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2026-11-02 13:43:25.301444: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
 
 MetaGraphDef with tag-set: 'serve' contains the following SignatureDefs:
 
@@ -56,7 +56,7 @@ signature_def['serving_default_examples']:
         shape: (-1, 16)
         name: StatefulPartitionedCall_4:0
   Method name is: tensorflow/serving/predict
-The MetaGraph with tag set ['serve'] contains the following ops: {'MergeV2Checkpoints', 'Mul', 'MatMul', 'StaticRegexFullMatch', 'LookupTableFindV2', 'StopGradient', 'Cumsum', 'Sum', 'RestoreV2', 'RealDiv', 'NoOp', 'Tile', 'Sub', 'Elu', 'Sin', 'Prod', 'Fill', 'StatefulPartitionedCall', 'Const', 'StaticRegexReplace', 'Shape', 'Cumprod', 'Maximum', 'NotEqual', 'ConcatV2', 'Pack', 'StridedSlice', 'Minimum', 'RaggedTensorToTensor', 'DisableCopyOnRead', 'SaveV2', 'Square', 'StringSplitV2', 'Reshape', 'FloorDiv', 'OneHot', 'Less', 'BroadcastTo', 'Mean', 'ShardedFilename', 'VarIsInitializedOp', 'Identity', 'Equal', 'LookupTableImportV2', 'Rsqrt', 'Select', 'Cos', 'Sigmoid', 'UnsortedSegmentSum', 'FloorMod', 'Cast', 'StringJoin', 'Placeholder', 'Neg', 'SquaredDifference', 'Range', 'VarHandleOp', 'ParseExampleV2', 'ReadVariableOp', 'HashTableV2', 'SelectV2', 'PlaceholderWithDefault', 'Max', 'Timestamp', 'IdentityN', 'Squeeze', 'AddV2', 'GatherV2', 'ExpandDims', 'Where', 'AssignVariableOp'}
+The MetaGraph with tag set ['serve'] contains the following ops: {'PlaceholderWithDefault', 'Cumprod', 'LookupTableImportV2', 'Sin', 'StringSplitV2', 'Maximum', 'ParseExampleV2', 'MergeV2Checkpoints', 'Mean', 'SaveV2', 'Tile', 'Select', 'Prod', 'Cast', 'Const', 'RaggedTensorToTensor', 'Shape', 'BroadcastTo', 'Mul', 'VarIsInitializedOp', 'SelectV2', 'UnsortedSegmentSum', 'Identity', 'RestoreV2', 'StaticRegexReplace', 'FloorDiv', 'Neg', 'Placeholder', 'ShardedFilename', 'Cos', 'OneHot', 'IdentityN', 'Reshape', 'Less', 'VarHandleOp', 'Range', 'StatefulPartitionedCall', 'GatherV2', 'Elu', 'FloorMod', 'Rsqrt', 'Fill', 'Timestamp', 'Sum', 'LookupTableFindV2', 'Max', 'RealDiv', 'StopGradient', 'AssignVariableOp', 'Minimum', 'Square', 'Where', 'NotEqual', 'Equal', 'ReadVariableOp', 'Sub', 'StaticRegexFullMatch', 'HashTableV2', 'Pack', 'ExpandDims', 'Sigmoid', 'MatMul', 'StringJoin', 'Squeeze', 'Cumsum', 'DisableCopyOnRead', 'SquaredDifference', 'AddV2', 'NoOp', 'StridedSlice', 'ConcatV2'}
 
 Concrete Functions:
   Function Name: 'serving_default'
@@ -64,7 +64,7 @@ Concrete Functions:
       Callable with:
         Argument #1
           DType: dict
-          Value: {'user_id': TensorSpec(shape=(None, 1), dtype=tf.int64, name='user_id'), 'gender': TensorSpec(shape=(None, 1), dtype=tf.string, name='gender'), 'occupation': TensorSpec(shape=(None, 1), dtype=tf.int64, name='occupation'), 'age': TensorSpec(shape=(None, 1), dtype=tf.int64, name='age'), 'timestamp': TensorSpec(shape=(None, 1), dtype=tf.int64, name='timestamp'), }
+          Value: {'user_id': TensorSpec(shape=(None, 1), dtype=tf.int64, name='user_id'), 'timestamp': TensorSpec(shape=(None, 1), dtype=tf.int64, name='timestamp'), 'age': TensorSpec(shape=(None, 1), dtype=tf.int64, name='age'), 'occupation': TensorSpec(shape=(None, 1), dtype=tf.int64, name='occupation'), 'gender': TensorSpec(shape=(None, 1), dtype=tf.string, name='gender'), }
 
   Function Name: 'serving_default_examples'
     Option #1

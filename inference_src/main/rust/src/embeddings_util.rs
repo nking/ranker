@@ -81,6 +81,10 @@ fn _read_embeddings(embeddings_uri: &str) -> (Vec<f32>, usize, usize) {
     let num_embeddings = records.len();
     let embed_len = records.first().map(|r| r.embedding.len()).unwrap_or(0);
 
+    // assert that records are sequential
+    let _range : i32 = &records[records.len() - 1].id - &records[0].id + 1;
+    debug_assert_eq!(num_embeddings as i32, _range);
+
     // Stack vertically into a single flat array
     // Pre-allocating capacity avoids expensive memory reallocations
     let mut stacked_embeddings: Vec<f32> = Vec::with_capacity(num_embeddings * embed_len);
