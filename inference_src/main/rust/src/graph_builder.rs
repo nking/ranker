@@ -9,9 +9,9 @@ fn build_graph_arrays(
     history_ratings: &[i32],
     history_movie_ids: &[i32],
     labels: &[i32],
-    user_embedding: &[f32],
+    user_embedding: &[f32], // single embedding vector for user_id
     movie_embeddings_catalog : &[f32],
-    num_catalog_users : usize,
+    movie_id_offset_to_0 : usize,
     embed_len : usize,
 ) -> (
     Vec<i32>,  // senders
@@ -62,9 +62,10 @@ fn build_graph_arrays(
     node_embeddings[0..embed_len].copy_from_slice(&user_embedding[0..embed_len]);
     let mut emb_off = embed_len;
     //copy in the movie embeddings for user history
+
     for i in 0..n_real_history {
-        let movie_id = &history_movie_ids[i];
-        let m_idx = (movie_id - 1) as usize - num_catalog_users;
+        let movie_id = history_movie_ids[i];
+        let m_idx = (movie_id as usize - movie_id_offset_to_0);
         let i00 = m_idx * embed_len;
         node_embeddings[emb_off..(emb_off + embed_len)].copy_from_slice(&movie_embeddings_catalog[i00..(i00 + embed_len)]);
         emb_off += embed_len;
@@ -72,8 +73,8 @@ fn build_graph_arrays(
 
     // copy in the movie embeddings for the candidates
     for i in 0..candidate_ids.len() {
-        let movie_id = &candidate_ids[i];
-        let m_idx = (movie_id - 1) as usize - num_catalog_users;
+        let movie_id = candidate_ids[i];
+        let m_idx = (movie_id as usize- movie_id_offset_to_0);
         let i00 = m_idx * embed_len;
         node_embeddings[emb_off..(emb_off + embed_len)].copy_from_slice(&movie_embeddings_catalog[i00..(i00 + embed_len)]);
         emb_off += embed_len;
@@ -140,10 +141,9 @@ pub struct JraphGraph {
 /// * `labels`:
 /// * `num_candidates`:
 /// * `max_history`:
-/// * `num_catalog_users`:
-/// * `num_catalog_movies`:
 /// * `embed_len`:
 /// * `movie_embeddings_catalog`:
+/// * `movie_id_offset_to_0`:
 /// * `user_embeddings`:
 /// * `n_local_devices`:
 ///
@@ -159,13 +159,10 @@ pub fn build_padded_super_graph(
     labels: &[i32],
     num_candidates: usize,
     max_history: usize,
-
-    num_catalog_users : usize,
-    num_catalog_movies : usize,
     embed_len : usize,
     movie_embeddings_catalog : &[f32],
+    movie_id_offset_to_0 : usize,
     user_embeddings : &[f32],
-
     n_local_devices: usize,
 ) -> JraphGraph {
 
@@ -213,7 +210,7 @@ pub fn build_padded_super_graph(
         let (senders, receivers, edge_features, node_ids, node_labels,
             node_types, node_embeddings, candidate_mask, total_nodes, total_edges) =
             build_graph_arrays(u_id, n_hist, &c_ids, &h_rats, &h_m_ids, &lbls,
-                &u_emb,&movie_embeddings_catalog, num_catalog_users, embed_len);
+                &u_emb,&movie_embeddings_catalog, movie_id_offset_to_0, embed_len);
 
         //WRITE METADATA
         n_node_padded[i] = total_nodes as i32;
@@ -317,8 +314,10 @@ pub fn create_fake_padded_super_batch(
         panic!("the range of movie_id_range must be >= (num_history + num_candidates + 1)")
     }
 
-    let (user_embeddings_catalog, num_users, embed_len) = read_user_embeddings(&user_embeddings_uri);
-    let (movie_embeddings_catalog, num_movies, _) = read_movie_embeddings(&movie_embeddings_uri);
+    let (user_embeddings_catalog, _num_users, embed_len, min_user_id) = read_user_embeddings(&user_embeddings_uri);
+    let (movie_embeddings_catalog, _num_movies, _embed_len, min_movie_id) = read_movie_embeddings(&movie_embeddings_uri);
+
+    let movie_id_offset_to_0 : usize = min_movie_id;
 
     let mut user_ids: Vec<i32> = vec![0; batch_size];
     let mut movie_ids: Vec<i32> = vec![0; batch_size];
@@ -350,7 +349,7 @@ pub fn create_fake_padded_super_batch(
         labels[i * num_candidates] = 1;
 
         //user_embedding implicit indices are the user_id-1
-        let idx = (user_ids[i] -1) as usize;
+        let idx = (user_ids[i] as usize - min_user_id);
         let idx_offset = idx * embed_len;
         let out_offset = i * embed_len;
         user_embeddings[out_offset..(out_offset + embed_len)].copy_from_slice(
@@ -367,10 +366,9 @@ pub fn create_fake_padded_super_batch(
             &labels,
             num_candidates,
             max_history,
-            num_users,
-            num_movies,
             embed_len,
             &movie_embeddings_catalog,
+            movie_id_offset_to_0,
             &user_embeddings,
             n_local_devices);
 
@@ -384,10 +382,9 @@ pub fn create_fake_padded_super_batch(
         labels: &[i32],
         user_history: &crate::user_history::UserHistory,
         max_history: usize,
-        num_users : usize,
-        num_movies : usize,
         embed_len: usize,
         movie_embeddings_catalog : &[f32],
+        movie_id_offset_to_0 : usize,
         user_embeddings : &[f32],
         n_local_devices: usize) -> JraphGraph {
 
@@ -412,10 +409,9 @@ pub fn create_fake_padded_super_batch(
             &labels,
             num_candidates,
             max_history,
-            num_users,
-            num_movies,
             embed_len,
             &movie_embeddings_catalog,
+            movie_id_offset_to_0,
             &user_embeddings,
             n_local_devices);
 

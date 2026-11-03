@@ -383,7 +383,6 @@ impl Orchestrator {
             candidate_ids,
             &searcher,
             &self.user_history,
-            num_catalog_users,
             ranker_model_version_choice
         ).await
     }
@@ -396,7 +395,6 @@ impl Orchestrator {
         candidate_ids: &[i32],
         searcher: &Searcher,
         user_history: &UserHistory,
-        num_catalog_users: usize,
         ranker_model_version_choice: Option<VersionChoice>
     ) -> Result<RankedMovies, Status> {
 
@@ -428,10 +426,9 @@ impl Orchestrator {
             &labels,
             user_history,
             ranker_metadata.max_history,
-            num_catalog_users,
-            searcher.get_num_catalog_movies(),
             searcher.get_embed_len(),
             searcher.get_movies_embedding_catalog_ref(),
+            searcher.get_offset_to_id(),
             user_embeddings,
             self.ranker_n_local_devices
         );
@@ -511,10 +508,9 @@ impl Orchestrator {
             &labels,
             &self.user_history,
             ranker_metadata.max_history,
-            ranker_metadata.num_catalog_users,
-            searcher.get_num_catalog_movies(),
             searcher.get_embed_len(),
             searcher.get_movies_embedding_catalog_ref(),
+            searcher.get_offset_to_id(),
             user_embeddings,
             self.ranker_n_local_devices
         );
@@ -554,9 +550,9 @@ impl Orchestrator {
         }
     }
 
-    pub fn _get_movies_embedding_catalog(&self) -> Vec<f32> {
+    pub fn _get_movies_embedding_catalog(&self) -> (Vec<f32>, usize) {
         let searcher = self.searcher.load();
-        searcher.get_movies_embedding_catalog_ref().clone()
+        (searcher.get_movies_embedding_catalog_ref().clone(), searcher.get_offset_to_id())
     }
 
     pub fn _get_user_history(&self) -> UserHistory {
@@ -588,7 +584,7 @@ impl Orchestrator {
 
         let mut ranked_movies = self._make_ranker_request_impl(
             &user_ids, &user_reqs.timestamps, &user_embeddings, &ann_movie_ids,
-            searcher, user_history, num_catalog_users,
+            searcher, user_history,
             ranker_model_version_choice.clone()).await?;
 
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
@@ -765,7 +761,6 @@ impl Orchestrator {
         user_history: &UserHistory,
         searcher: &Searcher,
         num_candidates: usize, // for the ANN saarch k
-        movies_offset: i32, // usually 1 + num_catalog_users
     ) -> Result<Response<Vec<i32>>, Status> {
 
         //let _embed_len = user_embeddings.len() / users_req.user_ids.len();
@@ -794,13 +789,15 @@ impl Orchestrator {
             = searcher.search(&user_embeddings, n_srch)
             .map_err(|e| Status::internal(format!("Vector search failed: {}", e)))?;
 
+        let offset_to_id : i32 = searcher.get_offset_to_id() as i32;
+
         for i in 0..nearest.len() {
             // final_candidates length is n_users * n_srch
             // candidate_ids are in "reference frame" of 0 to num_catalog_movies  - 1, so translate to
             // reference frame num_catalog_users + 1 to num_catalog_users + 1 + num_catalog_movies
             let raw_candidate_ids: Vec<i32> = nearest[i].keys
                 .iter()
-                .map(|x| *x as i32 + movies_offset)
+                .map(|x| *x as i32 + offset_to_id)
                 .collect();
 
             let _distances = &nearest[i].distances;

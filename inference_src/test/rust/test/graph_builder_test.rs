@@ -229,10 +229,10 @@ mod graph_builder_tests {
         assert_file_exists(&user_embeddings_uri);
         assert_file_exists(&movie_embeddings_uri);
 
-        let (movie_embeddings_catalog, num_movies, embed_len) = read_movie_embeddings(
+        let (movie_embeddings_catalog, num_movies, embed_len, min_movie_id) = read_movie_embeddings(
             &movie_embeddings_uri);
 
-        let (user_embeddings_catalog, num_users, _embed_len) = read_user_embeddings(
+        let (user_embeddings_catalog, num_users, _embed_len, min_user_id) = read_user_embeddings(
             &user_embeddings_uri);
 
         let ratings_map = get_train_val_test_liked_uris(DataSize::Tiny3, false);
@@ -279,7 +279,7 @@ mod graph_builder_tests {
             &labels,
             &user_history,
             max_history,
-            num_users, num_movies, embed_len, &movie_embeddings_catalog, &user_embeddings,
+            embed_len, &movie_embeddings_catalog, min_movie_id, &user_embeddings,
             jax_n_local_devices);
 
         print!("graph={:?}\n", padded_super_graph);

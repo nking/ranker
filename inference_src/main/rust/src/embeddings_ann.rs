@@ -11,6 +11,7 @@ pub struct Searcher {
     embed_len : usize,
     num_candidates: usize,
     persisted_index_path: PathBuf,
+    offset_to_id: usize // offset to add to key indicies to reult in movie_ids
 }
 
 impl fmt::Debug for Searcher {
@@ -24,6 +25,7 @@ impl fmt::Debug for Searcher {
             .field("embed_len", &self.embed_len)
             .field("num_candidates", &self.num_candidates)
             .field("persisted_index_path", &self.persisted_index_path)
+            .field("offset_to_id", &self.offset_to_id)
             .finish()
     }
 }
@@ -44,7 +46,7 @@ impl Searcher {
     pub fn new(movie_embeddings_uri: &str, num_candidates: usize, persisted_index_path: impl AsRef<Path>)
         -> Result<Self, Box<dyn std::error::Error+ Send + Sync>> {
 
-        let (movie_embeddings_catalog, num_movies, embed_len) = read_movie_embeddings(&movie_embeddings_uri);
+        let (movie_embeddings_catalog, num_movies, embed_len, min_movie_id) = read_movie_embeddings(&movie_embeddings_uri);
 
         println!("Number of movie embeddings = {}, embed_len: {}", num_movies, embed_len);
 
@@ -65,6 +67,7 @@ impl Searcher {
             embed_len : embed_len,
             num_candidates: num_candidates,
             persisted_index_path: path_buf,
+            offset_to_id: min_movie_id
         })
     }
 
@@ -80,7 +83,7 @@ impl Searcher {
     ///
     // static constructor
     pub fn new_detached(movie_embeddings_catalog: &[f32], embed_len: usize,
-        num_candidates: usize) -> Result<Self, Box<dyn std::error::Error+ Send + Sync>> {
+        num_candidates: usize, movie_id_offset_to_0: usize) -> Result<Self, Box<dyn std::error::Error+ Send + Sync>> {
 
         println!("Movies embeddings embed_len: {}", embed_len);
 
@@ -98,6 +101,7 @@ impl Searcher {
             embed_len : embed_len,
             num_candidates: num_candidates,
             persisted_index_path: "".parse()?,
+            offset_to_id: movie_id_offset_to_0
         })
     }
 
@@ -154,7 +158,9 @@ impl Searcher {
         &self.movie_embeddings_catalog
     }
 
-    ///construct a Userach index for inner_product.  If the embeddings catalog are normalized, the results
+    pub fn get_offset_to_id(&self) -> usize {self.offset_to_id}
+
+    ///construct a Usearch index for inner_product.  If the embeddings catalog are normalized, the results
     /// are cosin_similarity distances, else the results are simply dot product distances.
     /// The Index is configured to use HNSW degree for connectivity and expect F32 type embedding vectors.
     /// # Arguments
@@ -187,7 +193,8 @@ impl Searcher {
     ///
     /// returns: Result<Matches, Box<dyn Error, Global>>
     ///   let n be the number of embeddings in query,
-    //    returns a Match structure having keys : Vec<k*n:u64> and distances: Vec<k*n:f32>
+    //    returns a Match structure having keys : Vec<k*n:u64> and distances: Vec<k*n:f32>.
+    //    to transform the keys (which are indices of the searcher, to ids, add searcher.offset_to_id.
     pub fn search(&self, query: &[f32], k : Option<usize>) -> Result<Vec<Matches>, Box<dyn std::error::Error>> {
         let num_queries = query.len() / self.embed_len;
         let mut results: Vec<Matches> = Vec::with_capacity(num_queries);

@@ -27,7 +27,6 @@ struct TestHarness {
     #[allow(dead_code)]
     movies_df: LazyFrame,
     #[allow(dead_code)]
-    movies_offset: usize,
     num_catalog_users: usize,
     #[allow(dead_code)]
     num_catalog_movies: usize,
@@ -128,7 +127,6 @@ impl TestHarness {
             test_uris: test_ratings_uris,
             ratings_uris: ratings_uris,
             movies_df: movies_df,
-            movies_offset: movies_offset,
             num_catalog_users: ranker_metadata.num_catalog_users,
             num_catalog_movies: num_catalog_movies,
             embed_len: embed_len,
@@ -244,7 +242,7 @@ mod post_training_analysis {
 
         //NOTE:  edit these for the models to analyze
         let q_ver: usize = 1;
-        let r_ver: usize = 2;
+        let r_ver: usize = 1;
 
         let query_model_version = Some(VersionChoice::Version(q_ver as i64));
         let ranker_model_version = Some(VersionChoice::Version(r_ver as i64));
@@ -584,19 +582,24 @@ mod post_training_analysis {
         let embed_len = ranker_model_metadata.embed_len;
         let ranker_batch_size = ranker_model_metadata.batch_size;
         let candidate_model_version = query_model_version.clone();
-        let movies_offset = harness.movies_offset;
+
+        // Copy original movie embeddings and append new_movie_embeddings onto the end
+        let (_original_movie_catalog, min_movie_id) : (Vec<f32>, usize)  = harness.orchestrator._get_movies_embedding_catalog();
+
+        let num_catalog_movies = _original_movie_catalog.len() / embed_len;
+        let next_movie_id = min_movie_id + num_catalog_movies;// 6041, 3883
+        let movie_oov_id = min_movie_id - 1;
 
         // Sample 167 movies per tier (501 total) and generate OOV=0+offset embeddings
         let (old_movie_ids, new_movie_ids, new_movie_embeddings) = get_cold_start_movies(
             harness,
             candidate_model_version,
             embed_len,
-        )
-            .await
-            .expect("Error while simulating cold start movies");
+            next_movie_id as i32,
+            movie_oov_id as i32
+        ).await.expect("Error while simulating cold start movies");
 
-        // Copy original movie embeddings and append new_movie_embeddings onto the end
-        let _original_movie_catalog: Vec<f32> = harness.orchestrator._get_movies_embedding_catalog();
+
         let mut new_movies_catalog: Vec<f32> = Vec::with_capacity(
             _original_movie_catalog.len() + new_movie_embeddings.len()
         );
@@ -608,6 +611,7 @@ mod post_training_analysis {
             &new_movies_catalog,
             embed_len,
             num_candidates,
+            min_movie_id,
         ).expect("Error while constructing Searcher");
 
         let n_users = user_ids.len();
@@ -622,7 +626,6 @@ mod post_training_analysis {
                 &user_history,
                 &new_searcher,
                 num_candidates,
-                movies_offset as i32,
             )
             .await
             .expect("Error while making ANN search")
@@ -653,7 +656,6 @@ mod post_training_analysis {
                     &new_candidate_movie_ids[i0 * num_candidates..i1 * num_candidates],
                     &new_searcher,
                     &user_history,
-                    ranker_model_metadata.num_catalog_users,
                     ranker_model_version.clone(),
                 )
                 .await
@@ -805,7 +807,8 @@ mod post_training_analysis {
     ///
     /// returns: Result<(Vec<i32, Global>, Vec<i32, Global>, Vec<f32, Global>), Box<dyn Error+Send+Sync, Global>>
     async fn get_cold_start_movies(harness: &TestHarness,
-        candidate_model_version:Option<VersionChoice>, embed_len: usize) -> Result<(Vec<i32>, Vec<i32>, Vec<f32>), Box<dyn std::error::Error + Send + Sync>> {
+        candidate_model_version:Option<VersionChoice>, embed_len: usize,
+        next_movie_id: i32, oov_movie_id: i32) -> Result<(Vec<i32>, Vec<i32>, Vec<f32>), Box<dyn std::error::Error + Send + Sync>> {
 
         let num_per_tier: usize = 167; // 167 * 3 tiers = 501 total
 
@@ -846,7 +849,7 @@ mod post_training_analysis {
 
         // Generate contiguous new_movie_ids
         //offset=6040, num_cat_users=6040, movie_id range is [offset+1, offset+3883], so id0 is offset + n_movies + 1
-        let id0 = (harness.movies_offset + harness.num_catalog_movies + 1) as i32;
+        let id0 = next_movie_id;
         let new_movie_ids: Vec<i32> = (id0 .. id0 + (n_sampled as i32)).collect();
 
         // generate the MoviesRequests using the original movie_ids
@@ -864,7 +867,7 @@ mod post_training_analysis {
 
         // for the TwoTwoerDNN Candidate model, we need to use 0 for the OOV cold start movie_ids (until that gets refactored)
         // movie_id with value offset with be 0 when offset is subtracted
-        movies_request.movie_ids = vec![harness.movies_offset as i32; new_movie_ids.len()];
+        movies_request.movie_ids = vec![oov_movie_id; new_movie_ids.len()];
 
         // create new embeddings with cold start Ids
         let client = CandidateModelClient::new(harness.candidate_uri.clone(), embed_len).await;
@@ -1056,7 +1059,6 @@ mod post_training_analysis {
                     &new_candidate_ids[i0 * num_candidates..i1 * num_candidates],
                     &searcher,
                     &user_history,
-                    ranker_model_metadata.num_catalog_users,
                     ranker_model_version.clone(),
                 )
                 .await
@@ -2008,9 +2010,8 @@ mod post_training_analysis {
         // =================================================================
         println!("Calculating Intra-list diversity...");
 
-        let movie_embeddings: Vec<f32> = harness.orchestrator._get_movies_embedding_catalog();
+        let (movie_embeddings, movie_id_offset_to_0) : (Vec<f32>, usize) = harness.orchestrator._get_movies_embedding_catalog();
         let embed_len = harness.embed_len;
-        let movies_offset = harness.movies_offset;
 
         let intralist_diversity_scores: Vec<f64> = slates.par_iter().map(|slate| {
             let mut total_distance = 0.0;
@@ -2022,11 +2023,23 @@ mod post_training_analysis {
                     let raw_b = slate[j] as usize;
 
                     // OPTIMIZATION: Safely remove the global ID offset so we don't index out of bounds
-                    let idx_a = if raw_a >= movies_offset { raw_a - movies_offset } else { raw_a };
-                    let idx_b = if raw_b >= movies_offset { raw_b - movies_offset } else { raw_b };
+                    //let idx_a = if raw_a >= movies_offset { raw_a - movies_offset } else { raw_a };
+                    //let idx_b = if raw_b >= movies_offset { raw_b - movies_offset } else { raw_b };
+                    let idx_a = raw_a - movie_id_offset_to_0;
+                    let idx_b = raw_b - movie_id_offset_to_0;
 
                     let start_a = idx_a * embed_len;
                     let start_b = idx_b * embed_len;
+
+                    //DEBUG
+                    if start_a < 0 || start_a >= movie_embeddings.len() {
+                        panic!("out of bounds: {}, raw={}, offset={}, i={}, j={}, k={}, movie_embeddings.len={}",
+                            start_a, raw_a, movie_id_offset_to_0, i, j, k, movie_embeddings.len());
+                    }
+                    if start_b < 0 || start_b >= movie_embeddings.len() {
+                        panic!("out of bounds: {}, raw={}, offset={}, i={}, j={}, k={}, movie_embeddings.len={}",
+                            start_b, raw_b, movie_id_offset_to_0, i, j, k, movie_embeddings.len());
+                    }
 
                     let emb_a = &movie_embeddings[start_a..(start_a + embed_len)];
                     let emb_b = &movie_embeddings[start_b..(start_b + embed_len)];
@@ -2149,9 +2162,8 @@ mod post_training_analysis {
         let mut conclusions: Vec<String> = Vec::new();
         let n_users = user_ids.len();
 
-        let movie_embeddings: Vec<f32> = harness.orchestrator._get_movies_embedding_catalog();
+        let (movie_embeddings, movie_id_offset_to_0) : (Vec<f32>, usize) = harness.orchestrator._get_movies_embedding_catalog();
         let embed_len = harness.embed_len;
-        let movies_offset = harness.movies_offset;
 
         // =================================================================
         // CALCULATE GLOBAL USER CENTROID
@@ -2187,7 +2199,7 @@ mod post_training_analysis {
         for opt_id in movie_ids_ca.iter() {
             let sim = if let Some(id) = opt_id {
                 let raw_id = id as usize;
-                let idx = if raw_id >= movies_offset { raw_id - movies_offset } else { raw_id };
+                let idx = raw_id - movie_id_offset_to_0;
                 let start = idx * embed_len;
 
                 if start + embed_len <= movie_embeddings.len() {
