@@ -1,0 +1,50 @@
+{
+  "ranker_20": {
+    "automated_conclusions": [
+      "HIGH PERSONALIZATION (ranker_20): Global Inter-list Diversity is 98.54%. The model successfully delivers highly unique slates customized to individual users.",
+      "HIGH BREADTH (ranker_20): Intra-list Diversity is high (0.69), indicating slates feature a wide variety of semantic genres/topics."
+    ],
+    "metrics": {
+      "interlist_diversity_mean_k_20_ranker_20": 0.9854040001585965,
+      "interlist_diversity_mean_k_20_user_tier_0_ranker_20": 0.9855315519620694,
+      "interlist_diversity_mean_k_20_user_tier_1_ranker_20": 0.9852830736833339,
+      "interlist_diversity_mean_k_20_user_tier_2_ranker_20": 0.9856541227780414,
+      "intralist_diversity_mean_k_20_ranker_20": 0.6860794324958642,
+      "intralist_diversity_mean_k_20_user_tier_0_ranker_20": 0.6844536351725786,
+      "intralist_diversity_mean_k_20_user_tier_1_ranker_20": 0.6857590609160087,
+      "intralist_diversity_mean_k_20_user_tier_2_ranker_20": 0.6888880491850995
+    }
+  },
+  "retrieval_ann_100": {
+    "automated_conclusions": [
+      "HIGH PERSONALIZATION (retrieval_ann_100): Global Inter-list Diversity is 97.32%. The model successfully delivers highly unique slates customized to individual users.",
+      "HIGH BREADTH (retrieval_ann_100): Intra-list Diversity is high (0.64), indicating slates feature a wide variety of semantic genres/topics."
+    ],
+    "metrics": {
+      "interlist_diversity_mean_k_100_retrieval_ann_100": 0.9731859225203046,
+      "interlist_diversity_mean_k_100_user_tier_0_retrieval_ann_100": 0.9725536669796332,
+      "interlist_diversity_mean_k_100_user_tier_1_retrieval_ann_100": 0.9731880235716864,
+      "interlist_diversity_mean_k_100_user_tier_2_retrieval_ann_100": 0.9738700869195794,
+      "intralist_diversity_mean_k_100_retrieval_ann_100": 0.6398410972070806,
+      "intralist_diversity_mean_k_100_user_tier_0_retrieval_ann_100": 0.6402820559559869,
+      "intralist_diversity_mean_k_100_user_tier_1_retrieval_ann_100": 0.6400150600066045,
+      "intralist_diversity_mean_k_100_user_tier_2_retrieval_ann_100": 0.6387988700365039
+    }
+  },
+  "retrieval_ann_20": {
+    "automated_conclusions": [
+      "HIGH PERSONALIZATION (retrieval_ann_20): Global Inter-list Diversity is 99.15%. The model successfully delivers highly unique slates customized to individual users.",
+      "HIGH BREADTH (retrieval_ann_20): Intra-list Diversity is high (0.58), indicating slates feature a wide variety of semantic genres/topics."
+    ],
+    "metrics": {
+      "interlist_diversity_mean_k_20_retrieval_ann_20": 0.9915469465278484,
+      "interlist_diversity_mean_k_20_user_tier_0_retrieval_ann_20": 0.9914771977449566,
+      "interlist_diversity_mean_k_20_user_tier_1_retrieval_ann_20": 0.9914891512985242,
+      "interlist_diversity_mean_k_20_user_tier_2_retrieval_ann_20": 0.9918093304567882,
+      "intralist_diversity_mean_k_20_retrieval_ann_20": 0.5753242856055298,
+      "intralist_diversity_mean_k_20_user_tier_0_retrieval_ann_20": 0.567223559473411,
+      "intralist_diversity_mean_k_20_user_tier_1_retrieval_ann_20": 0.5775614797700475,
+      "intralist_diversity_mean_k_20_user_tier_2_retrieval_ann_20": 0.5769706549613854
+    }
+  }
+}

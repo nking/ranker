@@ -1,0 +1,107 @@
+{
+  "ranker_20": {
+    "automated_conclusions": [
+      "HEALTHY BIAS at_20 (ranker_20): Gini is 0.78. The model successfully balances mainstream relevance with catalog exploration.",
+      "STRONG TAIL at_20 (ranker_20): The bottom 80% captures 17.7% of traffic, indicating excellent long-tail surfacing capability.",
+      "DIVERSE HEAD at_20 (ranker_20): The top 10% consume 59.7% of slots, leaving plenty of room for the torso/tail.",
+      "UNIFORM COHORTS at_20 (ranker_20): Light and Power users experience roughly the same level of catalog concentration."
+    ],
+    "metrics": {
+      "coverage_at_20_full_ranker_20": 0.595930981200103,
+      "coverage_at_20_movie_tier_0_ranker_20": 0.9681978798586572,
+      "coverage_at_20_movie_tier_1_ranker_20": 0.7826855123674912,
+      "coverage_at_20_movie_tier_2_ranker_20": 0.2699197035206918,
+      "coverage_at_20_user_tier_0_movie_tier_0_ranker_20": 0.9028268551236749,
+      "coverage_at_20_user_tier_0_movie_tier_1_ranker_20": 0.6454652532391049,
+      "coverage_at_20_user_tier_0_movie_tier_2_ranker_20": 0.18900555898702903,
+      "coverage_at_20_user_tier_0_ranker_20": 0.49266031419005923,
+      "coverage_at_20_user_tier_1_movie_tier_0_ranker_20": 0.9487632508833922,
+      "coverage_at_20_user_tier_1_movie_tier_1_ranker_20": 0.7279151943462897,
+      "coverage_at_20_user_tier_1_movie_tier_2_ranker_20": 0.2285361334156887,
+      "coverage_at_20_user_tier_1_ranker_20": 0.5518928663404584,
+      "coverage_at_20_user_tier_2_movie_tier_0_ranker_20": 0.901060070671378,
+      "coverage_at_20_user_tier_2_movie_tier_1_ranker_20": 0.6095406360424028,
+      "coverage_at_20_user_tier_2_movie_tier_2_ranker_20": 0.16553428042001236,
+      "coverage_at_20_user_tier_2_ranker_20": 0.46690703064640743,
+      "gini_at_20_full_ranker_20": 0.784541086190216,
+      "gini_at_20_movie_tier_0_ranker_20": 0.513806601517574,
+      "gini_at_20_movie_tier_1_ranker_20": 0.7196079595837503,
+      "gini_at_20_movie_tier_2_ranker_20": 0.9244978520518286,
+      "gini_at_20_user_tier_0_ranker_20": 0.7920117393689068,
+      "gini_at_20_user_tier_1_ranker_20": 0.7904427055304195,
+      "gini_at_20_user_tier_2_ranker_20": 0.7947493646941548,
+      "lorenz_at_20_bottom_80_share_ranker_20": 0.17659929356357928,
+      "lorenz_at_20_top_10_share_ranker_20": 0.5965953689167975
+    }
+  },
+  "retrieval_ann_100": {
+    "automated_conclusions": [
+      "HEALTHY BIAS at_100 (retrieval_ann_100): Gini is 0.48. The model successfully balances mainstream relevance with catalog exploration.",
+      "STRONG TAIL at_100 (retrieval_ann_100): The bottom 80% captures 51.4% of traffic, indicating excellent long-tail surfacing capability.",
+      "DIVERSE HEAD at_100 (retrieval_ann_100): The top 10% consume 29.9% of slots, leaving plenty of room for the torso/tail.",
+      "WARNING (COHORT COLLAPSE) at_100 (retrieval_ann_100): Power users have higher concentration (Gini) than light users. The model may be pulling rich histories into dense popularity traps."
+    ],
+    "metrics": {
+      "coverage_at_100_full_retrieval_ann_100": 0.9801699716713881,
+      "coverage_at_100_movie_tier_0_retrieval_ann_100": 0.9893992932862191,
+      "coverage_at_100_movie_tier_1_retrieval_ann_100": 0.9964664310954063,
+      "coverage_at_100_movie_tier_2_retrieval_ann_100": 0.9598517603458925,
+      "coverage_at_100_user_tier_0_movie_tier_0_retrieval_ann_100": 0.9469964664310954,
+      "coverage_at_100_user_tier_0_movie_tier_1_retrieval_ann_100": 0.9782096584216725,
+      "coverage_at_100_user_tier_0_movie_tier_2_retrieval_ann_100": 0.8999382334774553,
+      "coverage_at_100_user_tier_0_retrieval_ann_100": 0.9410249806850374,
+      "coverage_at_100_user_tier_1_movie_tier_0_retrieval_ann_100": 0.9823321554770318,
+      "coverage_at_100_user_tier_1_movie_tier_1_retrieval_ann_100": 0.9941107184923439,
+      "coverage_at_100_user_tier_1_movie_tier_2_retrieval_ann_100": 0.9413218035824583,
+      "coverage_at_100_user_tier_1_retrieval_ann_100": 0.9703837239248004,
+      "coverage_at_100_user_tier_2_movie_tier_0_retrieval_ann_100": 0.9522968197879859,
+      "coverage_at_100_user_tier_2_movie_tier_1_retrieval_ann_100": 0.9752650176678446,
+      "coverage_at_100_user_tier_2_movie_tier_2_retrieval_ann_100": 0.8665843113032736,
+      "coverage_at_100_user_tier_2_retrieval_ann_100": 0.9266031419005923,
+      "gini_at_100_full_retrieval_ann_100": 0.4784525672627655,
+      "gini_at_100_movie_tier_0_retrieval_ann_100": 0.4502736244833512,
+      "gini_at_100_movie_tier_1_retrieval_ann_100": 0.4017093666742042,
+      "gini_at_100_movie_tier_2_retrieval_ann_100": 0.5577680029733321,
+      "gini_at_100_user_tier_0_retrieval_ann_100": 0.5118280752074515,
+      "gini_at_100_user_tier_1_retrieval_ann_100": 0.4802400266053344,
+      "gini_at_100_user_tier_2_retrieval_ann_100": 0.48196455392170945,
+      "lorenz_at_100_bottom_80_share_retrieval_ann_100": 0.5135439560439561,
+      "lorenz_at_100_top_10_share_retrieval_ann_100": 0.2990835949764521
+    }
+  },
+  "retrieval_ann_20": {
+    "automated_conclusions": [
+      "HEALTHY BIAS at_20 (retrieval_ann_20): Gini is 0.63. The model successfully balances mainstream relevance with catalog exploration.",
+      "STRONG TAIL at_20 (retrieval_ann_20): The bottom 80% captures 36.3% of traffic, indicating excellent long-tail surfacing capability.",
+      "DIVERSE HEAD at_20 (retrieval_ann_20): The top 10% consume 43.5% of slots, leaving plenty of room for the torso/tail.",
+      "UNIFORM COHORTS at_20 (retrieval_ann_20): Light and Power users experience roughly the same level of catalog concentration."
+    ],
+    "metrics": {
+      "coverage_at_20_full_retrieval_ann_20": 0.8459953644089622,
+      "coverage_at_20_movie_tier_0_retrieval_ann_20": 0.8904593639575972,
+      "coverage_at_20_movie_tier_1_retrieval_ann_20": 0.9322732626619552,
+      "coverage_at_20_movie_tier_2_retrieval_ann_20": 0.7399629400864731,
+      "coverage_at_20_user_tier_0_movie_tier_0_retrieval_ann_20": 0.6855123674911661,
+      "coverage_at_20_user_tier_0_movie_tier_1_retrieval_ann_20": 0.8244994110718492,
+      "coverage_at_20_user_tier_0_movie_tier_2_retrieval_ann_20": 0.586781964175417,
+      "coverage_at_20_user_tier_0_retrieval_ann_20": 0.7051249034251867,
+      "coverage_at_20_user_tier_1_movie_tier_0_retrieval_ann_20": 0.8551236749116607,
+      "coverage_at_20_user_tier_1_movie_tier_1_retrieval_ann_20": 0.908716136631331,
+      "coverage_at_20_user_tier_1_movie_tier_2_retrieval_ann_20": 0.6991970352069179,
+      "coverage_at_20_user_tier_1_retrieval_ann_20": 0.8135462271439609,
+      "coverage_at_20_user_tier_2_movie_tier_0_retrieval_ann_20": 0.7561837455830389,
+      "coverage_at_20_user_tier_2_movie_tier_1_retrieval_ann_20": 0.8056537102473498,
+      "coverage_at_20_user_tier_2_movie_tier_2_retrieval_ann_20": 0.5509573810994441,
+      "coverage_at_20_user_tier_2_retrieval_ann_20": 0.6922482616533608,
+      "gini_at_20_full_retrieval_ann_20": 0.6313273381818505,
+      "gini_at_20_movie_tier_0_retrieval_ann_20": 0.6082843234766957,
+      "gini_at_20_movie_tier_1_retrieval_ann_20": 0.5603527316728694,
+      "gini_at_20_movie_tier_2_retrieval_ann_20": 0.7096761338103159,
+      "gini_at_20_user_tier_0_retrieval_ann_20": 0.6678514487696416,
+      "gini_at_20_user_tier_1_retrieval_ann_20": 0.6389427414216096,
+      "gini_at_20_user_tier_2_retrieval_ann_20": 0.6508216479040076,
+      "lorenz_at_20_bottom_80_share_retrieval_ann_20": 0.36299058084772373,
+      "lorenz_at_20_top_10_share_retrieval_ann_20": 0.4354689952904238
+    }
+  }
+}

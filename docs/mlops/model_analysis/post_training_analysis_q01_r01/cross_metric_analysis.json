@@ -1,0 +1,16 @@
+{
+  "cross_metric_conclusions": [
+    "FUNNEL RETENTION: Shrinking the candidate pool from 100 to 20 retains 17.2% of the recall (Recall drops from 1.60% to 0.27%).",
+    "SURFACING SPEED LIFT: The Ranker improved MRR@20 by 396.3% (from 0.01 to 0.03). The Cross-Encoder successfully pushes the first relevant item much closer to rank 1.",
+    "RANKER LIFT: The Ranker improved NDCG@20 by 377.3% over pure retrieval. The Cross-Encoder is successfully refining the candidate slates.",
+    "SUCCESSFUL FILTERING: The Ranker aggressively filtered out 100.0% of the Retriever's items, resulting in a positive NDCG lift of 377.3%. It successfully separated the signal from the ANN's noise.",
+    "RANKER COVERAGE COLLAPSE: To achieve its ranking, the Ranker sacrificed 29.6% of the Retriever's catalog coverage. It is behaving much more conservatively than the ANN.",
+    "ITEM COLD-START RESILIENCE (RETRIEVER): When 501 test movies are replaced with unmemorized OOV=0 phantom items, Recall@100 retains 545.2% of warm performance (8.71% vs 1.60%). The Candidate Tower's content features (genres/metadata) generalize strongly into the embedding space.",
+    "ITEM COLD-START RANKER LIFT: Even with OOV=0 phantom movies in the candidate pool, the Ranker improves NDCG@20 by 65.1% (and MRR@20 by 80.4%) over pure retrieval. The GATv2 graph attention effectively scores cold-start item embeddings against user history.",
+    "HEAD ITEM ID DEPENDENCY: Under cold-start movie simulation, Tier 0 (head) NDCG@20 drops by -135.3% (1.14% -> 2.69%), compared to a -192.8% change for Tier 2 (long-tail) items. Popular items rely heavily on memorized collaborative ID weights rather than metadata.",
+    "STRONG DEMOGRAPHIC COLD-START (USER RETRIEVER): With user_id=0 (OOV), demographic features alone (age, gender, occupation) retain 157.3% of warm Recall@100 (2.51% vs 1.60%, 1.0x random baseline).",
+    "ZERO-HISTORY GRAPH RANKER LIFT: Even when cold-start users have an empty watch history in the GATv2 subgraph, the Ranker improves NDCG@20 by 307.2% (and MRR@20 by 523.9%) over pure retrieval.",
+    "POWER USER HISTORY ABLATION: Stripping Power Users (Tier 0) of their interaction history and user ID reduces Ranker Recall@20 from 1.39% to 0.84% (confirming that learned history + ID provides a +64.4% relative lift over raw demographics).",
+    "COLD-START BOTTLENECK (USER SIDE): End-to-end Ranker NDCG@20 retention is significantly lower for Cold-Start Users (156.8% of warm) than Cold-Start Movies (279.9% of warm). Onboarding new users (e.g., via interactive preference elicitation or richer user features) is a higher-leverage priority than item metadata."
+  ]
+}
