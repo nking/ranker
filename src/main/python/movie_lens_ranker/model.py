@@ -134,6 +134,7 @@ class GraphRanker(nnx.Module):
         #returns node embeddings as final representation of each node after
         # all message-passing layers.
 
+        #Returns updated node features [num_nodes, heads * out_features]
         node_repr = self.gatv2(
             x=x,
             edge_index = jnp.stack([graph.senders, graph.receivers]), #must be shape [2, num_edges]
@@ -142,7 +143,7 @@ class GraphRanker(nnx.Module):
             batch=batch_indices,
             batch_size=graph.n_node.shape[0]
         )
-        #NOTE: cannot append to the sends and receives candidates -> user edges because it would cause
+        #NOTE: cannot append to the sends and receives (candidates to user edges) because it would cause
         # target leakage.  also it would consume alot of memory.
 
         num_total_graphs = len(graph.n_node) # number of batches + number of dummy padding graphs

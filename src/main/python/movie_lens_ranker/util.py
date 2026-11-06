@@ -610,19 +610,17 @@ def build_history_lookup(ratings_uri_list: Union[str, List[str]], batch_size: in
                 reader.close()
     #logging.info(f'rewrite lookup size = {len(lookup)}')
     max_history = 0
-    lookup2 = {}
-    for u in lookup:
-        # sort all lists by timestamp
-        ts = lookup[u]["ts"]
-        idx = sorted(range(len(ts)), key=lambda ii: ts[ii])
-        m = lookup[u]["movie_id"]
-        r = lookup[u]["rating"]
-        max_history = max(max_history, len(m))
-        lookup2[u] = (
-            [ts[ii] for ii in idx], [m[ii] for ii in idx],
-            [r[ii] for ii in idx])
+    sorted_lookup = {}
+    for u, data in lookup.items():
+        ts_arr = np.asarray(data["ts"], dtype=np.int64)
+        m_arr = np.asarray(data["movie_id"], dtype=np.int32)
+        r_arr = np.asarray(data["rating"], dtype=np.int32)
+        
+        order = np.argsort(ts_arr, kind="stable")
+        max_history = max(max_history, len(m_arr))
+        sorted_lookup[u] = (ts_arr[order], m_arr[order], r_arr[order])
     
-    return lookup2, max_history
+    return sorted_lookup, max_history
 
 def uri_access_error(uri: str) -> Union[str, None]:
     """

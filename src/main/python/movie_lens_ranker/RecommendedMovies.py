@@ -20,6 +20,7 @@ class RecommendedMovies (object):
         watch history, like ts_2050 = 2524608000 used by the retrieval project.
         """
         self.pad_value = -1
+        self.ts_pad_value = 2524608000  # year 2050
         self.user_ids, self.movies, self.row_length = self._read(num_users, file_uri=movie_rec_file_uri, pad_value=self.pad_value)
         _ , self.timestamps, _ = self._read(num_users, movie_rec_ts_file_uri,  pad_value=self.pad_value, dtype2=np.int64)
         self.num_users = num_users
@@ -59,6 +60,11 @@ class RecommendedMovies (object):
                 reader.close()
         return user_ids, items, len_arr
     
+    def get_all_recommended_movies(self, user_id: np.ndarray) -> np.ndarray:
+        """Returns all recommended movies (both seen and unseen) ordered by decreasing score."""
+        user_idx = self.user_ids[user_id]
+        return self.movies[user_idx]
+    
     def get_unseen_movies(self, user_id: np.ndarray, timestamp: np.ndarray, latest_unseen_k:int=200) -> np.ndarray:
         """
         given array of user_ids, return top_k recommended movies for user that they haven't seen before time=timestamp.
@@ -73,11 +79,26 @@ class RecommendedMovies (object):
             raise ValueError(f"top_k must be smaller than the number of recommendations per user = {self.row_length}")
         
         user_idx = self.user_ids[user_id]
-        
+       
         mask = self.timestamps[user_idx] > timestamp[:, np.newaxis]
-        sort_indices = np.argsort(~mask, axis=1, kind='stable')
-        #equiv of row-wise tf.gather:
-        sel_movies = np.take_along_axis(self.movies[user_idx], sort_indices, axis=1)
-        
-        #the unseen movies have been moved to front of array and retain their respective original order which is by decreasing similarity score.
+        masked_movies = np.where(mask, self.movies[user_idx], self.pad_value)
+        sort_indices = np.argsort(~mask, axis=1, kind="stable")
+        sel_movies = np.take_along_axis(masked_movies, sort_indices, axis=1)
         return sel_movies[:, :latest_unseen_k]
+    
+    def get_lowest_scoring_unseen_movies(
+            self, user_id: np.ndarray, timestamp: np.ndarray,
+            worst_unseen_k: int = 200
+    ) -> np.ndarray:
+        if worst_unseen_k > self.row_length:
+            raise ValueError(
+                f"worst_unseen_k must be <= recommendations per user = {self.row_length}"
+            )
+        user_idx = self.user_ids[user_id]
+        mask = self.timestamps[user_idx] > timestamp[:, np.newaxis]
+        masked_movies = np.where(mask, self.movies[user_idx], self.pad_value)
+        mask_rev = mask[:, ::-1]
+        movies_rev = masked_movies[:, ::-1]
+        sort_indices = np.argsort(~mask_rev, axis=1, kind="stable")
+        sel_movies = np.take_along_axis(movies_rev, sort_indices, axis=1)
+        return sel_movies[:, :worst_unseen_k]

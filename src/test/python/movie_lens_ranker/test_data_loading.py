@@ -238,16 +238,19 @@ class TestDataLoading(unittest.TestCase):
         history_dict, max_history = build_history_lookup(
             self.ratings_train_uri, batch_size=batch_size)
         self.assertTrue(isinstance(history_dict, dict))
-        n_hist = len(
-            history_dict)  # number of users who rated movies in train dataset
+        n_hist = len(history_dict)  # number of users who rated movies in train dataset
         self.assertTrue(n_hist > 0 and n_hist < 6040)
         min_user_id = min(history_dict.keys())
         entry_tuples = history_dict[min_user_id]
         self.assertEqual(3, len(entry_tuples))
         for i in range(3):
-            self.assertTrue(isinstance(entry_tuples[i], list))
+            self.assertTrue(isinstance(entry_tuples[i], np.ndarray))
             self.assertTrue(len(entry_tuples[i]) > 0)
-            self.assertTrue(isinstance(entry_tuples[i][0], int))
+            v = entry_tuples[i][0]
+            if i == 0:
+                self.assertTrue(isinstance(v, np.int64))
+            else:
+                self.assertTrue(isinstance(v, np.int32))
     
     def test_read_array_records2(self):
         batch_size = 1024

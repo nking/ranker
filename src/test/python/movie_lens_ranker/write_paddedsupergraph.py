@@ -17,7 +17,7 @@ from movie_lens_ranker.util import read_user_movie_embeddings
 
 import argparse
 
-def test_inference_inputs(
+def create_inference_inputs(
         output_path: str,
         in_batch:list,
         ratings_uri:str,
@@ -175,7 +175,7 @@ if __name__ == '__main__':
     in_batch = json.loads(args_dict['in_batch'])
     print(f'in_batch={in_batch}')
 
-    test_inference_inputs(
+    create_inference_inputs(
         output_path=args_dict['output_path'],
         ratings_uri=args_dict['ratings_uri'],
         in_batch=in_batch,

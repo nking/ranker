@@ -58,7 +58,7 @@ class RatingsHistoryLookupTransform(pgrain.MapTransform):
             user_ids, timestamps, self.max_history)
         
         #history_* shapes are (batch_size, max_history)
-        history_lengths = np.sum(history_movies != -1, axis=1)
+        history_lengths = np.sum(history_movies != self.history_lookup.pad_value, axis=1)
         
         # Convert everything to a single dictionary of NumPy arrays
         return {

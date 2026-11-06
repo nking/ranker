@@ -165,7 +165,7 @@ def push_invalid_right(arr:np.ndarray, pad_value:int=-1):
     :return: matrix in which the elements in each row have been shifted to the end of the
      array such that the pad_values are at highest indices. The order of non-pad_values is maintained.
     """
-    valid_mask = (arr != -1)
+    valid_mask = (arr != pad_value)
     
     # ~valid_mask makes valid items 0 (False) and invalid items 1 (True).
     # argsort puts 0s before 1s. kind='stable' preserves the order of the valid items.

@@ -15,7 +15,7 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
         :param user_movie_embeddings: stacked embeddings with first row being all zeros so that user
         ids and movie_ids will be the same as the indexes of the user_movie_embeddings 2D array
         """
-        self.user_movie_embeddings = user_movie_embeddings
+        self.user_movie_embeddings = np.asarray(user_movie_embeddings)
 
     def map(self, batch:Dict[str, np.ndarray]) -> List[jraph.GraphsTuple]:
         """
@@ -69,8 +69,9 @@ class SparseLocalSubgraphTransform(pgrain.MapTransform):
                 node_labels, node_types, candidate_mask,
                 total_nodes, total_edges
              ) = build_graph_arrays(u_id, n_hist, c_ids, h_rats, h_m_ids, lbls)
-
-            emb = jnp.take(a=self.user_movie_embeddings, indices=node_ids, axis=0)
+            
+            emb = self.user_movie_embeddings[node_ids]
+            ###emb = jnp.take(a=self.user_movie_embeddings, indices=node_ids, axis=0)
             
             # Construct the GraphsTuple (Python side)
             results.append(jraph.GraphsTuple(

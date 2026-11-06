@@ -168,4 +168,48 @@ class NumbaOpsTest(TestCase):
         cond0 = set(source_row.tolist())
         for i in range(write_to_idx, num_negatives):
             self.assertTrue(pool_row2[i] in cond0)
+    
+    def test_util_numba_pad_value_and_deduplication_regression(self):
+        """
+        Regression test for util_numba.py:
+        1. `row_wise_sortedset_subtract` uses `pad_value` (not hardcoded -1).
+        2. `build_negative_pool` avoids duplicating items from `arr4` that were already
+           selected from `arr1..arr3`.
+        """
+        custom_pad = -999
+        arr1 = np.array([[10, 20, 30, custom_pad]], dtype=np.int32)
+        arr2 = np.array([[20, custom_pad, custom_pad, custom_pad]],
+            dtype=np.int32)
         
+        sub = row_wise_sortedset_subtract(arr1, arr2, pad_value=custom_pad)
+        self.assertEqual(sub[0, 0], 10)
+        self.assertEqual(sub[0, 1], 30)
+        self.assertEqual(sub[0, 2], custom_pad)
+        self.assertEqual(sub[0, 3], custom_pad)
+        
+        # arr4 (Type 4) contains movies 2, 3, 6 which were already picked in arr1..arr3
+        pool1 = np.array([[2, -1]], dtype=np.int32)
+        pool2 = np.array([[6, -1]], dtype=np.int32)
+        pool3 = np.array([[3, -1]], dtype=np.int32)
+        pool4 = np.array([[2, 3, 6, 8]], dtype=np.int32)
+        
+        neg_pool = build_negative_pool(
+            arr1=pool1,
+            arr2=pool2,
+            arr3=pool3,
+            arr4=pool4,
+            target1=1,
+            target2=1,
+            target3=1,
+            num_negatives=4,
+            pad_value=-1,
+            seed=42,
+        )
+        
+        row_negs = neg_pool[0].tolist()
+        self.assertEqual(
+            len(set(row_negs)),
+            4,
+            f"Expected 4 unique negative movie IDs, got {row_negs}",
+        )
+        self.assertEqual(set(row_negs), {2, 6, 3, 8})
