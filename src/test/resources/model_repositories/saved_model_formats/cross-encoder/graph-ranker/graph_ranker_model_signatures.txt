@@ -1,7 +1,7 @@
-2026-11-03 10:16:00.841978: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
-2026-11-03 10:16:00.889510: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+2026-11-06 18:32:49.366342: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2026-11-06 18:32:49.418278: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
 To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2026-11-03 10:16:03.222260: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+2026-11-06 18:32:51.909524: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
 
 MetaGraphDef with tag-set: 'serve' contains the following SignatureDefs:
 
@@ -168,6 +168,6 @@ signature_def['serving_diagnostics']:
         shape: (258, 24)
         name: StatefulPartitionedCall_2:2
   Method name is: tensorflow/serving/predict
-The MetaGraph with tag set ['serve'] contains the following ops: {'MergeV2Checkpoints', 'RestoreV2', 'ShardedFilename', 'Identity', 'XlaCallModule', 'AssignVariableOp', 'Placeholder', 'Const', 'SaveV2', 'Pack', 'StatefulPartitionedCall', 'NoOp', 'DisableCopyOnRead', 'Select', 'ReadVariableOp', 'StaticRegexFullMatch', 'PreventGradient', 'VarHandleOp', 'StringJoin'}
+The MetaGraph with tag set ['serve'] contains the following ops: {'PreventGradient', 'Select', 'RestoreV2', 'Placeholder', 'StringJoin', 'DisableCopyOnRead', 'NoOp', 'Identity', 'MergeV2Checkpoints', 'StaticRegexFullMatch', 'SaveV2', 'Pack', 'ShardedFilename', 'XlaCallModule', 'StatefulPartitionedCall', 'AssignVariableOp', 'VarHandleOp', 'ReadVariableOp', 'Const'}
 
 Concrete Functions:
