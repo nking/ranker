@@ -1,17 +1,17 @@
 {
   "ranker_20": {
     "automated_conclusions": [
-      "MODERATE HUBNESS (ranker_20): The retrieval distribution is moderately right-skewed (Skewness: 3.7). A handful of items are dominating slates, but they are not strictly tied to the global user centroid (r=0.15)."
+      "MODERATE HUBNESS (ranker_20): The retrieval distribution is moderately right-skewed (Skewness: 3.6). A handful of items are dominating slates, but they are not strictly tied to the global user centroid (r=0.13)."
     ],
     "metrics": {
-      "hub_exposure_mean_nk_k_20_ranker_20": 134.53598901098903,
-      "hub_exposure_mean_nk_k_20_user_tier_0_ranker_20": 133.9767175572519,
-      "hub_exposure_mean_nk_k_20_user_tier_1_ranker_20": 135.3073000971188,
-      "hub_exposure_mean_nk_k_20_user_tier_2_ranker_20": 132.66272158498435,
-      "hub_exposure_mean_sim_k_20_ranker_20": -0.0014419066546906834,
-      "hubness_centroid_corr_k_20_ranker_20": 0.15207655123645158,
-      "hubness_max_nk_k_20_ranker_20": 614.0,
-      "hubness_skewness_k_20_ranker_20": 3.68498247973087
+      "hub_exposure_mean_nk_k_20_ranker_20": 131.0254905808477,
+      "hub_exposure_mean_nk_k_20_user_tier_0_ranker_20": 128.19871183206106,
+      "hub_exposure_mean_nk_k_20_user_tier_1_ranker_20": 132.25927484622855,
+      "hub_exposure_mean_nk_k_20_user_tier_2_ranker_20": 130.1405109489051,
+      "hub_exposure_mean_sim_k_20_ranker_20": -0.017321997875987614,
+      "hubness_centroid_corr_k_20_ranker_20": 0.13291596521572982,
+      "hubness_max_nk_k_20_ranker_20": 556.0,
+      "hubness_skewness_k_20_ranker_20": 3.553548789827326
     }
   },
   "retrieval_ann_100": {
@@ -20,11 +20,11 @@
     ],
     "metrics": {
       "hub_exposure_mean_nk_k_100_retrieval_ann_100": 238.37514128728418,
-      "hub_exposure_mean_nk_k_100_user_tier_0_retrieval_ann_100": 244.3567175572519,
-      "hub_exposure_mean_nk_k_100_user_tier_1_retrieval_ann_100": 238.0611977986403,
+      "hub_exposure_mean_nk_k_100_user_tier_0_retrieval_ann_100": 244.35671755725193,
+      "hub_exposure_mean_nk_k_100_user_tier_1_retrieval_ann_100": 238.06119779864034,
       "hub_exposure_mean_nk_k_100_user_tier_2_retrieval_ann_100": 232.84967674661104,
-      "hub_exposure_mean_sim_k_100_retrieval_ann_100": -0.1970646269304981,
-      "hubness_centroid_corr_k_100_retrieval_ann_100": -0.24889657743230953,
+      "hub_exposure_mean_sim_k_100_retrieval_ann_100": -0.1970646526262672,
+      "hubness_centroid_corr_k_100_retrieval_ann_100": -0.24889666749336417,
       "hubness_max_nk_k_100_retrieval_ann_100": 804.0,
       "hubness_skewness_k_100_retrieval_ann_100": 1.4003926828423716
     }
@@ -34,12 +34,12 @@
       "HEALTHY LATENT SPACE (retrieval_ann_20): Skewness is low (2.8), indicating recommendation volume is naturally distributed without geometric black holes."
     ],
     "metrics": {
-      "hub_exposure_mean_nk_k_20_retrieval_ann_20": 77.45204081632654,
+      "hub_exposure_mean_nk_k_20_retrieval_ann_20": 77.45204081632653,
       "hub_exposure_mean_nk_k_20_user_tier_0_retrieval_ann_20": 78.30085877862595,
       "hub_exposure_mean_nk_k_20_user_tier_1_retrieval_ann_20": 77.78522175461313,
       "hub_exposure_mean_nk_k_20_user_tier_2_retrieval_ann_20": 75.45125130344108,
-      "hub_exposure_mean_sim_k_20_retrieval_ann_20": -0.19882723106702677,
-      "hubness_centroid_corr_k_20_retrieval_ann_20": -0.16445206649501293,
+      "hub_exposure_mean_sim_k_20_retrieval_ann_20": -0.1988272614260572,
+      "hubness_centroid_corr_k_20_retrieval_ann_20": -0.1644521339168706,
       "hubness_max_nk_k_20_retrieval_ann_20": 342.0,
       "hubness_skewness_k_20_retrieval_ann_20": 2.7851310542648458
     }

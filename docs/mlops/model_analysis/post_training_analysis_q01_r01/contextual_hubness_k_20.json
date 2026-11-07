@@ -1,19 +1,19 @@
 {
   "automated_conclusions": [
-    "HEALTHY EXPRESSIVITY (ranker_contextual_k_20): The mean contextual similarity is 0.45. The GATv2 layers are successfully preserving geometric breadth between users and candidates."
+    "HEALTHY EXPRESSIVITY (ranker_contextual_k_20): The mean contextual similarity is 0.44. The GATv2 layers are successfully preserving geometric breadth between users and candidates."
   ],
   "metrics": {
-    "ctx_exposure_mean_anisotropy_ranker_contextual_k_20": 0.44549801971518915,
-    "ctx_exposure_mean_anisotropy_user_tier_0_ranker_contextual_k_20": 0.46791453977240816,
-    "ctx_exposure_mean_anisotropy_user_tier_1_ranker_contextual_k_20": 0.4414390675364302,
-    "ctx_exposure_mean_anisotropy_user_tier_2_ranker_contextual_k_20": 0.43407527754649405,
-    "ctx_exposure_mean_nk_ranker_contextual_k_20": 134.53598901098903,
-    "ctx_exposure_mean_nk_user_tier_0_ranker_contextual_k_20": 133.9767175572519,
-    "ctx_exposure_mean_nk_user_tier_1_ranker_contextual_k_20": 135.3073000971188,
-    "ctx_exposure_mean_nk_user_tier_2_ranker_contextual_k_20": 132.66272158498435,
-    "ctx_hubness_centroid_corr_ranker_contextual_k_20": -0.01121623151440698,
-    "ctx_hubness_max_nk_ranker_contextual_k_20": 614.0,
-    "ctx_hubness_mean_sim_ranker_contextual_k_20": 0.44800227171389495,
-    "ctx_hubness_skewness_ranker_contextual_k_20": 3.68498247973087
+    "ctx_exposure_mean_anisotropy_ranker_contextual_k_20": 0.4136012567530453,
+    "ctx_exposure_mean_anisotropy_user_tier_0_ranker_contextual_k_20": 0.3981056191358614,
+    "ctx_exposure_mean_anisotropy_user_tier_1_ranker_contextual_k_20": 0.40844333683901407,
+    "ctx_exposure_mean_anisotropy_user_tier_2_ranker_contextual_k_20": 0.4471489552277596,
+    "ctx_exposure_mean_nk_ranker_contextual_k_20": 131.02549058084773,
+    "ctx_exposure_mean_nk_user_tier_0_ranker_contextual_k_20": 128.19871183206106,
+    "ctx_exposure_mean_nk_user_tier_1_ranker_contextual_k_20": 132.25927484622855,
+    "ctx_exposure_mean_nk_user_tier_2_ranker_contextual_k_20": 130.1405109489051,
+    "ctx_hubness_centroid_corr_ranker_contextual_k_20": -0.12374264642034027,
+    "ctx_hubness_max_nk_ranker_contextual_k_20": 556.0,
+    "ctx_hubness_mean_sim_ranker_contextual_k_20": 0.43791754890206946,
+    "ctx_hubness_skewness_ranker_contextual_k_20": 3.553548789827326
   }
 }

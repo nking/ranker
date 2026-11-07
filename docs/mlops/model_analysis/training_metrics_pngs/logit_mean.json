@@ -1,13 +1,13 @@
 {
     "latest_train_step": 14,
-    "latest_train_value": 4.986551761627197,
-    "latest_train_smoothed": 5.2502403456215205,
+    "latest_train_value": 2.7908506393432617,
+    "latest_train_smoothed": 2.950251487306388,
     "latest_val_step": 14,
-    "latest_val_value": 5.049969739913941,
-    "latest_val_smoothed": 5.03558897128833,
+    "latest_val_value": 3.2981405210494996,
+    "latest_val_smoothed": 3.287054196630484,
     "latest_test_step": 15,
-    "latest_test_value": 4.773886650166613,
-    "latest_test_smoothed": 4.773886650166613,
+    "latest_test_value": 3.2852444090741746,
+    "latest_test_smoothed": 3.2852444090741746,
     "random_metric": null,
     "ceiling": null
 }

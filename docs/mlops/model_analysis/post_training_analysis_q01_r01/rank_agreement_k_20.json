@@ -1,10 +1,10 @@
 {
   "automated_conclusions": [
     "MASSIVE CHURN: The Ranker completely discards and replaces over 80% of the Retriever's top items (Overlap: 19.7%). It is acting as an extremely aggressive filter.",
-    "AGGRESSIVE RE-RANKING: The Ranker drastically scrambles the relative ordering of retrieved items (Spearman ρ = -0.01), proving it scores candidate items very differently than the ANN space."
+    "AGGRESSIVE RE-RANKING: The Ranker drastically scrambles the relative ordering of retrieved items (Spearman ρ = -0.03), proving it scores candidate items very differently than the ANN space."
   ],
   "metrics": {
-    "mean_overlap_at_20": 0.19721350078492905,
-    "mean_spearman_rho_at_20": -0.011969962508755622
+    "mean_overlap_at_20": 0.19730180533752012,
+    "mean_spearman_rho_at_20": -0.030868426238995498
   }
 }

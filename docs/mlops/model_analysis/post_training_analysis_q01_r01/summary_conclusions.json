@@ -1,12 +1,12 @@
 {
   "cold_start_movies": {
     "ranker_20_cold_start_movies": [
-      "STRONG RECALL LIFT: Global Recall@20 (3.7%) heavily outperforms the random expected baseline (0.5%). The candidate generator is extracting meaningful semantic signal.",
-      "STRONG PRECISION LIFT: Global Precision@20 (1.65%) heavily outperforms the random expected precision (0.22%), indicating high density of relevant items in the retrieved slates.",
+      "STRONG RECALL LIFT: Global Recall@20 (4.0%) heavily outperforms the random expected baseline (0.5%). The candidate generator is extracting meaningful semantic signal.",
+      "STRONG PRECISION LIFT: Global Precision@20 (1.79%) heavily outperforms the random expected precision (0.22%), indicating high density of relevant items in the retrieved slates.",
       "SLOW SURFACING WARNING: Global MRR@20 is heavily degraded (0.07), indicating users must scroll significantly to find the first relevant item.",
-      "STRONG LIGHT-USER GENERALIZATION: Light/niche users (Tier 2 Recall: 4.6%) achieve recall comparable to or exceeding power users (Tier 0 Recall: 3.5%).",
-      "HEALTHY RANKING STRATIFICATION: NDCG is higher for power users (Tier 0: 4.94% vs Tier 2: 2.35%). The model not only retrieves the right items for power users but places them higher in the slate.",
-      "POPULARITY BIAS DETECTED: Ranking quality heavily favors head/popular movies (Tier 0 NDCG: 2.69%) compared to long-tail/niche items (Tier 2 NDCG: 0.31%)."
+      "STRONG LIGHT-USER GENERALIZATION: Light/niche users (Tier 2 Recall: 4.6%) achieve recall comparable to or exceeding power users (Tier 0 Recall: 3.9%).",
+      "HEALTHY RANKING STRATIFICATION: NDCG is higher for power users (Tier 0: 5.11% vs Tier 2: 2.50%). The model not only retrieves the right items for power users but places them higher in the slate.",
+      "POPULARITY BIAS DETECTED: Ranking quality heavily favors head/popular movies (Tier 0 NDCG: 2.86%) compared to long-tail/niche items (Tier 2 NDCG: 0.34%)."
     ],
     "retrieval_ann_100_cold_start_movies": [
       "STRONG RECALL LIFT: Global Recall@100 (8.7%) heavily outperforms the random expected baseline (2.3%). The candidate generator is extracting meaningful semantic signal.",
@@ -28,11 +28,11 @@
   "cold_start_users": {
     "ranker_20_cold_start_users": [
       "MODERATE RECALL LIFT: Global Recall@20 (1.5%) beats the random baseline (0.5%), but there is room for improvement.",
-      "MODERATE PRECISION LIFT: Global Precision@20 (1.03%) is better than random (0.39%), suggesting basic relevance filtering is functioning.",
+      "MODERATE PRECISION LIFT: Global Precision@20 (1.02%) is better than random (0.39%), suggesting basic relevance filtering is functioning.",
       "SLOW SURFACING WARNING: Global MRR@20 is heavily degraded (0.04), indicating users must scroll significantly to find the first relevant item.",
-      "STRONG LIGHT-USER GENERALIZATION: Light/niche users (Tier 2 Recall: 2.9%) achieve recall comparable to or exceeding power users (Tier 0 Recall: 0.8%).",
-      "STRONG NICHE USER RANKING: Light/niche users achieve strong top-K ranking quality (Tier 2 NDCG: 3.00% vs Tier 0: 1.41%).",
-      "POPULARITY BIAS DETECTED: Ranking quality heavily favors head/popular movies (Tier 0 NDCG: 1.65%) compared to long-tail/niche items (Tier 2 NDCG: 0.00%)."
+      "STRONG LIGHT-USER GENERALIZATION: Light/niche users (Tier 2 Recall: 2.9%) achieve recall comparable to or exceeding power users (Tier 0 Recall: 0.9%).",
+      "STRONG NICHE USER RANKING: Light/niche users achieve strong top-K ranking quality (Tier 2 NDCG: 2.39% vs Tier 0: 1.57%).",
+      "POPULARITY BIAS DETECTED: Ranking quality heavily favors head/popular movies (Tier 0 NDCG: 1.53%) compared to long-tail/niche items (Tier 2 NDCG: 0.00%)."
     ],
     "retrieval_ann_100_cold_start_users": [
       "RECALL FAILURE: The model fails to outperform a random candidate generator on Recall.",
@@ -52,13 +52,13 @@
     ]
   },
   "contextual_hubness": [
-    "HEALTHY EXPRESSIVITY (ranker_contextual_k_20): The mean contextual similarity is 0.45. The GATv2 layers are successfully preserving geometric breadth between users and candidates."
+    "HEALTHY EXPRESSIVITY (ranker_contextual_k_20): The mean contextual similarity is 0.44. The GATv2 layers are successfully preserving geometric breadth between users and candidates."
   ],
   "coverage_and_gini": {
     "ranker_20": [
       "HEALTHY BIAS at_20 (ranker_20): Gini is 0.78. The model successfully balances mainstream relevance with catalog exploration.",
-      "STRONG TAIL at_20 (ranker_20): The bottom 80% captures 17.7% of traffic, indicating excellent long-tail surfacing capability.",
-      "DIVERSE HEAD at_20 (ranker_20): The top 10% consume 59.7% of slots, leaving plenty of room for the torso/tail.",
+      "STRONG TAIL at_20 (ranker_20): The bottom 80% captures 18.3% of traffic, indicating excellent long-tail surfacing capability.",
+      "DIVERSE HEAD at_20 (ranker_20): The top 10% consume 59.2% of slots, leaving plenty of room for the torso/tail.",
       "UNIFORM COHORTS at_20 (ranker_20): Light and Power users experience roughly the same level of catalog concentration."
     ],
     "retrieval_ann_100": [
@@ -76,35 +76,35 @@
   },
   "cross_metric_analysis": [
     "FUNNEL RETENTION: Shrinking the candidate pool from 100 to 20 retains 17.2% of the recall (Recall drops from 1.60% to 0.27%).",
-    "SURFACING SPEED LIFT: The Ranker improved MRR@20 by 396.3% (from 0.01 to 0.03). The Cross-Encoder successfully pushes the first relevant item much closer to rank 1.",
-    "RANKER LIFT: The Ranker improved NDCG@20 by 377.3% over pure retrieval. The Cross-Encoder is successfully refining the candidate slates.",
-    "SUCCESSFUL FILTERING: The Ranker aggressively filtered out 100.0% of the Retriever's items, resulting in a positive NDCG lift of 377.3%. It successfully separated the signal from the ANN's noise.",
-    "RANKER COVERAGE COLLAPSE: To achieve its ranking, the Ranker sacrificed 29.6% of the Retriever's catalog coverage. It is behaving much more conservatively than the ANN.",
+    "SURFACING SPEED LIFT: The Ranker improved MRR@20 by 454.9% (from 0.01 to 0.03). The Cross-Encoder successfully pushes the first relevant item much closer to rank 1.",
+    "RANKER LIFT: The Ranker improved NDCG@20 by 406.7% over pure retrieval. The Cross-Encoder is successfully refining the candidate slates.",
+    "SUCCESSFUL FILTERING: The Ranker aggressively filtered out 100.0% of the Retriever's items, resulting in a positive NDCG lift of 406.7%. It successfully separated the signal from the ANN's noise.",
+    "RANKER COVERAGE COLLAPSE: To achieve its ranking, the Ranker sacrificed 26.5% of the Retriever's catalog coverage. It is behaving much more conservatively than the ANN.",
     "ITEM COLD-START RESILIENCE (RETRIEVER): When 501 test movies are replaced with unmemorized OOV=0 phantom items, Recall@100 retains 545.2% of warm performance (8.71% vs 1.60%). The Candidate Tower's content features (genres/metadata) generalize strongly into the embedding space.",
-    "ITEM COLD-START RANKER LIFT: Even with OOV=0 phantom movies in the candidate pool, the Ranker improves NDCG@20 by 65.1% (and MRR@20 by 80.4%) over pure retrieval. The GATv2 graph attention effectively scores cold-start item embeddings against user history.",
-    "HEAD ITEM ID DEPENDENCY: Under cold-start movie simulation, Tier 0 (head) NDCG@20 drops by -135.3% (1.14% -> 2.69%), compared to a -192.8% change for Tier 2 (long-tail) items. Popular items rely heavily on memorized collaborative ID weights rather than metadata.",
+    "ITEM COLD-START RANKER LIFT: Even with OOV=0 phantom movies in the candidate pool, the Ranker improves NDCG@20 by 76.4% (and MRR@20 by 85.9%) over pure retrieval. The GATv2 graph attention effectively scores cold-start item embeddings against user history.",
+    "HEAD ITEM ID DEPENDENCY: Under cold-start movie simulation, Tier 0 (head) NDCG@20 drops by -136.6% (1.21% -> 2.86%), compared to a -344.3% change for Tier 2 (long-tail) items. Popular items rely heavily on memorized collaborative ID weights rather than metadata.",
     "STRONG DEMOGRAPHIC COLD-START (USER RETRIEVER): With user_id=0 (OOV), demographic features alone (age, gender, occupation) retain 157.3% of warm Recall@100 (2.51% vs 1.60%, 1.0x random baseline).",
-    "ZERO-HISTORY GRAPH RANKER LIFT: Even when cold-start users have an empty watch history in the GATv2 subgraph, the Ranker improves NDCG@20 by 307.2% (and MRR@20 by 523.9%) over pure retrieval.",
-    "POWER USER HISTORY ABLATION: Stripping Power Users (Tier 0) of their interaction history and user ID reduces Ranker Recall@20 from 1.39% to 0.84% (confirming that learned history + ID provides a +64.4% relative lift over raw demographics).",
-    "COLD-START BOTTLENECK (USER SIDE): End-to-end Ranker NDCG@20 retention is significantly lower for Cold-Start Users (156.8% of warm) than Cold-Start Movies (279.9% of warm). Onboarding new users (e.g., via interactive preference elicitation or richer user features) is a higher-leverage priority than item metadata."
+    "ZERO-HISTORY GRAPH RANKER LIFT: Even when cold-start users have an empty watch history in the GATv2 subgraph, the Ranker improves NDCG@20 by 304.2% (and MRR@20 by 543.2%) over pure retrieval.",
+    "POWER USER HISTORY ABLATION: Stripping Power Users (Tier 0) of their interaction history and user ID reduces Ranker Recall@20 from 1.53% to 0.86% (confirming that learned history + ID provides a +77.5% relative lift over raw demographics).",
+    "COLD-START BOTTLENECK (USER SIDE): End-to-end Ranker NDCG@20 retention is significantly lower for Cold-Start Users (146.6% of warm) than Cold-Start Movies (281.8% of warm). Onboarding new users (e.g., via interactive preference elicitation or richer user features) is a higher-leverage priority than item metadata."
   ],
   "diversity_metrics": {
     "ranker_20": [
-      "HIGH PERSONALIZATION (ranker_20): Global Inter-list Diversity is 98.54%. The model successfully delivers highly unique slates customized to individual users.",
+      "HIGH PERSONALIZATION (ranker_20): Global Inter-list Diversity is 98.62%. The model successfully delivers highly unique slates customized to individual users.",
       "HIGH BREADTH (ranker_20): Intra-list Diversity is high (0.69), indicating slates feature a wide variety of semantic genres/topics."
     ],
     "retrieval_ann_100": [
-      "HIGH PERSONALIZATION (retrieval_ann_100): Global Inter-list Diversity is 97.32%. The model successfully delivers highly unique slates customized to individual users.",
+      "HIGH PERSONALIZATION (retrieval_ann_100): Global Inter-list Diversity is 97.39%. The model successfully delivers highly unique slates customized to individual users.",
       "HIGH BREADTH (retrieval_ann_100): Intra-list Diversity is high (0.64), indicating slates feature a wide variety of semantic genres/topics."
     ],
     "retrieval_ann_20": [
-      "HIGH PERSONALIZATION (retrieval_ann_20): Global Inter-list Diversity is 99.15%. The model successfully delivers highly unique slates customized to individual users.",
+      "HIGH PERSONALIZATION (retrieval_ann_20): Global Inter-list Diversity is 99.17%. The model successfully delivers highly unique slates customized to individual users.",
       "HIGH BREADTH (retrieval_ann_20): Intra-list Diversity is high (0.58), indicating slates feature a wide variety of semantic genres/topics."
     ]
   },
   "embedding_hubness": {
     "ranker_20": [
-      "MODERATE HUBNESS (ranker_20): The retrieval distribution is moderately right-skewed (Skewness: 3.7). A handful of items are dominating slates, but they are not strictly tied to the global user centroid (r=0.15)."
+      "MODERATE HUBNESS (ranker_20): The retrieval distribution is moderately right-skewed (Skewness: 3.6). A handful of items are dominating slates, but they are not strictly tied to the global user centroid (r=0.13)."
     ],
     "retrieval_ann_100": [
       "HEALTHY LATENT SPACE (retrieval_ann_100): Skewness is low (1.4), indicating recommendation volume is naturally distributed without geometric black holes."
@@ -114,18 +114,18 @@
     ]
   },
   "executive_summary": [
-    "TWO-STAGE FUNNEL SUMMARY (@100 -> @20): Stage-1 ANN Recall@100 is 1.60%. Unranked ANN Recall@20 retains 17.2% of that pool (0.27%), while Stage-2 GATv2 Ranker@20 captures 66.6% of the pool (1.06%), delivering +287.3% Recall@20, +377.3% NDCG@20 (0.0023 -> 0.0108), and +396.3% MRR@20 (0.0055 -> 0.0275) lift over ANN@20.",
-    "TIER-STRATIFIED RANKING BREAKDOWN (@20): Composite NDCG@20 shifted from 0.0017 (Retriever) to 0.0055 (Ranker) | Head (Tier 0): 0.0016 -> 0.0114 | Torso (Tier 1): 0.0019 -> 0.0043 | Tail (Tier 2): 0.0018 -> 0.0011.",
-    "HIGH SPHERICAL STABILITY (Movie Candidate): Mean Resultant Length R_bar = 0.9997 (P10 = 0.9992, Median vMF kappa = 51349.1), Mean Geodesic Deviation = 1.2 deg (P90 = 1.8 deg, Robust MAD = 0.3 deg). 100.0% of entities have tight centroids (R_bar >= 0.90), while 0.0% exhibit strong context shift (R_bar < 0.70).",
-    "HIGH SPHERICAL STABILITY (User Query): Mean Resultant Length R_bar = 0.9996 (P10 = 0.9989, Median vMF kappa = 114995.2), Mean Geodesic Deviation = 0.7 deg (P90 = 1.1 deg, Robust MAD = 0.1 deg). 100.0% of entities have tight centroids (R_bar >= 0.90), while 0.0% exhibit strong context shift (R_bar < 0.70)."
+    "TWO-STAGE FUNNEL SUMMARY (@100 -> @20): Stage-1 ANN Recall@100 is 1.60%. Unranked ANN Recall@20 retains 17.2% of that pool (0.27%), while Stage-2 GATv2 Ranker@20 captures 70.4% of the pool (1.12%), delivering +309.3% Recall@20, +406.7% NDCG@20 (0.0023 -> 0.0115), and +454.9% MRR@20 (0.0055 -> 0.0307) lift over ANN@20.",
+    "TIER-STRATIFIED RANKING BREAKDOWN (@20): Composite NDCG@20 shifted from 0.0017 (Retriever) to 0.0057 (Ranker) | Head (Tier 0): 0.0016 -> 0.0121 | Torso (Tier 1): 0.0019 -> 0.0045 | Tail (Tier 2): 0.0018 -> 0.0008.",
+    "HIGH SPHERICAL STABILITY (Movie Candidate): Mean Resultant Length R_bar = 0.9991 (P10 = 0.9978, Median vMF kappa = 18250.0), Mean Geodesic Deviation = 2.0 deg (P90 = 3.0 deg, Robust MAD = 0.6 deg). 100.0% of entities have tight centroids (R_bar >= 0.90), while 0.0% exhibit strong context shift (R_bar < 0.70).",
+    "HIGH SPHERICAL STABILITY (User Query): Mean Resultant Length R_bar = 0.9997 (P10 = 0.9991, Median vMF kappa = 114995.2), Mean Geodesic Deviation = 0.7 deg (P90 = 1.1 deg, Robust MAD = 0.1 deg). 100.0% of entities have tight centroids (R_bar >= 0.90), while 0.0% exhibit strong context shift (R_bar < 0.70)."
   ],
   "gatv2_spherical_fidelity": [
-    "HIGH SPHERICAL STABILITY (Movie Candidate): Mean Resultant Length R_bar = 0.9997 (P10 = 0.9992, Median vMF kappa = 51349.1), Mean Geodesic Deviation = 1.2 deg (P90 = 1.8 deg, Robust MAD = 0.3 deg). 100.0% of entities have tight centroids (R_bar >= 0.90), while 0.0% exhibit strong context shift (R_bar < 0.70).",
-    "HIGH SPHERICAL STABILITY (User Query): Mean Resultant Length R_bar = 0.9996 (P10 = 0.9989, Median vMF kappa = 114995.2), Mean Geodesic Deviation = 0.7 deg (P90 = 1.1 deg, Robust MAD = 0.1 deg). 100.0% of entities have tight centroids (R_bar >= 0.90), while 0.0% exhibit strong context shift (R_bar < 0.70)."
+    "HIGH SPHERICAL STABILITY (Movie Candidate): Mean Resultant Length R_bar = 0.9991 (P10 = 0.9978, Median vMF kappa = 18250.0), Mean Geodesic Deviation = 2.0 deg (P90 = 3.0 deg, Robust MAD = 0.6 deg). 100.0% of entities have tight centroids (R_bar >= 0.90), while 0.0% exhibit strong context shift (R_bar < 0.70).",
+    "HIGH SPHERICAL STABILITY (User Query): Mean Resultant Length R_bar = 0.9997 (P10 = 0.9991, Median vMF kappa = 114995.2), Mean Geodesic Deviation = 0.7 deg (P90 = 1.1 deg, Robust MAD = 0.1 deg). 100.0% of entities have tight centroids (R_bar >= 0.90), while 0.0% exhibit strong context shift (R_bar < 0.70)."
   ],
   "popularity_bias": {
     "ranker_20": [
-      "NICHE EXPLORATION (ranker_20): The model actively suppresses popularity, surfacing items 42.5% less popular than organic consumption.",
+      "NICHE EXPLORATION (ranker_20): The model actively suppresses popularity, surfacing items 41.6% less popular than organic consumption.",
       "POWER USER PENALTY (ranker_20): Power users (Tier 0) experience significantly worse popularity bias than Light users (Tier 2). The model ignores their rich histories and defaults to blockbusters."
     ],
     "retrieval_ann_100": [
@@ -139,16 +139,16 @@
   },
   "rank_agreement_and_churn": [
     "MASSIVE CHURN: The Ranker completely discards and replaces over 80% of the Retriever's top items (Overlap: 19.7%). It is acting as an extremely aggressive filter.",
-    "AGGRESSIVE RE-RANKING: The Ranker drastically scrambles the relative ordering of retrieved items (Spearman ρ = -0.01), proving it scores candidate items very differently than the ANN space."
+    "AGGRESSIVE RE-RANKING: The Ranker drastically scrambles the relative ordering of retrieved items (Spearman ρ = -0.03), proving it scores candidate items very differently than the ANN space."
   ],
   "stratified_metrics": {
     "ranker_20": [
       "MODERATE RECALL LIFT: Global Recall@20 (1.1%) beats the random baseline (0.5%), but there is room for improvement.",
-      "MODERATE PRECISION LIFT: Global Precision@20 (0.61%) is better than random (0.24%), suggesting basic relevance filtering is functioning.",
+      "MODERATE PRECISION LIFT: Global Precision@20 (0.62%) is better than random (0.24%), suggesting basic relevance filtering is functioning.",
       "SLOW SURFACING WARNING: Global MRR@20 is heavily degraded (0.03), indicating users must scroll significantly to find the first relevant item.",
-      "EXCELLENT HISTORY UTILIZATION: Power users (Tier 0 Recall: 1.4%) perform massively better than light users (Tier 2 Recall: 0.9%). The model successfully translates rich interaction histories into highly relevant slates.",
-      "HEALTHY RANKING STRATIFICATION: NDCG is higher for power users (Tier 0: 2.01% vs Tier 2: 0.66%). The model not only retrieves the right items for power users but places them higher in the slate.",
-      "POPULARITY BIAS DETECTED: Ranking quality heavily favors head/popular movies (Tier 0 NDCG: 1.14%) compared to long-tail/niche items (Tier 2 NDCG: 0.11%)."
+      "EXCELLENT HISTORY UTILIZATION: Power users (Tier 0 Recall: 1.5%) perform massively better than light users (Tier 2 Recall: 0.9%). The model successfully translates rich interaction histories into highly relevant slates.",
+      "HEALTHY RANKING STRATIFICATION: NDCG is higher for power users (Tier 0: 2.22% vs Tier 2: 0.64%). The model not only retrieves the right items for power users but places them higher in the slate.",
+      "POPULARITY BIAS DETECTED: Ranking quality heavily favors head/popular movies (Tier 0 NDCG: 1.21%) compared to long-tail/niche items (Tier 2 NDCG: 0.08%)."
     ],
     "retrieval_ann_100": [
       "RECALL FAILURE: The model fails to outperform a random candidate generator on Recall.",
