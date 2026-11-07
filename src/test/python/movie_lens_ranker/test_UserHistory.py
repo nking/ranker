@@ -108,6 +108,9 @@ class TestUserHistory_vec(unittest.TestCase):
             mask = np.where(t < uh.ts_pad_value)
             m, r, t = m[mask], r[mask], t[mask]
             m_compare, r_compare, t_compare = movie_hist_valid[i]
+            ## spot check for a known value:
+            if i == 0:
+                self.assertEqual(m_compare[-1], 6888)
             n = len(mask[0])
             m_compare = m_compare[-n:]
             r_compare = r_compare[-n:]

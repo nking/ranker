@@ -367,12 +367,12 @@ impl Orchestrator {
         ranker_model_version_choice: Option<VersionChoice>
     ) -> Result<RankedMovies, Status> {
 
-        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+        let _ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
             .map_err(|e| {
                 eprintln!("Failed to fetch ranker metadata: {}", e);
                 Status::internal(format!("Internal metadata error: {}", e))
             })?;
-        let num_catalog_users = ranker_metadata.num_catalog_users;
+        //let num_catalog_users = ranker_metadata.num_catalog_users;
 
         let searcher = self.searcher.load();
 
@@ -568,7 +568,6 @@ impl Orchestrator {
         ann_res: ApproxNearestNeighborsResponse,
         searcher: &Searcher,
         user_history: &UserHistory,
-        num_catalog_users:usize,
         ) -> Result<Response<RankedMovies>, Status> {
 
         let user_ids = ann_res.user_ids;
@@ -776,7 +775,7 @@ impl Orchestrator {
 
         // history is length n_users * max_n_hist
         let (history, _ratings) : (Vec<i32>, Vec<i32>) = user_history.get_history_before_timestamp(
-            &user_ids, &timestamps, max_n_hist);
+            &user_ids, &timestamps, max_n_hist, true);
 
         // Pre-allocate the exact size needed for the final flattened candidates
         let mut final_candidates: Vec<i32> = Vec::with_capacity(user_ids.len() * num_candidates);
@@ -902,7 +901,7 @@ impl Orchestrator {
 
         // history is length n_users * max_n_hist
         let (history, _ratings) : (Vec<i32>, Vec<i32>) = user_history.get_history_before_timestamp(
-            &user_ids0, &users_req.timestamps, max_n_hist);
+            &user_ids0, &users_req.timestamps, max_n_hist, true);
 
         // Pre-allocate the exact size needed for the final flattened candidates
         let mut final_candidates: Vec<i32> = Vec::with_capacity(n_users * k);
