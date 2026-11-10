@@ -1,0 +1,30 @@
+# Stage-3 Listwise LLM Reranker hosted on Triton C++ ONNX Runtime Backend
+triton-reranker:
+  image: nvcr.io/nvidia/tritonserver:25.02-py3
+  container_name: triton-reranker
+  restart: unless-stopped
+  ports:
+    - "172.17.0.1:8530:8500" # gRPC port (8500, 8510, 8520 already taken)
+    - "172.17.0.1:8531:8501" # REST API & Healthcheck port (8501, 8511, 8521 already taken)
+  environment:
+    - OMP_NUM_THREADS=4
+    - MKL_NUM_THREADS=4
+  volumes:
+    - ./src/test/resources/model_repositories/triton_models:/models:ro
+  command:
+    - tritonserver
+    - --model-repository=/models
+    - --grpc-port=8500
+    - --http-port=8501
+    - --allow-metrics=false
+    - --log-verbose=0
+  healthcheck:
+    test: [ "CMD", "bash", "-c", "echo > /dev/tcp/localhost/8501" ]
+    interval: 10s
+    timeout: 5s
+    retries: 3
+    start_period: 10s
+  # Check readiness outside container:
+  # curl -i http://172.17.0.1:8531/v2/health/ready
+  # Check model metadata & tensor shapes:
+  # curl http://172.17.0.1:8531/v2/models/qwen-reranker

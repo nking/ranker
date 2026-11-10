@@ -51,7 +51,8 @@ impl Searcher {
         println!("Number of movie embeddings = {}, embed_len: {}", num_movies, embed_len);
 
         let path_buf = persisted_index_path.as_ref().to_path_buf();
-        let indexer = if path_buf.exists() {
+        //TODO: add an option flag to the method to reload if exists
+        let indexer = if false {//path_buf.exists() {
             println!("Restoring index from {:?}", path_buf);
             let path_str = path_buf.to_str().ok_or("Path contains invalid UTF-8 characters")?;
             Index::restore(path_str)?

@@ -26,6 +26,14 @@ pub struct UserMapEntry {
 ///   cold-start user IDs (`<= 0` or `> n_users`), and is permanently filled with
 ///   `pad_value` (-1) and `ts_pad_value` (2524608000).
 /// - Valid catalog users `1..=n_users` index directly into row `user_id as usize`.
+/// - n_users is the number of catalog users
+/// - max_history is the number of (movie_ids, ratings, timestamps) for each user
+///   and if the real history is < max_history the remaining part of the arrys holds the pad values.
+///   For best results, max_history should be large, large enough to successfully cover the
+///   range of potential queries and still return the max_history that the model inference needs.
+///   Can use the max history among all users, e.g. 2048-ish.
+/// - the section of the flat arrays belonging to a user are sorted by their timestamps for the real
+///    history and are floowed by padding up the max_history.
 #[derive(Debug, Clone)]
 pub struct UserHistory {
     pub movie_ids: Vec<i32>,

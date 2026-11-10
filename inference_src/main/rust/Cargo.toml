@@ -147,3 +147,8 @@ path= "../../test/rust/test/post_training_analysis.rs"
 [[test]]
 name = "compare_post_training_analysis"
 path= "../../test/rust/test/compare_post_training_analysis.rs"
+
+
+[[test]]
+name = "write_reranker_train_parquet"
+path= "../../test/rust/test/write_reranker_train_parquet.rs"

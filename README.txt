@@ -105,12 +105,14 @@ project directory hierarchy:
 │   ├──test/   
 │   │   ├── python/movie_lens_ranker  # Tests for Main Branch
 │   |   └── resources                 #data for tests
+│   |         └── model_repositories  #trained models
 ├── deploy/                                       # Yaml Files (No executable code)
 │   ├── compose/                                  # Local Docker Compose configurations
 │   │   ├── docker-compose.yaml                   # Combines app + dbs
 │   │   ├── docker-compose-TFS.yaml               # TFS hosting of the tower Query model and Ranker model
 │   │   ├── docker-compose-TFS-candidate.yaml     # TFS hosting of the tower Candidate model
 │   │   └── docker-compose-dbs.yaml               # the 3 database containers
+│   │   └── docker-compose-reranker.yaml          # triton hosting of the SFT LLM reranker
 │   └── k8s/                          # Native Kubernetes definitions
 │       ├── rbac.yaml                 # Role & RoleBindings
 │       ├── databases/                # Manifests for your local DBs (replacing compose)

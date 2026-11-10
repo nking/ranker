@@ -9,7 +9,7 @@ use crate::embeddings_ann::Searcher;
 use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
 use crate::user_history::{build_user_history, UserHistory};
 
-use crate::pb::{UsersRequest, UsersRankOnlyRequest, RankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse, RankedMoviesAndRepr};
+use crate::pb::{UsersRequest, UsersRankOnlyRequest, RankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse, RankedMoviesAndRepr, RerankRequest, RerankResponse};
 use tonic::{Request, Response, Status};
 use usearch::ffi::Matches;
 use crate::tensorflow::serving::model_spec::VersionChoice;
@@ -1241,4 +1241,7 @@ impl RecommenderService for Orchestrator {
         Ok(Response::new( ranked_movies))
     }
 
+    async fn rerank(&self, request: Request<RerankRequest>) -> Result<Response<RerankResponse>, Status> {
+        todo!()
+    }
 }
