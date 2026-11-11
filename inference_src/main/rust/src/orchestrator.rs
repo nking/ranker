@@ -1241,7 +1241,7 @@ impl RecommenderService for Orchestrator {
         Ok(Response::new( ranked_movies))
     }
 
-    async fn rerank(&self, request: Request<RerankRequest>) -> Result<Response<RerankResponse>, Status> {
+    async fn rerank(&self, _request: Request<RerankRequest>) -> Result<Response<RerankResponse>, Status> {
         todo!()
     }
 }

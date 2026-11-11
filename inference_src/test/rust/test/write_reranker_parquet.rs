@@ -15,16 +15,24 @@ pub mod helper {
 use inference_engine::app_config::AppConfig;
 use inference_engine::orchestrator::Orchestrator;
 use helper::{get_train_val_test_liked_uris, DataSize};
-use crate::helper::get_config_json_uri;
+use crate::helper::{get_bin_dir, get_config_json_uri};
 
 struct Harness {
     orchestrator: Orchestrator,
-    train_ratings_positive_uri: String,
+    ratings_positive_uri: String,
+    output_file_path: String,
+    q_ver: usize,
+    r_ver: usize
 }
 
 impl Harness {
-    async fn new() -> Self {
+    async fn new(training: bool, use_full: bool) -> Self {
+
         println!("\n[SETUP]: Initializing test resource...");
+
+        let q_ver = 1;
+        let r_ver = 1;
+
         let config_path = get_config_json_uri().to_string();
         let config = AppConfig::load_from_file(&config_path)
             .expect("Could not load config json file");
@@ -39,13 +47,19 @@ impl Harness {
 
         let movie_embeddings_uri : String = config.movie_embeddings_path;
 
+        let datasize = if use_full {DataSize::Full} else {DataSize::Tiny3};
         // only use train history vecause are using this to train the reranker model
-        let ratings_map = get_train_val_test_liked_uris(DataSize::Full, false);
-        let ratings_uris: Vec<&str> = vec![
+        let ratings_map = get_train_val_test_liked_uris(datasize, false);
+        let mut ratings_uris: Vec<&str> = vec![
             ratings_map.get("train_liked").unwrap(),
             ratings_map.get("train_3").unwrap(),
             ratings_map.get("train_disliked").unwrap(),
         ];
+        if training {
+            ratings_uris.push(ratings_map.get("val_liked").unwrap());
+            ratings_uris.push(ratings_map.get("val_3").unwrap());
+            ratings_uris.push(ratings_map.get("val_disliked").unwrap());
+        }
 
         let orchestrator = Orchestrator::new(
             query_uri,
@@ -61,8 +75,29 @@ impl Harness {
             user_db_path
         ).await.unwrap();
 
+        let output_base_dir = get_bin_dir().unwrap().to_string_lossy().into_owned();
+
+        let type_str = if training { "training" } else { "validation" };
+        let type_dir = if use_full {""} else {"tiny3/"};
+
+        let parquet_output_path = format!(
+            "{}/{}reranker_{}_parquet_q{:02}_r{:02}.parquet",
+            output_base_dir.trim_end_matches('/'),
+            type_dir,
+            type_str,
+            q_ver,
+            r_ver
+        );
+
+        let ratings_positive_uri = if training {ratings_map.get("train_liked").unwrap().clone()}
+            else {ratings_map.get("val_liked").unwrap().clone()};
+
         Self {
-            orchestrator: orchestrator, train_ratings_positive_uri: ratings_map.get("train_liked").unwrap().clone()
+            orchestrator: orchestrator,
+            ratings_positive_uri: ratings_positive_uri,
+            output_file_path: parquet_output_path,
+            q_ver: q_ver,
+            r_ver: r_ver
         }
     }
 }
@@ -75,7 +110,7 @@ impl Drop for Harness {
 }
 
 #[cfg(test)]
-mod write_reranker_train_parquet {
+mod write_reranker_parquet {
     use polars::prelude::{col, LazyFrame};
     // Bring everything from the outer scope (TestHarness, helper functions, etc.) into the test module
     use super::*;
@@ -85,7 +120,7 @@ mod write_reranker_train_parquet {
     use inference_engine::pb::{RankedMoviesAndRepr, UsersRequest};
     use tonic::{Request, Response};
     use inference_engine::tensorflow::serving::model_spec::VersionChoice;
-    use crate::helper::{get_bin_dir, load_and_concat_parquet};
+    use crate::helper::{load_and_concat_parquet};
 
     use std::fs::File;
     use std::path::Path;
@@ -97,32 +132,42 @@ mod write_reranker_train_parquet {
     use parquet::basic::Compression;
     use parquet::file::properties::WriterProperties;
 
+
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_write_parquet() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_write_parquet_train_full() -> Result<(), Box<dyn std::error::Error>> {
+        run_write_parquet(true, true).await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_write_parquet_validation_full() -> Result<(), Box<dyn std::error::Error>> {
+        run_write_parquet(false, true).await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_write_parquet_train_tiny3() -> Result<(), Box<dyn std::error::Error>> {
+        run_write_parquet(true, false).await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_write_parquet_validation_tiny3() -> Result<(), Box<dyn std::error::Error>> {
+        run_write_parquet(false, false).await
+    }
+
+    async fn run_write_parquet(training: bool, use_full: bool) -> Result<(), Box<dyn std::error::Error>> {
         /*
-        for the re-ranker training, we will write the parquet file :
+        for the re-ranker training, we will write into the parquet file :
             user_id, movie_id, rating, timestamp, candidate_ids, candidate_scores,
             user_embedding, candidate_embeddings
-        the movie_id is in the candidate_ids.
+        the movie_id is also in the candidate_ids because it is a positive used in training and
+        the movie embedding is needed for it..
         */
 
         // Setup runs here
-        let harness = Harness::new().await;
-
-        let q_ver = 1;
-        let r_ver = 1;
+        let harness = Harness::new(training, use_full).await;
 
         let top_k = harness.orchestrator.top_k;
-        let query_model_version = Some(VersionChoice::Version(q_ver));
-        let ranker_model_version = Some(VersionChoice::Version(r_ver));
-
-        let output_base_dir = get_bin_dir().unwrap().to_string_lossy().into_owned();
-        let parquet_output_path = format!(
-            "{}/reranker_training_parquet_q{:02}_r{:02}.parquet",
-            output_base_dir.trim_end_matches('/'),
-            q_ver,
-            r_ver
-        );
+        let query_model_version = Some(VersionChoice::Version(harness.q_ver as i64));
+        let ranker_model_version = Some(VersionChoice::Version(harness.r_ver as i64));
 
         let ranker_metadata = harness
             .orchestrator
@@ -136,11 +181,11 @@ mod write_reranker_train_parquet {
             .get_ranker_batch_size(ranker_model_version.clone())
             .expect("error while reading ranker metadata");
 
-        let ratings_uri_str: &[&str] = &[&harness.train_ratings_positive_uri];
+        let ratings_uri_str: &[&str] = &[&harness.ratings_positive_uri];
 
-        let pos_train_df: LazyFrame =
-            load_and_concat_parquet(ratings_uri_str).expect("error reading train ratings into df");
-        let pos_train_df = pos_train_df
+        let pos_df: LazyFrame =
+            load_and_concat_parquet(ratings_uri_str).expect("error reading ratings into df");
+        let pos_df = pos_df
             .select([
                 col("user_id"),
                 col("movie_id"),
@@ -149,10 +194,10 @@ mod write_reranker_train_parquet {
             ])
             .collect()?;
 
-        let user_ca = pos_train_df.column("user_id")?.i32()?;
-        let movie_ca = pos_train_df.column("movie_id")?.i32()?;
-        let rating_ca = pos_train_df.column("rating")?.i32()?;
-        let time_ca = pos_train_df.column("timestamp")?.i64()?;
+        let user_ca = pos_df.column("user_id")?.i32()?;
+        let movie_ca = pos_df.column("movie_id")?.i32()?;
+        let rating_ca = pos_df.column("rating")?.i32()?;
+        let time_ca = pos_df.column("timestamp")?.i64()?;
 
         let user_ids: Vec<i32> = user_ca.into_no_null_iter().collect();
         let movie_ids: Vec<i32> = movie_ca.into_no_null_iter().collect();
@@ -160,7 +205,7 @@ mod write_reranker_train_parquet {
         let timestamps: Vec<i64> = time_ca.into_no_null_iter().collect();
 
         // 1. Create the Arrow schema and Parquet writer for `parquet_output_path`
-        if let Some(parent) = Path::new(&parquet_output_path).parent() {
+        if let Some(parent) = Path::new(&harness.output_file_path).parent() {
             std::fs::create_dir_all(parent)?;
         }
 
@@ -199,7 +244,7 @@ mod write_reranker_train_parquet {
             ),
         ]));
 
-        let output_file = File::create(&parquet_output_path)?;
+        let output_file = File::create(&harness.output_file_path)?;
         let writer_props = WriterProperties::builder()
             .set_compression(Compression::SNAPPY)
             .build();
@@ -222,8 +267,8 @@ mod write_reranker_train_parquet {
                     ranker_model_version.clone(),
                 )
                 .await?;
-            let mut users_request: UsersRequest = tonic_request.into_inner();
-            users_request.k = Some(top_k as u32);
+            let users_request: UsersRequest = tonic_request.into_inner();
+            //users_request.k = Some(top_k as u32);
 
             let predict_req = tonic::Request::new(users_request);
             let results: Result<Response<RankedMoviesAndRepr>, tonic::Status> =
@@ -296,11 +341,11 @@ mod write_reranker_train_parquet {
 
         // 5. Flush and close the Parquet file
         parquet_writer.close()?;
-        println!("Wrote reranker training parquet to: {}", parquet_output_path);
+        println!("Wrote reranker training parquet to: {}", harness.output_file_path);
 
         // 6. Verify the written Parquet file can be read, row count matches, and spot-check rows
         assert_training_parquet_valid(
-            &parquet_output_path,
+            &harness.output_file_path,
             &user_ids,
             &movie_ids,
             &ratings,
