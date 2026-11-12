@@ -39,6 +39,8 @@ mkdir -p "$DEST_DIR"
 echo "Found ${#src_files[@]} file(s). Copying to $DEST_DIR..."
 cp -v "${src_files[@]}" "$DEST_DIR/"
 
+cp src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/training_hyperparameters.json "$DEST_DIR/ranker_training_hyperparameters.json"
+
 SRC_PATTERN="bin/tiny3/reranker_*.parquet"
 DEST_DIR="$BASE_DEST/src/test/resources/data/tiny3"
 shopt -s nullglob
