@@ -25,8 +25,15 @@ struct Harness {
     r_ver: usize
 }
 
+#[derive(PartialEq, Eq, Hash)]
+pub enum Split {
+    Train,
+    Val,
+    Test,
+}
+
 impl Harness {
-    async fn new(training: bool, use_full: bool) -> Self {
+    async fn new(split: Split, use_full: bool) -> Self {
 
         println!("\n[SETUP]: Initializing test resource...");
 
@@ -55,10 +62,15 @@ impl Harness {
             ratings_map.get("train_3").unwrap(),
             ratings_map.get("train_disliked").unwrap(),
         ];
-        if training {
+        if split == Split::Val || split == Split::Test {
             ratings_uris.push(ratings_map.get("val_liked").unwrap());
             ratings_uris.push(ratings_map.get("val_3").unwrap());
             ratings_uris.push(ratings_map.get("val_disliked").unwrap());
+        }
+        if split == Split::Test {
+            ratings_uris.push(ratings_map.get("test_liked").unwrap());
+            ratings_uris.push(ratings_map.get("test_3").unwrap());
+            ratings_uris.push(ratings_map.get("test_disliked").unwrap());
         }
 
         let orchestrator = Orchestrator::new(
@@ -77,7 +89,9 @@ impl Harness {
 
         let output_base_dir = get_bin_dir().unwrap().to_string_lossy().into_owned();
 
-        let type_str = if training { "training" } else { "validation" };
+        let type_str = if split==Split::Train { "training" }
+            else if split==Split::Val { "validation" }
+            else {"test"};
         let type_dir = if use_full {""} else {"tiny3/"};
 
         let parquet_output_path = format!(
@@ -89,8 +103,10 @@ impl Harness {
             r_ver
         );
 
-        let ratings_positive_uri = if training {ratings_map.get("train_liked").unwrap().clone()}
-            else {ratings_map.get("val_liked").unwrap().clone()};
+        let ratings_positive_uri =
+            if split==Split::Train {ratings_map.get("train_liked").unwrap().clone()}
+            else if split==Split::Val {ratings_map.get("val_liked").unwrap().clone()}
+            else {ratings_map.get("test_liked").unwrap().clone()};
 
         Self {
             orchestrator: orchestrator,
@@ -135,25 +151,35 @@ mod write_reranker_parquet {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_write_parquet_train_full() -> Result<(), Box<dyn std::error::Error>> {
-        run_write_parquet(true, true).await
+        run_write_parquet(Split::Train, true).await
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_write_parquet_validation_full() -> Result<(), Box<dyn std::error::Error>> {
-        run_write_parquet(false, true).await
+        run_write_parquet(Split::Val, true).await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_write_parquet_test_full() -> Result<(), Box<dyn std::error::Error>> {
+        run_write_parquet(Split::Test, true).await
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_write_parquet_train_tiny3() -> Result<(), Box<dyn std::error::Error>> {
-        run_write_parquet(true, false).await
+        run_write_parquet(Split::Train, false).await
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_write_parquet_validation_tiny3() -> Result<(), Box<dyn std::error::Error>> {
-        run_write_parquet(false, false).await
+        run_write_parquet(Split::Val, false).await
     }
 
-    async fn run_write_parquet(training: bool, use_full: bool) -> Result<(), Box<dyn std::error::Error>> {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_write_parquet_test_tiny3() -> Result<(), Box<dyn std::error::Error>> {
+        run_write_parquet(Split::Test, false).await
+    }
+
+    async fn run_write_parquet(split: Split, use_full: bool) -> Result<(), Box<dyn std::error::Error>> {
         /*
         for the re-ranker training, we will write into the parquet file :
             user_id, movie_id, rating, timestamp, candidate_ids, candidate_scores,
@@ -163,7 +189,7 @@ mod write_reranker_parquet {
         */
 
         // Setup runs here
-        let harness = Harness::new(training, use_full).await;
+        let harness = Harness::new(split, use_full).await;
 
         let top_k = harness.orchestrator.top_k;
         let query_model_version = Some(VersionChoice::Version(harness.q_ver as i64));
