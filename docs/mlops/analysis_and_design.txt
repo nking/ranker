@@ -47,4 +47,35 @@ this will reduce the model RAM which makes loading of the model faster, and it w
 workflow of the recommendation system.
 
 
+---------------------------------------
 
+runtime complexity of the final Graph GATv2 ranker:
+
+   let 
+     K = number of attention heads = 4
+     H^(i) = K * d_k = hidden dimension = 96
+     V = number of nodes
+         = max_history + num_candidates = 100 + 100 = 200 
+     E = edges of graph
+         directed bipartite (history to candidates + self loops)
+           = 100 X 100 + 200 = 10,200
+         bi-drectional bipartite = 2 * (100 * 100) + 200 = 20,200
+         if we had fully connected, that would be 200 x 200 = 40,000 edges
+     F_0 = input embedding dimension
+         = 16
+     L - number of layers 
+
+   O( sum_{l=1,L}( V * F^(l)_in * H^(l) + E * H^(l) ) )
+
+     node FLOPs: 8,601,600 (details omitted)
+     edge FLOPs: 23,755,200 (details omitted)
+     total FLOPs: 32.36 MFLOPs
+     memory traffic: 48.32 MB (details omitted)
+     arithmetic intensity: 0.67 FLOPs/Byte
+
+     * the 2nd term is the bottleneck because of E
+     and it is ~ 60% of the total FLOPs and ~ 98% of total memory bandwidth.
+     * if needed to reduce memory, could reduce the max_history from 100 to 30-ish
+       woud reduce E linearly and hence the runtime complexity.
+
+     this is memory bound 
