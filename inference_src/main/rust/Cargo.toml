@@ -9,6 +9,10 @@ name = "inference_engine"
 #  Add "rlib" so Rust tests can import the code
 crate-type = ["cdylib", "rlib"]
 
+#remove this when done debugging
+[profile.dev.build-override]
+debug = true
+
 [dependencies]
 numpy = "0.29"
 ndarray = "0.17"
@@ -123,10 +127,6 @@ path="../../test/rust/test/user_db_test.rs"
 [[test]]
 name = "movie_db_tests"
 path="../../test/rust/test/movie_db_test.rs"
-
-[[test]]
-name = "calc_metrics_2_tests"
-path="../../test/rust/test/calc_metrics_2_test.rs"
 
 [[test]]
 name = "bayesian_tests"

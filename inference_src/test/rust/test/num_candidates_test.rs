@@ -39,7 +39,7 @@ impl TestHarness {
         let query_uri = config.query_uri.clone();
         let ranker_uri = config.ranker_uri.clone();
         let ranker_n_local_devices = config.ranker_n_local_devices;
-        let top_k = config.top_k;
+        let top_k = config.ranker_top_k;
         let user_db_path: PathBuf = config.user_db_path.clone();
         let persisted_index_path : PathBuf = config.persisted_index_path.clone();
         let _params_json_uri : String = config.params_json_path;

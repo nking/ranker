@@ -48,7 +48,7 @@ impl TestHarness {
         let ranker_uri = config.ranker_uri.clone();
         let candidate_uri = config.candidate_uri.clone();
         let ranker_n_local_devices = config.ranker_n_local_devices;
-        let top_k = config.top_k;
+        let top_k = config.ranker_top_k;
         let user_db_path: PathBuf = config.user_db_path.clone();
         let persisted_index_path : PathBuf = config.persisted_index_path.clone();
         let _params_json_uri : String = config.params_json_path;
@@ -283,7 +283,7 @@ mod post_training_analysis {
         let num_candidates = ranker_metadata.num_candidates;
 
         // calculate top_k=20 for retrieval then ranker
-        let top_k = harness.orchestrator.top_k;
+        let top_k = harness.orchestrator.ranker_top_k;
         let embed_len = ranker_metadata.embed_len;
 
         // calc retrieval metrics @20 and ranker metrics @20

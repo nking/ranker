@@ -53,7 +53,7 @@ impl AppRunner {
             &self.config.movie_embeddings_path,
             ratings_uris_refs,
             self.config.ranker_n_local_devices,
-            self.config.top_k,
+            self.config.ranker_top_k,
             self.config.persisted_index_path,
             self.config.user_db_path
         ).await?;

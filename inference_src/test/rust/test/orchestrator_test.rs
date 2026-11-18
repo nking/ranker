@@ -27,7 +27,7 @@ impl TestHarness {
         let query_uri = config.query_uri.clone();
         let ranker_uri = config.ranker_uri.clone();
         let ranker_n_local_devices = config.ranker_n_local_devices;
-        let top_k = config.top_k;
+        let ranker_top_k = config.ranker_top_k;
         let user_db_path: PathBuf = config.user_db_path.clone();
         let persisted_index_path : PathBuf = config.persisted_index_path.clone();
         let _params_json_uri : String = config.params_json_path;
@@ -57,7 +57,7 @@ impl TestHarness {
             &movie_embeddings_uri,
             ratings_uris,
             ranker_n_local_devices,
-            top_k,
+            ranker_top_k,
             persisted_index_path,
             user_db_path
         ).await.unwrap();
@@ -117,7 +117,7 @@ mod orchestrator_tests {
         //approx_nearest_neighbors
         // ranks_only
 
-        let top_k = harness.orchestrator.top_k;
+        let top_k = harness.orchestrator.ranker_top_k;
         let query_model_version = Some(VersionChoice::Version(1));
         let ranker_model_version = Some(VersionChoice::Version(1));
 
@@ -239,10 +239,10 @@ mod orchestrator_tests {
         assert!(results.is_ok(), "Prediction failed: {:?}", results.err());
         let ranked_movies = results.unwrap().into_inner();
 
-        assert_eq!(harness.orchestrator.top_k as u32, ranked_movies.k);
+        assert_eq!(harness.orchestrator.ranker_top_k as u32, ranked_movies.k);
         assert_eq!(ranked_movies.user_ids.len(), 1);
-        assert_eq!(ranked_movies.scores.len(), 1 * harness.orchestrator.top_k);
-        assert_eq!(ranked_movies.movie_ids.len(), 1 * harness.orchestrator.top_k);
+        assert_eq!(ranked_movies.scores.len(), 1 * harness.orchestrator.ranker_top_k);
+        assert_eq!(ranked_movies.movie_ids.len(), 1 * harness.orchestrator.ranker_top_k);
 
         assert_eq!(user_ids[0], ranked_movies.user_ids[0]);
 
@@ -269,10 +269,10 @@ mod orchestrator_tests {
         assert!(results.is_ok(), "Prediction failed: {:?}", results.err());
         let ranked_movies = results.unwrap().into_inner();
 
-        assert_eq!(harness.orchestrator.top_k as u32, ranked_movies.k);
+        assert_eq!(harness.orchestrator.ranker_top_k as u32, ranked_movies.k);
         assert_eq!(ranked_movies.user_ids.len(), user_ids.len());
-        assert_eq!(ranked_movies.scores.len(), user_ids.len() * harness.orchestrator.top_k);
-        assert_eq!(ranked_movies.movie_ids.len(), user_ids.len() * harness.orchestrator.top_k);
+        assert_eq!(ranked_movies.scores.len(), user_ids.len() * harness.orchestrator.ranker_top_k);
+        assert_eq!(ranked_movies.movie_ids.len(), user_ids.len() * harness.orchestrator.ranker_top_k);
 
         println!("Got {} recommendations!", ranked_movies.movie_ids.len());
         for i in 0..ranked_movies.movie_ids.len() {

@@ -15,9 +15,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/tensorflow_serving/config/model_server_config.proto",
                 "proto/tensorflow_serving/apis/get_model_status.proto",
                 "proto/tensorflow_serving/apis/model_service.proto",
+                "proto/triton/grpc_service.proto",
                 "proto/recommender/recommender.proto",
             ],
-            &["proto/"], // The root include directory
+            &["proto/", "proto/triton/"], // The root include directory
         )?;
     Ok(())
 }

@@ -17,6 +17,7 @@ mod app_config_tests {
               "query_uri": "http://172.17.0.1:8500",
               "ranker_uri": "http://172.17.0.1:8510",
               "candidate_uri": "http://172.17.0.1:8520",
+              "reranker_uri": "http://172.17.0.1:8530",
               "params_json_path": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/assets.extra/metadata_batch.json",
               "movie_embeddings_path": "../../../src/test/resources/data/bi-encoder/1/movie_emb-00000-of-00001.parquet",
               "movie_tiers_path": "../../../src/test/resources/data/movie_tiers.json",
@@ -44,7 +45,7 @@ mod app_config_tests {
 
         let config = AppConfig::load_from_file(temp_file.path().to_str().unwrap()).unwrap();
 
-        assert_eq!(config.top_k, 20);
+        assert_eq!(config.ranker_top_k, 20);
         assert_eq!(config.ranker_n_local_devices, 1);
         assert_eq!(config.ratings_uris.len(), 6);
         assert_eq!(config.server_addr.port(), 50051);
@@ -54,7 +55,7 @@ mod app_config_tests {
     pub fn test_default_config() {
         let config_path = get_config_json_uri();
         let config = AppConfig::load_from_file(&config_path).unwrap();
-        assert_eq!(config.top_k, 20);
+        assert_eq!(config.ranker_top_k, 20);
         assert_eq!(config.ranker_n_local_devices, 1);
         assert_eq!(config.ratings_uris.len(), 6);
         assert_eq!(config.server_addr.port(), 50051);

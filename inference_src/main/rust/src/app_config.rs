@@ -27,6 +27,10 @@ pub struct AppConfig {
     #[arg(long, env = "CANDIDATE_URI", default_value = "http://172.17.0.1:8520")]
     pub candidate_uri: String,
 
+    /// URI for the triton served reranker Model
+    #[arg(long, env = "RERANKER_URI", default_value = "http://172.17.0.1:8530")]
+    pub reranker_uri: String,
+
     /// Path to the hyperparameters JSON file
     #[arg(long, env = "PARAMS_JSON_PATH")]
     pub params_json_path: String,
@@ -47,8 +51,8 @@ pub struct AppConfig {
     pub ranker_n_local_devices : usize,
 
     // the number of candidates to choose from the ANN search and to rank
-    #[arg(long, env = "TOP_K", default_value_t = 20)]
-    pub top_k : usize,
+    #[arg(long, env = "RANKER_TOP_K", default_value_t = 20)]
+    pub ranker_top_k : usize,
 
     // path to use for the ANN embeddings indexer persistence.  the directory of the file must
     // already exist and be writable by this app

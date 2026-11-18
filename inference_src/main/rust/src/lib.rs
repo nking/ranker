@@ -21,6 +21,8 @@ pub mod app_config;
 pub mod ranker_model_metadata;
 pub mod query_model_metadata;
 
+pub mod reranker_model_metadata;
+
 pub mod pb {
     tonic::include_proto!("recommender");
 }
@@ -33,4 +35,8 @@ pub mod tensorflow {
         tonic::include_proto!("tensorflow.serving");
     }
     tonic::include_proto!("tensorflow");
+}
+
+pub mod triton {
+    tonic::include_proto!("inference");
 }

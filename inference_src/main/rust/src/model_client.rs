@@ -20,6 +20,11 @@ use crate::tensorflow::serving::model_service_client::ModelServiceClient;
 use crate::tensorflow::serving::model_spec::VersionChoice;
 use crate::tensorflow::serving::model_version_status::State;
 
+use crate::triton::{
+    grpc_inference_service_client::GrpcInferenceServiceClient,
+    model_infer_request::{InferInputTensor, InferRequestedOutputTensor},
+    InferTensorContents, ModelInferRequest, ModelReadyRequest
+};
 const CLIENT_CONNECT_TIMEOUT: u64 = 5;
 
 #[derive(Debug)]
@@ -37,6 +42,13 @@ pub struct CandidateModelClient {
 
 #[derive(Debug)]
 pub struct RankerModelClient {
+    pub client: PredictionServiceClient<Channel>,
+    pub metadata: RankerModelMetadata,
+    pub model_service_client: ModelServiceClient<Channel>,
+}
+
+#[derive(Debug)]
+pub struct ReRankerModelClient {
     pub client: PredictionServiceClient<Channel>,
     pub metadata: RankerModelMetadata,
     pub model_service_client: ModelServiceClient<Channel>,
@@ -254,6 +266,7 @@ impl RankerModelClient {
 
 }
 
+
 impl CandidateModelClient {
     pub async fn new(uri: String, embed_len: usize) -> Self {
         let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
@@ -311,6 +324,46 @@ impl CandidateModelClient {
         }
     }
 }
+
+/*
+impl RerankerModelClient {
+    pub async fn new(uri: String, metadata: RerankerModelMetadata) -> Self {
+        let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
+
+        let channel = endpoint
+            //.max_decoding_message_size(10 * 1024 * 1024) // 10MB example
+            .connect_timeout(Duration::from_secs(CLIENT_CONNECT_TIMEOUT))
+            .connect()
+            .await.expect("Failed to connect to triton for reranker model");
+
+        editing ...
+        // this can handle a RankedMovies response from a UsersRequest of 700_000 user_ids
+        const MAX_MESSAGE_SIZE: usize = 256 * 1024 * 1024;
+        let triton_client = GrpcInferenceServiceClient::new(channel.clone())
+            .max_decoding_message_size(MAX_MESSAGE_SIZE)
+            .max_encoding_message_size(MAX_MESSAGE_SIZE);
+
+        // Channel is an Arc-backed handle; cloning it shares the exact same TCP connection
+        Self {
+            client: triton_client,
+            metadata: metadata,
+            model_service_client: ModelServiceClient::new(channel),
+        }
+    }
+
+    pub async fn get_latest_model_version(
+        &self,
+    ) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        let client = self.model_service_client.clone();
+
+        let mut versions = get_all_model_versions("graph-ranker", client).await
+            .expect("Failed to fetch graph-ranker model versions");
+
+        versions.sort_unstable();
+        Ok(versions[versions.len() - 1])
+    }
+}
+*/
 
 async fn get_all_model_versions(
     model_name: &str,

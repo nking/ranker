@@ -47,7 +47,7 @@ impl Harness {
         let query_uri = config.query_uri.clone();
         let ranker_uri = config.ranker_uri.clone();
         let ranker_n_local_devices = config.ranker_n_local_devices;
-        let top_k = config.top_k;
+        let top_k = config.ranker_top_k;
         let user_db_path: PathBuf = config.user_db_path.clone();
         let persisted_index_path : PathBuf = config.persisted_index_path.clone();
         let _params_json_uri : String = config.params_json_path;
@@ -191,7 +191,7 @@ mod write_reranker_parquet {
         // Setup runs here
         let harness = Harness::new(split, use_full).await;
 
-        let top_k = harness.orchestrator.top_k;
+        let ranker_top_k = harness.orchestrator.ranker_top_k;
         let query_model_version = Some(VersionChoice::Version(harness.q_ver as i64));
         let ranker_model_version = Some(VersionChoice::Version(harness.r_ver as i64));
 
@@ -250,12 +250,12 @@ mod write_reranker_parquet {
             Field::new("timestamp", DataType::Int64, false),
             Field::new(
                 "candidate_ids",
-                DataType::FixedSizeList(cand_id_item_field.clone(), top_k as i32),
+                DataType::FixedSizeList(cand_id_item_field.clone(), ranker_top_k as i32),
                 false,
             ),
             Field::new(
                 "candidate_scores",
-                DataType::FixedSizeList(float_item_field.clone(), top_k as i32),
+                DataType::FixedSizeList(float_item_field.clone(), ranker_top_k as i32),
                 false,
             ),
             Field::new(
@@ -265,7 +265,7 @@ mod write_reranker_parquet {
             ),
             Field::new(
                 "candidate_embeddings",
-                DataType::FixedSizeList(cand_emb_inner_field.clone(), top_k as i32),
+                DataType::FixedSizeList(cand_emb_inner_field.clone(), ranker_top_k as i32),
                 false,
             ),
         ]));
@@ -308,22 +308,22 @@ mod write_reranker_parquet {
             assert_eq!(chunk_users, rmar.user_ids.as_slice());
 
             let n_chunk = chunk_users.len();
-            debug_assert_eq!(rmar.movie_ids.len(), n_chunk * top_k);
-            debug_assert_eq!(rmar.scores.len(), n_chunk * top_k);
+            debug_assert_eq!(rmar.movie_ids.len(), n_chunk * ranker_top_k);
+            debug_assert_eq!(rmar.scores.len(), n_chunk * ranker_top_k);
             debug_assert_eq!(rmar.user_reprs.len(), n_chunk * out_features);
-            debug_assert_eq!(rmar.cand_reprs.len(), n_chunk * top_k * out_features);
+            debug_assert_eq!(rmar.cand_reprs.len(), n_chunk * ranker_top_k * out_features);
 
             // 4. Build Arrow arrays for this batch and append to the Parquet file
             let candidate_ids_list = FixedSizeListArray::try_new(
                 cand_id_item_field.clone(),
-                top_k as i32,
+                ranker_top_k as i32,
                 Arc::new(Int32Array::from(rmar.movie_ids)),
                 None,
             )?;
 
             let candidate_scores_list = FixedSizeListArray::try_new(
                 float_item_field.clone(),
-                top_k as i32,
+                ranker_top_k as i32,
                 Arc::new(Float32Array::from(rmar.scores)),
                 None,
             )?;
@@ -343,7 +343,7 @@ mod write_reranker_parquet {
             )?;
             let candidate_emb_list = FixedSizeListArray::try_new(
                 cand_emb_inner_field.clone(),
-                top_k as i32,
+                ranker_top_k as i32,
                 Arc::new(cand_emb_flat_vecs),
                 None,
             )?;
@@ -376,7 +376,7 @@ mod write_reranker_parquet {
             &movie_ids,
             &ratings,
             &timestamps,
-            top_k,
+            ranker_top_k,
             out_features,
         )?;
 
@@ -389,7 +389,7 @@ mod write_reranker_parquet {
         expected_movie_ids: &[i32],
         expected_ratings: &[i32],
         expected_timestamps: &[i64],
-        top_k: usize,
+        ranker_top_k: usize,
         out_features: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let file = File::open(parquet_path)?;
@@ -476,7 +476,7 @@ mod write_reranker_parquet {
                     .as_any()
                     .downcast_ref::<Int32Array>()
                     .expect("candidate_ids inner elements must be Int32Array");
-                assert_eq!(row_cand_ids.len(), top_k);
+                assert_eq!(row_cand_ids.len(), ranker_top_k);
 
                 // 3. Verify candidate_scores type and length (top_k)
                 let row_cand_scores_arr = cand_scores_col.value(row_idx);
@@ -484,7 +484,7 @@ mod write_reranker_parquet {
                     .as_any()
                     .downcast_ref::<Float32Array>()
                     .expect("candidate_scores inner elements must be Float32Array");
-                assert_eq!(row_cand_scores.len(), top_k);
+                assert_eq!(row_cand_scores.len(), ranker_top_k);
                 assert!(
                     row_cand_scores.iter().all(|v| v.map_or(false, |x| x.is_finite())),
                     "candidate_scores contains non-finite values at row {}",
@@ -510,9 +510,9 @@ mod write_reranker_parquet {
                     .as_any()
                     .downcast_ref::<FixedSizeListArray>()
                     .expect("candidate_embeddings outer element must be FixedSizeListArray");
-                assert_eq!(row_cand_embs_list.len(), top_k);
+                assert_eq!(row_cand_embs_list.len(), ranker_top_k);
 
-                for k_idx in 0..top_k {
+                for k_idx in 0..ranker_top_k {
                     let inner_emb_arr = row_cand_embs_list.value(k_idx);
                     let inner_emb = inner_emb_arr
                         .as_any()

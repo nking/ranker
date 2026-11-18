@@ -4,7 +4,7 @@ project to create a ranker model for the mid-tier
 in a 3 part recommendation system.  Part 1 is
 the Two-tower bi-encoder + Scann or USearch for retrieval.
 part 2 is the ranker (list-wise cross-encoder) in this project.
-part 3 is the re-ranker (fine-tuned pretrained list-wise cross-encoder).
+part 3 is the reranker (fine-tuned pretrained list-wise cross-encoder).
 
 this project will create a ranker from
 the Jax AI Stack + Rax.

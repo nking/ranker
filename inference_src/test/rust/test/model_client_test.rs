@@ -147,7 +147,7 @@ mod client_tests {
 
         let client = RankerModelClient::new(config.ranker_uri.clone(), ranker_metadata.clone()).await;
 
-        let _top_k = config.top_k;
+        let _top_k = config.ranker_top_k;
         let _user_db_path: PathBuf = config.user_db_path.clone();
         let _persisted_index_path : PathBuf = config.persisted_index_path.clone();
 

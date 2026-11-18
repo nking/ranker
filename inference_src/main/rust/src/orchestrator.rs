@@ -44,7 +44,7 @@ pub struct Orchestrator {
     #[allow(dead_code)]
     ranker_n_local_devices : usize,
     persisted_index_path: PathBuf,
-    pub top_k : usize, // the number of movie_ids that inference will return for a user
+    pub ranker_top_k: usize, // the number of movie_ids that inference will return for a user
 }
 
 impl Orchestrator {
@@ -140,7 +140,7 @@ impl Orchestrator {
             user_history: user_history,
             ranker_n_local_devices: ranker_n_local_devices,
             persisted_index_path: persisted_index_path.as_ref().to_path_buf(),
-            top_k: top_k,
+            ranker_top_k: top_k,
             user_db: user_db,
         })
     }
@@ -597,14 +597,14 @@ impl Orchestrator {
         let num_candidates = ranker_metadata.num_candidates;
 
         let (top_movie_ids, top_scores) = get_top_k_desc_scores(
-            & mut ranked_movies.movie_ids, &mut ranked_movies.scores, num_candidates, self.top_k
+            & mut ranked_movies.movie_ids, &mut ranked_movies.scores, num_candidates, self.ranker_top_k
         );
 
         Ok(Response::new( RankedMovies{
             user_ids: user_ids,
             movie_ids: top_movie_ids,
             scores: top_scores,
-            k: self.top_k as u32,
+            k: self.ranker_top_k as u32,
         }))
     }
 
@@ -646,14 +646,14 @@ impl Orchestrator {
         let num_candidates = ranker_metadata.num_candidates;
 
         let (top_movie_ids, top_scores) = get_top_k_desc_scores(
-            & mut ranked_movies.movie_ids, &mut ranked_movies.scores, num_candidates, self.top_k
+            & mut ranked_movies.movie_ids, &mut ranked_movies.scores, num_candidates, self.ranker_top_k
         );
 
         Ok(Response::new( RankedMovies{
             user_ids: user_ids,
             movie_ids: top_movie_ids,
             scores: top_scores,
-            k: self.top_k as u32,
+            k: self.ranker_top_k as u32,
         }))
     }
 
@@ -719,13 +719,13 @@ impl Orchestrator {
             n_users,
             & mut ranked_movies_and_reprs.movie_ids, &mut ranked_movies_and_reprs.scores,
             & mut ranked_movies_and_reprs.cand_reprs,
-            num_candidates, self.top_k, out_features
+            num_candidates, self.ranker_top_k, out_features
         );
 
         debug_assert_eq!(user_ids.len(), n_users);
-        debug_assert_eq!(top_movie_ids.len(), self.top_k * n_users);
-        debug_assert_eq!(top_scores.len(), self.top_k * n_users);
-        debug_assert_eq!(top_cand_repr.len(), self.top_k * n_users * out_features);
+        debug_assert_eq!(top_movie_ids.len(), self.ranker_top_k * n_users);
+        debug_assert_eq!(top_scores.len(), self.ranker_top_k * n_users);
+        debug_assert_eq!(top_cand_repr.len(), self.ranker_top_k * n_users * out_features);
         debug_assert_eq!(ranked_movies_and_reprs.user_reprs.len(), n_users  * out_features);
 
         Ok(Response::new( RankedMoviesAndRepr {
@@ -734,7 +734,7 @@ impl Orchestrator {
             scores: top_scores,
             user_reprs: ranked_movies_and_reprs.user_reprs,
             cand_reprs: top_cand_repr,
-            k: self.top_k as u32,
+            k: self.ranker_top_k as u32,
         }))
     }
 
@@ -1059,7 +1059,7 @@ impl RecommenderService for Orchestrator {
             user_ids: user_reqs.user_ids,
             movie_ids: final_candidate_ids,
             scores: final_scores,
-            k: self.top_k as u32
+            k: self.ranker_top_k as u32
         }))
     }
 
@@ -1099,7 +1099,7 @@ impl RecommenderService for Orchestrator {
             return self._predict_diagnostic(Request::new(user_reqs.clone())).await;
         }
 
-        let top_k = self.top_k;
+        let top_k = self.ranker_top_k;
 
         // reserve response arrays:
         let mut final_candidate_ids: Vec<i32> = Vec::with_capacity(n_users * top_k);
@@ -1131,8 +1131,8 @@ impl RecommenderService for Orchestrator {
             let resp_i = self._predict_diagnostic(Request::new(req_i)).await?;
             let ranked_movies_i = resp_i.into_inner();
 
-            debug_assert_eq!(ranked_movies_i.k as usize, self.top_k);
-            debug_assert_eq!(ranked_movies_i.movie_ids.len(), _n_users * self.top_k);
+            debug_assert_eq!(ranked_movies_i.k as usize, self.ranker_top_k);
+            debug_assert_eq!(ranked_movies_i.movie_ids.len(), _n_users * self.ranker_top_k);
 
             final_candidate_ids.extend(ranked_movies_i.movie_ids);
             final_scores.extend(ranked_movies_i.scores);
