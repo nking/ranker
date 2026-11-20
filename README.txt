@@ -273,7 +273,6 @@ except ImportError as e:
     print('FAILED: Missing libraries:', e)
 "
 
-
 -----------------------------------------------------------------------
 Running Unit Tests:
 
@@ -337,3 +336,48 @@ Running k8s/kind/KFP scripts:
 
   or 
   python3 run_app_trainer_kfp.sh  
+
+-----------------------------------------------------------------------
+Building the rust py03 bindings reranker prompt wheel
+-----------------------------------------------------
+   for use here in inference and in project reranker
+   for training to keep the prompt processing the
+   same for train and inference.
+
+   *NOTE: after any change to Cargo.toml run
+       cargo check -p reranker_prompt --features python
+
+ cargo check -p reranker_prompt --features python
+
+to build the wheel on your computer:
+
+    make sure the project venv is activated
+
+    cd inference_src
+
+    This only needs to be done once in directory inference_src:
+      pip install "maturin[patchelf]>=1.14" ziglang
+      cargo install cargo-zigbuild
+
+    # Build release wheel targeting Kaggle's glibc 2.39 and Python 3.12+ (abi3)
+    maturin build --release --locked --zig --compatibility manylinux_2_39
+
+    # Check the output wheel and size
+    ls -lh target/wheels/reranker_prompt-*.whl
+
+    # Copy into your sibling reranker repo (clean old wheels first so the glob matches one file)
+    for example, if reranker is a sibling directory to the ranker project:
+        rm -f ../../reranker/wheels/reranker_prompt-*.whl
+        cp target/wheels/reranker_prompt-*.whl ../../reranker/wheels/
+
+   To update the reranker conda install so it will have the wheel too:
+   # With your `reranker` conda env activated:
+   cd ../../reranker
+   python -m pip install --force-reinstall --no-deps wheels/reranker_prompt-*.whl
+
+   # Verify the import and check where it loaded from
+   python -c "import reranker_prompt; print(reranker_prompt.__file__, reranker_prompt.RerankerPromptFormatter.candidate_labels(5))"
+
+   subsequent re-builds of the wheel and copies to reranker/wheels/
+   can use this for the reinstall in the conda environment in the ../reranker directory:
+       pip install --force-reinstall --no-deps

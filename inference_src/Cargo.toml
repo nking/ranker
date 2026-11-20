@@ -8,3 +8,7 @@ members = [
 # Remove this when done debugging (workspace profiles must live at the workspace root)
 [profile.dev.build-override]
 debug = true
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
