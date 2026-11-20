@@ -1,69 +1,25 @@
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::{Error, ErrorKind, Result};
+use std::io::Result;
 use std::path::Path;
+use std::sync::Arc;
 
-use parquet::file::reader::{FileReader, SerializedFileReader};
-use parquet::record::Field;
+use reranker_prompt::movie_catalog::MovieCatalog;
 use tonic::Request;
 
-use crate::tensorflow::serving::model_spec::VersionChoice;
 use crate::pb::MoviesRequest;
+use crate::tensorflow::serving::model_spec::VersionChoice;
 
-#[derive(Debug)]
-pub struct MovieDb {
-    // In-memory lookup table for O(1) access
-    // Maps movie_id -> genres
-    movies: HashMap<i32, String>,
+/// Extension trait adapting `MovieCatalog` to build gRPC `MoviesRequest` payloads
+/// without coupling the lean `reranker_prompt` crate to `tonic` or protobufs.
+pub trait MovieCatalogRequestExt {
+    fn build_movies_request(
+        &self,
+        movie_ids: &[i32],
+        model_version: Option<VersionChoice>,
+    ) -> Option<Request<MoviesRequest>>;
 }
 
-impl MovieDb {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let file = File::open(path)?;
-
-        // Initialize the Parquet reader
-        let reader = SerializedFileReader::new(file)
-            .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Failed to read Parquet: {}", e)))?;
-
-        let mut movies = HashMap::new();
-
-        // Iterate through all rows in the Parquet file
-        let iter = reader.get_row_iter(None)
-            .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
-
-        for record_result in iter {
-            let row = record_result.map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
-
-            let mut movie_id = 0;
-            let mut genres = String::new();
-
-            // Robust column extraction by name (ignores column order)
-            for (name, field) in row.get_column_iter() {
-                match name.as_str() {
-                    "movie_id" => {
-                        // Handle both standard integer types just in case
-                        match field {
-                            Field::Int(val) => movie_id = *val,
-                            Field::Long(val) => movie_id = *val as i32,
-                            _ => {}
-                        }
-                    }
-                    "genres" => {
-                        if let Field::Str(val) = field {
-                            genres = val.clone();
-                        }
-                    }
-                    _ => {} // Ignore any extra columns
-                }
-            }
-
-            movies.insert(movie_id, genres);
-        }
-
-        Ok(Self { movies })
-    }
-
-    pub fn get_request(
+impl MovieCatalogRequestExt for MovieCatalog {
+    fn build_movies_request(
         &self,
         movie_ids: &[i32],
         model_version: Option<VersionChoice>,
@@ -72,36 +28,67 @@ impl MovieDb {
             return None;
         }
 
-        // Pre-allocate vectors to avoid reallocation overhead during the loop
-        let capacity: usize = movie_ids.len();
+        let capacity = movie_ids.len();
         let mut valid_movie_ids: Vec<i32> = Vec::with_capacity(capacity);
         let mut genres: Vec<String> = Vec::with_capacity(capacity);
 
-        // Fetch genres from our in-memory HashMap
-        for id in movie_ids {
-            if let Some(genre_str) = self.movies.get(id) {
-                valid_movie_ids.push(*id);
-                genres.push(genre_str.clone()); // We must clone to own the string for the gRPC request
+        for &id in movie_ids {
+            if let Some(genre_str) = self.get_genres(id) {
+                valid_movie_ids.push(id);
+                genres.push(genre_str.to_owned());
             }
         }
 
-        // If none of the requested IDs were valid, return None
         if valid_movie_ids.is_empty() {
             return None;
         }
 
         let n_movies = valid_movie_ids.len() as u32;
-
-        let version_num: Option<i64> = match model_version {
+        let version_num = match model_version {
             Some(VersionChoice::Version(v)) => Some(v),
-            _ => None
+            _ => None,
         };
 
         Some(Request::new(MoviesRequest {
             movie_ids: valid_movie_ids,
-            genres, // moved into the struct
+            genres,
             n_movies,
             candidate_model_version: version_num,
         }))
+    }
+}
+
+/// Thin shared-ownership facade over `Arc<MovieCatalog>` preserving the existing
+/// `MovieDb` API while sharing a single in-memory catalog with `RerankerPromptFormatter`.
+#[derive(Debug, Clone)]
+pub struct MovieDb {
+    catalog: Arc<MovieCatalog>,
+}
+
+impl MovieDb {
+    /// Loads `movies.parquet` directly (convenient for standalone tests and callers).
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let catalog = MovieCatalog::from_parquet(path)?;
+        Ok(Self {
+            catalog: Arc::new(catalog),
+        })
+    }
+
+    /// Reuses an existing `Arc<MovieCatalog>` with zero duplicate Parquet parsing or memory.
+    pub fn from_catalog(catalog: Arc<MovieCatalog>) -> Self {
+        Self { catalog }
+    }
+
+    /// Exposes the underlying shared catalog handle for downstream components (e.g., reranker).
+    pub fn catalog(&self) -> Arc<MovieCatalog> {
+        Arc::clone(&self.catalog)
+    }
+
+    pub fn get_request(
+        &self,
+        movie_ids: &[i32],
+        model_version: Option<VersionChoice>,
+    ) -> Option<Request<MoviesRequest>> {
+        self.catalog.build_movies_request(movie_ids, model_version)
     }
 }

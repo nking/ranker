@@ -1,10 +1,9 @@
-
 pub mod user_history;
 pub mod user_db;
 
 pub mod movie_db;
 pub mod recommended_movies;
-pub mod graph_builder;
+pub mod ranker_graph_builder;
 
 pub mod bayesian;
 pub mod embeddings_util;
@@ -22,6 +21,7 @@ pub mod ranker_model_metadata;
 pub mod query_model_metadata;
 
 pub mod reranker_model_metadata;
+pub mod reranker_prompt_formatter;
 
 pub mod pb {
     tonic::include_proto!("recommender");

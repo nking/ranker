@@ -6,7 +6,7 @@ mod client_tests {
     use serde_json::Value;
     use inference_engine::app_config::AppConfig;
     use inference_engine::model_client::{CandidateModelClient, QueryModelClient, RankerModelClient};
-    use inference_engine::graph_builder::{create_fake_padded_super_batch, JraphGraph};
+    use inference_engine::ranker_graph_builder::{create_fake_padded_super_batch, JraphGraph};
     use inference_engine::tensorflow::serving::model_spec::VersionChoice;
     //use super::*;
     // Assuming your UserRequest is accessible here

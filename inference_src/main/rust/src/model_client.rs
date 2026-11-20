@@ -3,10 +3,10 @@ use std::error::Error;
 use std::time::Duration;
 use tonic::transport::{Channel, Endpoint};
 // use crate:: means look inside this project
-use crate::graph_builder::{JraphGraph};
+use crate::ranker_graph_builder::{JraphGraph};
 use crate::pb::{UsersRequest, MoviesRequest};
 use crate::ranker_model_metadata::RankerModelMetadata;
-
+use crate::reranker_model_metadata::RerankerModelMetadata;
 use crate::tensorflow::{
     TensorProto, DataType, TensorShapeProto,
     tensor_shape_proto::Dim,
@@ -20,11 +20,7 @@ use crate::tensorflow::serving::model_service_client::ModelServiceClient;
 use crate::tensorflow::serving::model_spec::VersionChoice;
 use crate::tensorflow::serving::model_version_status::State;
 
-use crate::triton::{
-    grpc_inference_service_client::GrpcInferenceServiceClient,
-    model_infer_request::{InferInputTensor, InferRequestedOutputTensor},
-    InferTensorContents, ModelInferRequest, ModelReadyRequest
-};
+use crate::triton::{grpc_inference_service_client::GrpcInferenceServiceClient, model_infer_request::{InferInputTensor, InferRequestedOutputTensor}, InferTensorContents, ModelInferRequest, ModelReadyRequest, ModelMetadataRequest};
 const CLIENT_CONNECT_TIMEOUT: u64 = 5;
 
 #[derive(Debug)]
@@ -48,10 +44,9 @@ pub struct RankerModelClient {
 }
 
 #[derive(Debug)]
-pub struct ReRankerModelClient {
-    pub client: PredictionServiceClient<Channel>,
-    pub metadata: RankerModelMetadata,
-    pub model_service_client: ModelServiceClient<Channel>,
+pub struct RerankerModelClient {
+    pub client: GrpcInferenceServiceClient<Channel>,
+    pub metadata: RerankerModelMetadata,
 }
 
 impl QueryModelClient {
@@ -257,9 +252,9 @@ impl RankerModelClient {
         };
 
         // Extract the three distinct tensors requested by the diagnostic signature
-        let outputs = extract_float_tensor(&mut inner_response.outputs, "outputs")?;
-        let user_reprs = extract_float_tensor(&mut inner_response.outputs, "user_reprs")?;
-        let cand_reprs = extract_float_tensor(&mut inner_response.outputs, "cand_reprs")?;
+        let outputs: Vec<f32> = extract_float_tensor(&mut inner_response.outputs, "outputs")?;
+        let user_reprs: Vec<f32> = extract_float_tensor(&mut inner_response.outputs, "user_reprs")?;
+        let cand_reprs: Vec<f32> = extract_float_tensor(&mut inner_response.outputs, "cand_reprs")?;
 
         Ok((outputs, user_reprs, cand_reprs))
     }
@@ -325,7 +320,6 @@ impl CandidateModelClient {
     }
 }
 
-/*
 impl RerankerModelClient {
     pub async fn new(uri: String, metadata: RerankerModelMetadata) -> Self {
         let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
@@ -336,34 +330,172 @@ impl RerankerModelClient {
             .connect()
             .await.expect("Failed to connect to triton for reranker model");
 
-        editing ...
-        // this can handle a RankedMovies response from a UsersRequest of 700_000 user_ids
         const MAX_MESSAGE_SIZE: usize = 256 * 1024 * 1024;
-        let triton_client = GrpcInferenceServiceClient::new(channel.clone())
+        let triton_client = GrpcInferenceServiceClient::new(channel)
             .max_decoding_message_size(MAX_MESSAGE_SIZE)
             .max_encoding_message_size(MAX_MESSAGE_SIZE);
 
-        // Channel is an Arc-backed handle; cloning it shares the exact same TCP connection
         Self {
             client: triton_client,
-            metadata: metadata,
-            model_service_client: ModelServiceClient::new(channel),
+            metadata,
         }
     }
 
+    // Checks whether the Triton model (and optional specific version) is loaded and ready.
+    pub async fn is_model_ready(
+        &self,
+        model_version: Option<i64>,
+    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+        let req = ModelReadyRequest {
+            name: self.metadata.model_name.clone(),
+            version: model_version.map(|v| v.to_string()).unwrap_or_default(),
+        };
+        let resp = self.client.clone().model_ready(req).await?;
+        Ok(resp.into_inner().ready)
+    }
+
+    /// Queries Triton's ModelMetadata RPC to return the highest available numeric version.
     pub async fn get_latest_model_version(
         &self,
     ) -> Result<i64, Box<dyn Error + Send + Sync>> {
-        let client = self.model_service_client.clone();
+        let req = ModelMetadataRequest {
+            name: self.metadata.model_name.clone(),
+            version: String::new(), // Empty string queries all active versions
+        };
 
-        let mut versions = get_all_model_versions("graph-ranker", client).await
-            .expect("Failed to fetch graph-ranker model versions");
+        let resp = self.client.clone().model_metadata(req).await?.into_inner();
+
+        let mut versions: Vec<i64> = resp
+            .versions
+            .into_iter()
+            .filter_map(|v| v.parse::<i64>().ok())
+            .collect();
+
+        if versions.is_empty() {
+            return Err(format!(
+                "No valid numeric versions found in Triton for model '{}'",
+                self.metadata.model_name
+            )
+                .into());
+        }
 
         versions.sort_unstable();
-        Ok(versions[versions.len() - 1])
+        Ok(*versions.last().unwrap())
+    }
+
+    /// Sends tokenized `[batch_size, seq_len]` inputs to Triton ONNX Runtime and returns flat FP32 scores/logits.
+    pub async fn get_reranked_scores(
+        &self,
+        input_ids: &[i64],
+        attention_mask: &[i64],
+        ranker_embs: &[f64],
+        batch_size: usize,
+        seq_len: usize,
+        model_version: Option<i64>,
+    ) -> Result<Vec<f32>, Box<dyn Error + Send + Sync>> {
+        let expected_len = batch_size * seq_len;
+        if input_ids.len() != expected_len || attention_mask.len() != expected_len {
+            return Err(format!(
+                "Token buffer length mismatch: expected {} ({}x{}), got input_ids={} attention_mask={}",
+                expected_len,
+                batch_size,
+                seq_len,
+                input_ids.len(),
+                attention_mask.len()
+            )
+                .into());
+        }
+
+        let infer_req = build_triton_reranker_infer_request(
+            &self.metadata,
+            input_ids,
+            attention_mask,
+            batch_size,
+            seq_len,
+            model_version,
+        );
+
+        let response = self.client.clone().model_infer(infer_req).await?;
+        let inner = response.into_inner();
+
+        // 1. Fast path: Triton C++ backend places raw little-endian bytes in `raw_output_contents`
+        if let Some(raw_bytes) = inner.raw_output_contents.first() {
+            if !raw_bytes.is_empty() {
+                let mut scores = Vec::with_capacity(raw_bytes.len() / 4);
+                for chunk in raw_bytes.chunks_exact(4) {
+                    let val = f32::from_le_bytes(
+                        chunk.try_into().map_err(|_| "Failed to parse f32 bytes from Triton")?,
+                    );
+                    scores.push(val);
+                }
+                return Ok(scores);
+            }
+        }
+
+        // 2. Fallback path: Protobuf `InferTensorContents.fp32_contents`
+        if let Some(out_tensor) = inner.outputs.first() {
+            if let Some(contents) = &out_tensor.contents {
+                if !contents.fp32_contents.is_empty() {
+                    return Ok(contents.fp32_contents.clone());
+                }
+            }
+        }
+
+        Err("Error: Triton ModelInferResponse contained neither raw_output_contents nor fp32_contents".into())
     }
 }
-*/
+pub fn build_triton_reranker_infer_request(
+    metadata: &RerankerModelMetadata,
+    input_ids: &[i64],
+    attention_mask: &[i64],
+    batch_size: usize,
+    seq_len: usize,
+    model_version: Option<i64>,
+) -> ModelInferRequest {
+    let shape = vec![batch_size as i64, seq_len as i64];
+
+    let input_ids_tensor = InferInputTensor {
+        name: metadata.input_ids_name.clone(),
+        datatype: "INT64".to_string(),
+        shape: shape.clone(),
+        parameters: HashMap::new(),
+        contents: None, // Sent via raw_input_contents for zero-varint overhead
+    };
+
+    let attention_mask_tensor = InferInputTensor {
+        name: metadata.attention_mask_name.clone(),
+        datatype: "INT64".to_string(),
+        shape,
+        parameters: HashMap::new(),
+        contents: None,
+    };
+
+    let requested_output = InferRequestedOutputTensor {
+        name: metadata.output_name.clone(),
+        parameters: HashMap::new(),
+    };
+
+    let encode_i64_le = |slice: &[i64]| -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(slice.len() * 8);
+        for &val in slice {
+            bytes.extend_from_slice(&val.to_le_bytes());
+        }
+        bytes
+    };
+
+    ModelInferRequest {
+        model_name: metadata.model_name.clone(),
+        model_version: model_version.map(|v| v.to_string()).unwrap_or_default(),
+        id: String::new(),
+        parameters: HashMap::new(),
+        inputs: vec![input_ids_tensor, attention_mask_tensor],
+        outputs: vec![requested_output],
+        raw_input_contents: vec![
+            encode_i64_le(input_ids),
+            encode_i64_le(attention_mask),
+        ],
+    }
+}
 
 async fn get_all_model_versions(
     model_name: &str,

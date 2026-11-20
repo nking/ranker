@@ -145,17 +145,29 @@ export_src
 │            └── movie_lens_ranker_export
 |                    └── test_export.py     # script to export an orbax checkpoint to TF SavedModel
 |
-inference_src    # code for the end-to-end inference using rust
-│   ├── pyproject.toml
-    ├── main
-    |   └── rust                      #rust src code for input graph and server code
-    |        └── Cargo.toml
-    |        └── src
-    |        └── proto
-    ├── test
-        └── rust                      #rust test code
-             └── test
-             └── resources            #rust test data
+inference_src                       # code for the end-to-end inference using rust
+│   ├── Cargo.toml                  # Cargo workspace root
+    ├── pyproject.toml              # builds lean `reranker_prompt` wheel (glibc 2.39)
+    ├── reranker_prompt/            # lean crate
+    │   ├── Cargo.toml
+    │   └── src/
+    │       ├── lib.rs
+    │       ├── movie_catalog.rs                      # Reads (movie_id, title, genres) from movies.parquet
+    │       ├── movie_tiers.rs                        # Reads movie_tiers.json (NDJSON)
+    │       ├── reranker_prompt_formatter.rs          # Core formatter + minijinja + rayon
+    │       └── python_bindings.rs                    # Compiled only with `--features python`
+    ├── main/
+    │   └── rust/                                     # `inference_engine`
+    │       ├── Cargo.toml                            #  depends on `reranker_prompt`
+    │       └── src/
+    │           ├── lib.rs                            # list modules and tests
+    │           └── reranker_prompt_formatter.rs      # thin bridge connecting `UserHistory` -> `reranker_prompt`
+    └── test/
+        └── rust/
+            └── test/
+                └── reranker_prompt_formatter_test.rs # NEW: unit + integration tests
+
+
 
 tf_c++_op_src
 

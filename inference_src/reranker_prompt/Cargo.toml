@@ -1,0 +1,25 @@
+[package]
+name = "reranker_prompt"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "reranker_prompt"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+python = ["dep:pyo3", "dep:numpy"]
+
+[dependencies]
+minijinja = "3.1.0"
+parquet = { version = "59.3.3", default-features = false, features = ["snap", "flate2-zlib-rs", "zstd", "lz4", "brotli"] }
+serde_yaml = "0.9.34"
+rayon = "1.12.0"
+rustc-hash = "2.1.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.150"
+
+# Optional Python wheel bindings (never linked into `inference_engine`)
+pyo3 = { version = "0.29.0", features = ["abi3-py312"], optional = true }
+numpy = { version = "0.29.0", optional = true }

@@ -3,25 +3,23 @@ requires = ["maturin>=1.14,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "movie_lens_ranker_inference"
+name = "reranker_prompt"
 version = "0.1.0"
-description = "Ranker inference for Kaggle recommender systems project"
+description = "Shared Rust/Python prompt formatter for MovieLens Qwen reranker"
 authors = [
     { name = "Nichole King" },
 ]
-requires-python = ">=3.12.0,<3.13"
-#see requirements-[c|g]pu.txt for dependencies
-dependencies = [
-]
+requires-python = ">=3.12,<3.14"
+dependencies = ["numpy>=1.24"]
+# Ensure inference_src/README.txt exists, or remove this line
 readme = "README.txt"
 license = { text = "MIT" }
 
 classifiers = [
-    "Development Status :: 1 - development",
+    "Development Status :: 3 - Alpha",
     "Programming Language :: Python",
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
 ]
 
 [project.urls]
@@ -29,11 +27,9 @@ Homepage = "https://www.kaggle.com/code/nicholeasuniquename/ranker-cross-encoder
 Repository = "https://github.com/nking/ranker.git"
 
 [tool.maturin]
-# This tells maturin where your rust project lives
-manifest-path = "inference_src/main/rust/Cargo.toml"
-# This tells maturin where your python source is located
-python-source = "inference_src/main/python"
-
-[tool.setuptools.packages.find]
-where = ["inference_src/main/python"]
-include = ["movie_lens_ranker_inference*"] # Optional, but good for being explicit
+manifest-path = "reranker_prompt/Cargo.toml"
+module-name = "reranker_prompt"
+features = ["python"]
+compatibility = "manylinux_2_39"
+zig = true
+strip = true

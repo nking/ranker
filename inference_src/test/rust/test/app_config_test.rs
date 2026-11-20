@@ -32,7 +32,7 @@ mod app_config_tests {
               "user_db_path":"../../../src/test/resources/data/users.bin",
               "movies_path": "../../../src/test/resources/data/movies.parquet",
               "ranker_n_local_devices": 1,
-              "top_k": 20,
+              "ranker_top_k": 20,
               "persisted_index_path": "./target/movie_embeddings_indexer",
               "query_saved_models_uri": "../../../src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/",
               "ranker_saved_models_uri": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/",

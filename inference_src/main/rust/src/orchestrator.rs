@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, atomic::{AtomicI64, Ordering}};
 use arc_swap::{ArcSwap, Guard};
 use crate::model_client::{QueryModelClient, RankerModelClient};
 use crate::embeddings_ann::Searcher;
-use crate::graph_builder::{build_enriched_padded_supergraph, JraphGraph};
+use crate::ranker_graph_builder::{build_enriched_padded_supergraph, JraphGraph};
 use crate::user_history::{build_user_history, UserHistory};
 
 use crate::pb::{UsersRequest, UsersRankOnlyRequest, RankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse, RankedMoviesAndRepr, RerankRequest, RerankResponse};

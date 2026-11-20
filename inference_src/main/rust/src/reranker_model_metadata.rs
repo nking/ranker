@@ -19,6 +19,17 @@ pub struct RerankerModelMetadata {
     #[arg(long, env = "WEIGHT_DECAY")]
     pub weight_decay: f32,
     */
+    #[arg(long, env = "MODEL_NAME", default_value = "qwen-reranker")]
+    pub model_name: String,
+
+    #[arg(long, env="INPUT_IDS_NAME", default_value="input-ids")]
+    pub input_ids_name: String,
+
+    #[arg(long, env="ATTENTION_MASK_NAME", default_value="attention-mask")]
+    pub attention_mask_name: String,
+
+    #[arg(long, env="OUTPUT_NAME", default_value="candidate_log_probs")]
+    pub output_name: String,
 
     #[arg(long, env = "NUM_CANDIDATES")]
     pub num_candidates : usize,

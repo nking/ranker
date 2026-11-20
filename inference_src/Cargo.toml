@@ -1,0 +1,10 @@
+[workspace]
+resolver = "3"
+members = [
+    "main/rust",
+    "reranker_prompt",
+]
+
+# Remove this when done debugging (workspace profiles must live at the workspace root)
+[profile.dev.build-override]
+debug = true

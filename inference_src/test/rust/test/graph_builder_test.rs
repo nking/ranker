@@ -24,7 +24,7 @@ mod graph_builder_tests {
 
     use helper::{get_train_val_test_liked_uris, DataSize, get_python_path};
     use inference_engine::embeddings_util::{read_movie_embeddings, read_user_embeddings, get_user_embeddings};
-    use inference_engine::graph_builder::{build_enriched_padded_supergraph, create_fake_padded_super_batch, JraphGraph};
+    use inference_engine::ranker_graph_builder::{build_enriched_padded_supergraph, create_fake_padded_super_batch, JraphGraph};
     use inference_engine::user_history::{build_user_history, UserHistory};
     use crate::graph_builder_tests::helper::{assert_slices_nearly_equal, get_embeddings_uris};
 

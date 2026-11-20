@@ -1,4 +1,4 @@
-#after updating this, cd to src/rust and invoke cargo update
+#after updating this, cd to inference_src and invoke cargo update
 [package]
 name = "inference_engine"
 version = "0.1.0"
@@ -9,12 +9,8 @@ name = "inference_engine"
 #  Add "rlib" so Rust tests can import the code
 crate-type = ["cdylib", "rlib"]
 
-#remove this when done debugging
-[profile.dev.build-override]
-debug = true
-
 [dependencies]
-numpy = "0.29"
+reranker_prompt = { path = "../../reranker_prompt" }
 ndarray = "0.17"
 serde = { version = "1.0", features = ["derive"] }
 rustc-hash = "2.0"
@@ -74,81 +70,84 @@ plotters = { version = "0.3.7", default-features = false, features = [
 # Force Cargo to look outside its project root for the test file
 [[test]]
 name = "integration_tests"
-path="../../test/rust/test/integration_test.rs"
+path = "../../test/rust/test/integration_test.rs"
 
 [[test]]
 name = "user_history_tests"
-path="../../test/rust/test/user_history_test.rs"
+path = "../../test/rust/test/user_history_test.rs"
 
 [[test]]
 name = "recommended_movies_tests"
-path="../../test/rust/test/recommended_movies_test.rs"
+path = "../../test/rust/test/recommended_movies_test.rs"
 
 [[test]]
 name = "graph_builder_tests"
-path="../../test/rust/test/graph_builder_test.rs"
+path = "../../test/rust/test/graph_builder_test.rs"
 
 [[test]]
 name = "client_tests"
-path= "../../test/rust/test/model_client_test.rs"
+path = "../../test/rust/test/model_client_test.rs"
 
 [[test]]
 name = "embedding_ann_tests"
-path="../../test/rust/test/embedding_ann_test.rs"
+path = "../../test/rust/test/embedding_ann_test.rs"
 
 [[test]]
 name = "util_tests"
-path="../../test/rust/test/util_test.rs"
+path = "../../test/rust/test/util_test.rs"
 
 [[test]]
 name = "orchestrator_tests"
-path="../../test/rust/test/orchestrator_test.rs"
+path = "../../test/rust/test/orchestrator_test.rs"
 
 [[test]]
 name = "app_config_tests"
-path="../../test/rust/test/app_config_test.rs"
+path = "../../test/rust/test/app_config_test.rs"
 
 [[test]]
 name = "ranker_model_metadata_tests"
-path="../../test/rust/test/ranker_model_metadata_test.rs"
+path = "../../test/rust/test/ranker_model_metadata_test.rs"
 
 [[test]]
 name = "query_model_metadata_tests"
-path="../../test/rust/test/query_model_metadata_test.rs"
+path = "../../test/rust/test/query_model_metadata_test.rs"
 
 [[test]]
 name = "app_runner_tests"
-path="../../test/rust/test/app_runner_test.rs"
+path = "../../test/rust/test/app_runner_test.rs"
 
 [[test]]
 name = "user_db_tests"
-path="../../test/rust/test/user_db_test.rs"
+path = "../../test/rust/test/user_db_test.rs"
 
 [[test]]
 name = "movie_db_tests"
-path="../../test/rust/test/movie_db_test.rs"
+path = "../../test/rust/test/movie_db_test.rs"
 
 [[test]]
 name = "bayesian_tests"
-path= "../../test/rust/test/bayesian_test.rs"
+path = "../../test/rust/test/bayesian_test.rs"
 
 [[test]]
 name = "movie_tiers_tests"
-path= "../../test/rust/test/movie_tiers_test.rs"
+path = "../../test/rust/test/movie_tiers_test.rs"
 
 [[test]]
 name = "num_candidates_tests"
-path= "../../test/rust/test/num_candidates_test.rs"
+path = "../../test/rust/test/num_candidates_test.rs"
 
 [[test]]
 name = "post_training_analysis"
-path= "../../test/rust/test/post_training_analysis.rs"
+path = "../../test/rust/test/post_training_analysis.rs"
 
 [[test]]
 name = "compare_post_training_analysis"
-path= "../../test/rust/test/compare_post_training_analysis.rs"
-
+path = "../../test/rust/test/compare_post_training_analysis.rs"
 
 [[test]]
 name = "write_reranker_parquet"
-path= "../../test/rust/test/write_reranker_parquet.rs"
+path = "../../test/rust/test/write_reranker_parquet.rs"
+
+[[test]]
+name = "reranker_prompt_formatter_test"
+path = "../../test/rust/test/reranker_prompt_formatter_test.rs"
