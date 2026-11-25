@@ -69,6 +69,7 @@ pub struct RerankerModelClient {
     metadata_write_lock: Mutex<()>,
     pub model_latest_version: AtomicI64,
     models_path : String,
+    model_name : String, // for triton model latest version call
 }
 
 impl QueryModelClient {
@@ -83,7 +84,7 @@ impl QueryModelClient {
             .expect("Failed to connect to TFS for query model");
 
         let client = ModelServiceClient::new(channel.clone());
-        let mut versions = get_all_model_versions("query", client).await
+        let mut versions = get_all_model_versions("query", client.clone()).await
             .expect("Failed to fetch query model versions");
         versions.sort_unstable();
         let query_latest_ver = versions[versions.len() - 1];
@@ -91,7 +92,8 @@ impl QueryModelClient {
         let query_metadata_uri = format!(
             "{}/{}/assets.extra/{}",
             query_models_path.trim_end_matches('/'), query_latest_ver, "hyperparameters.json");
-        let query_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri)?;
+        let query_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri)
+            .expect("Error while loading query metadata");
         let mut initial_query_dict = HashMap::new();
         initial_query_dict.insert(query_latest_ver, Arc::new(query_metadata.clone()));
 
@@ -175,9 +177,11 @@ impl QueryModelClient {
 
         let n_valid_users : usize = request.n_users as usize;
 
-        let predict_req: PredictRequest = build_query_model_inputs(request, query_model_version_choice);
+        let predict_req: PredictRequest = build_query_model_inputs(request,
+            query_model_version_choice.clone());
 
-        let query_metadata = self.get_or_fetch_metadata(query_model_version_choice.clone())
+        let query_metadata = self.get_or_fetch_metadata(
+            query_model_version_choice.clone())
             .await.expect("error fetching query metadata");
         let embed_len = query_metadata.embed_len;
 
@@ -262,7 +266,8 @@ impl RankerModelClient {
         let ranker_metadata_uri = format!(
             "{}/{}/assets.extra/{}",
             ranker_models_path.trim_end_matches('/'), latest_ver, filename);
-        let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri)?;
+        let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri)
+            .expect("Error while loading ranker metadata");
         let mut initial_ranker_dict = HashMap::new();
         initial_ranker_dict.insert(latest_ver, Arc::new(ranker_metadata.clone()));
 
@@ -294,12 +299,11 @@ impl RankerModelClient {
     pub async fn update_latest_model_version(
         &self,
     ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
-        // Query both TFS endpoints concurrently
-        let query_ver = self.get_latest_model_version().await.expect("Error getting latest model version");
+        let ver = self.get_latest_model_version().await.expect("Error getting latest ranker model version");
 
-        self.model_latest_version.store(query_ver, Ordering::Release);
+        self.model_latest_version.store(ver, Ordering::Release);
 
-        Ok(query_ver)
+        Ok(ver)
     }
 
     pub async fn get_or_fetch_metadata(&self, ranker_model_version_choice: Option<VersionChoice>)
@@ -470,7 +474,7 @@ impl CandidateModelClient {
             .expect("Failed to connect to TFS for candidate model");
 
         let client = ModelServiceClient::new(channel.clone());
-        let mut versions = get_all_model_versions("candidate", client).await
+        let mut versions = get_all_model_versions("candidate", client.clone()).await
             .expect("Failed to fetch candidate model versions");
         versions.sort_unstable();
         let latest_ver = versions[versions.len() - 1];
@@ -478,7 +482,8 @@ impl CandidateModelClient {
         let metadata_uri = format!(
             "{}/{}/assets.extra/{}",
             models_path.trim_end_matches('/'), latest_ver, "hyperparameters.json");
-        let query_metadata = QueryModelMetadata::load_from_file(&metadata_uri)?;
+        let query_metadata = QueryModelMetadata::load_from_file(&metadata_uri)
+            .expect("Error while reading query metadata");
         let mut initial_query_dict = HashMap::new();
         initial_query_dict.insert(latest_ver, Arc::new(query_metadata.clone()));
 
@@ -491,7 +496,6 @@ impl CandidateModelClient {
             models_path: models_path.clone()
         }
     }
-
 
     pub async fn get_or_fetch_metadata(
         &self,
@@ -544,6 +548,16 @@ impl CandidateModelClient {
         Ok(new_metadata_arc)
     }
 
+    pub async fn update_latest_model_version(
+        &self,
+    ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+        let ver = self.get_latest_model_version().await.expect("Error getting latest candidate model version");
+
+        self.model_latest_version.store(ver, Ordering::Release);
+
+        Ok(ver)
+    }
+
     pub async fn get_latest_model_version(
         &self,
     ) -> Result<i64, Box<dyn Error + Send + Sync>> {
@@ -562,7 +576,8 @@ impl CandidateModelClient {
 
         let n_valid_movies : usize = request.n_movies as usize;
 
-        let predict_req: PredictRequest = build_candidate_model_inputs(request, candidate_model_version_choice);
+        let predict_req: PredictRequest = build_candidate_model_inputs(request,
+            candidate_model_version_choice.clone());
 
         let metadata = self.get_or_fetch_metadata(candidate_model_version_choice.clone())
             .await.expect("Error getting metadata for candidate model");
@@ -637,27 +652,89 @@ impl RerankerModelClient {
             .collect();
 
         if versions.is_empty() {
-            return Err(format!(
-                "No valid numeric versions found in Triton for model '{}'",
-                model_name
-            ).into());
+            //TODO: consider refactoring to return Result<Self, Error>
+            panic!( "No valid numeric versions found in Triton for model '{}'",
+                model_name);
         }
 
         versions.sort_unstable();
         let latest_ver = *versions.last().unwrap();
 
-
         let reranker_metadata_uri = format!(
             "{}/{}/{}",
             reranker_models_path.trim_end_matches('/'), latest_ver, "training_hyperparameters.json");
-        let reranker_metadata = RerankerModelMetadata::load_from_file(&reranker_metadata_uri)?;
+        let reranker_metadata = RerankerModelMetadata::load_from_file(&reranker_metadata_uri)
+            .expect("Error while reading reranker metadata");
         let mut initial_reranker_dict = HashMap::new();
         initial_reranker_dict.insert(latest_ver, Arc::new(reranker_metadata.clone()));
 
         Self {
             client: triton_client,
-            model_metadata_dict
+            model_metadata_dict : ArcSwap::from_pointee(initial_reranker_dict),
+            metadata_write_lock: Mutex::new(()),
+            model_latest_version: AtomicI64::new(latest_ver),
+            models_path: reranker_models_path.clone(),
+            model_name: model_name.parse().unwrap()
         }
+    }
+
+    pub async fn get_or_fetch_metadata(
+        &self,
+        model_version: Option<i64>,
+    ) -> Result<Arc<RerankerModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
+        let version_num: i64 = match model_version {
+            Some(v) => v,
+            _ => self.get_latest_model_version().await?,
+        };
+
+        // FAST Lock-free read.
+        // 99.99% of requests will hit this and return instantly.
+        let map = self.model_metadata_dict.load();
+        if let Some(meta) = map.get(&version_num) {
+            return Ok(meta.clone());
+        }
+
+        // ACQUIRE LOCK
+        // Only one thread gets past this line at a time.
+        // this is a heavy lock and is dropped when the variable goes out of scope when method is done
+        // but below we add a drop (unlock) for good code form.
+        let _guard = self.metadata_write_lock.lock().unwrap();
+
+        let filename = "training_hyperparameters.json";
+
+        let metadata_uri = build_triton_metadata_uri(&self.models_path,
+            version_num, filename);
+        let new_metadata = RerankerModelMetadata::load_from_file(&metadata_uri)?;
+
+        // FETCH (CPU or I/O bound): Do this outside the map update
+        let new_metadata_arc = Arc::new(new_metadata);
+
+        // COPY-ON-WRITE: Safely update the dictionary
+        // `rcu` automatically loops if another thread modified the map while we were working,
+        // ensuring we don't accidentally overwrite someone else's concurrent insertion.
+        self.model_metadata_dict.rcu(|current_map| {
+            // "Shallow clone": copies the i64 keys and Arc pointers. Takes nanoseconds.
+            let mut new_map = (**current_map).clone();
+
+            // Insert our new item
+            new_map.insert(version_num, new_metadata_arc.clone());
+
+            Arc::new(new_map)
+        });
+
+        drop(_guard);
+
+        Ok(new_metadata_arc)
+    }
+
+    pub async fn update_latest_model_version(
+        &self,
+    ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+        let ver = self.get_latest_model_version().await.expect("Error getting latest reranker model version");
+
+        self.model_latest_version.store(ver, Ordering::Release);
+
+        Ok(ver)
     }
 
     // Checks whether the Triton model (and optional specific version) is loaded and ready.
@@ -665,9 +742,12 @@ impl RerankerModelClient {
         &self,
         model_version: Option<i64>,
     ) -> Result<bool, Box<dyn Error + Send + Sync>> {
-        editing
+
+        let model_metadata = self.get_or_fetch_metadata(model_version).await
+            .expect("Error while getting RerankerModelMetadata");
+
         let req = ModelReadyRequest {
-            name: self.metadata.model_name.clone(),
+            name: model_metadata.model_name.clone(),
             version: model_version.map(|v| v.to_string()).unwrap_or_default(),
         };
         let resp = self.client.clone().model_ready(req).await?;
@@ -678,8 +758,9 @@ impl RerankerModelClient {
     pub async fn get_latest_model_version(
         &self,
     ) -> Result<i64, Box<dyn Error + Send + Sync>> {
+
         let req = ModelMetadataRequest {
-            name: self.metadata.model_name.clone(),
+            name: self.model_name.clone(),
             version: String::new(), // Empty string queries all active versions
         };
 
@@ -694,9 +775,8 @@ impl RerankerModelClient {
         if versions.is_empty() {
             return Err(format!(
                 "No valid numeric versions found in Triton for model '{}'",
-                self.metadata.model_name
-            )
-                .into());
+                self.model_name
+            ).into());
         }
 
         versions.sort_unstable();
@@ -726,8 +806,11 @@ impl RerankerModelClient {
                 .into());
         }
 
+        editing  add ranker_embs
+        let model_metadata = self.get_or_fetch_metadata(model_version).await?;
+
         let infer_req = build_triton_reranker_infer_request(
-            &self.metadata,
+            &model_metadata,
             input_ids,
             attention_mask,
             batch_size,
@@ -764,6 +847,7 @@ impl RerankerModelClient {
         Err("Error: Triton ModelInferResponse contained neither raw_output_contents nor fp32_contents".into())
     }
 }
+
 pub fn build_triton_reranker_infer_request(
     metadata: &RerankerModelMetadata,
     input_ids: &[i64],
@@ -773,6 +857,8 @@ pub fn build_triton_reranker_infer_request(
     model_version: Option<i64>,
 ) -> ModelInferRequest {
     let shape = vec![batch_size as i64, seq_len as i64];
+
+    editing to include embeddings
 
     let input_ids_tensor = InferInputTensor {
         name: metadata.input_ids_name.clone(),
@@ -1284,3 +1370,17 @@ fn build_tfs_metadata_uri(
     )
 }
 
+
+// filename can be a &str, String, &Path, or anything implementing AsRef<str> or Display
+fn build_triton_metadata_uri(
+    triton_models_uri: &str,
+    model_version_num: i64,
+    filename: &str,
+) -> String {
+    format!(
+        "{}/{}/{}",
+        triton_models_uri.trim_end_matches('/'),
+        model_version_num,
+        filename
+    )
+}

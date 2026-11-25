@@ -29,10 +29,6 @@ pub struct Orchestrator {
     ranker_model: RankerModelClient,
     reranker_model: RerankerModelClient,
 
-    reranker_model_latest_version: AtomicI64,
-
-    reranker_models_path : String,
-    
     searcher: ArcSwap<Searcher>, // updatable
     user_history: UserHistory,  // can be made updatable in future
     user_db: UserDb,
@@ -92,23 +88,15 @@ impl Orchestrator {
         let reranker_client = RerankerModelClient::new(reranker_uri,
             reranker_models_path).await;
 
-
-        let ranker_latest_ver = ranker_client.get_latest_model_version().await?;
-        let reranker_latest_ver = reranker_client.get_latest_model_version().await?;
-
-
-
-
+        // we want ANN to return 10x to 100x num_candidates so that scoring will reorder and produce num_candidates top results
+        let ranker_ver = ranker_client.get_latest_model_version().await?;
+        let ranker_metadata = ranker_client
+            .get_or_fetch_metadata(Some(VersionChoice::Version(ranker_ver))).await?;
         let num_candidates = ranker_metadata.num_candidates;
 
-        if query_metadata.embed_len != ranker_metadata.embed_len {
-            return Err(format!(
-                "Query model embed_len {} does not match the Ranker model embed_len {}",
-                query_metadata.embed_len, ranker_metadata.embed_len
-            ).into()); // .into() converts the String into Box<dyn std::error::Error + Send + Sync>
-        }
-
-        // we want ANN to return 10x to 100x num_candidates so that scoring will reorder and produce num_candidates top results
+        let reranker_ver = reranker_client.get_latest_model_version().await?;
+        let reranker_metadata = reranker_client
+            .get_or_fetch_metadata(Some(reranker_ver)).await?;
 
         let initial_searcher = Searcher::new(movie_embeddings_uri, num_candidates, &persisted_index_path)?;
 
@@ -120,17 +108,12 @@ impl Orchestrator {
             ranker_model: ranker_client,
             reranker_model: reranker_client,
 
-            reranker_model_latest_version: AtomicI64::new(reranker_latest_ver),
-
-            reranker_models_path : reranker_models_path.clone(),
-            ranker_serving_is_batched: ranker_serving_is_batched,
-
             searcher: ArcSwap::from_pointee(initial_searcher),
             user_history: user_history,
             user_db: user_db,
             ranker_n_local_devices: ranker_n_local_devices,
             persisted_index_path: persisted_index_path.as_ref().to_path_buf(),
-            ranker_top_k: ranker_metadata.num_candidates,
+            ranker_top_k: num_candidates,
             reranker_top_k: reranker_metadata.eval_top_k
         })
     }
@@ -142,6 +125,7 @@ impl Orchestrator {
         &self,
     ) -> Result<(i64, i64, i64), Box<dyn std::error::Error + Send + Sync>> {
 
+        //TODO: consider invoking these concurrently.
         let query_ver = self.query_model.update_latest_model_version().await?;
         let ranker_ver = self.ranker_model.update_latest_model_version().await?;
         let reranker_ver = self.reranker_model.update_latest_model_version().await?;
@@ -150,14 +134,19 @@ impl Orchestrator {
     }
 
     #[inline]
-    pub fn get_query_model_latest_version(&self) -> i64 {
+    pub async fn get_query_model_latest_version(&self) -> i64 {
         //self.query_model.get_latest_model_version()
-        self.query_model.get_latest_model_version()
+        self.query_model.get_latest_model_version().await.expect("Error getting latest query model version")
     }
 
     #[inline]
-    pub fn get_ranker_model_latest_version(&self) -> i64 {
-        self.ranker_model.get_latest_model_version()
+    pub async fn get_ranker_model_latest_version(&self) -> i64 {
+        self.ranker_model.get_latest_model_version().await.expect("Error getting latest ranker model version")
+    }
+
+    #[inline]
+    pub async fn get_reranker_model_latest_version(&self) -> i64 {
+        self.reranker_model.get_latest_model_version().await.expect("Error getting latest reranker model version")
     }
 
 
