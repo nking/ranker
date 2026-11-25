@@ -28,6 +28,9 @@ pub struct RerankerModelMetadata {
     #[arg(long, env="ATTENTION_MASK_NAME", default_value="attention-mask")]
     pub attention_mask_name: String,
 
+    #[arg(long, env="RANKER_EMBS_NAME", default_value="ranker_embs")]
+    pub ranker_embs_name: String,
+
     #[arg(long, env="OUTPUT_NAME", default_value="candidate_log_probs")]
     pub output_name: String,
 
