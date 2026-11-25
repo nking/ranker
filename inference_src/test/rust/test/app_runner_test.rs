@@ -35,7 +35,7 @@ mod app_runner_tests {
         };
         let _ranker_metadata_uri = format!(
             "{}/{}/assets.extra/{}",
-            config.ranker_saved_models_uri.trim_end_matches('/'), 1, filename);
+            config.ranker_models_path.trim_end_matches('/'), 1, filename);
 
         let runner = AppRunner::new(config.clone());
 

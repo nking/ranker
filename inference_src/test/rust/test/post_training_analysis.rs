@@ -72,8 +72,8 @@ impl TestHarness {
         let orchestrator = Orchestrator::new(
             query_uri,
             ranker_uri,
-            config.query_saved_models_uri,
-            config.ranker_saved_models_uri,
+            config.query_models_path,
+            config.ranker_models_path,
             config.ranker_serving_is_batched,
             &movie_embeddings_uri,
             ratings_uris,

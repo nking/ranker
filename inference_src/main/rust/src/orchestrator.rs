@@ -4,7 +4,7 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, atomic::{AtomicI64, Ordering}};
 use arc_swap::{ArcSwap, Guard};
-use crate::model_client::{QueryModelClient, RankerModelClient};
+use crate::model_client::{QueryModelClient, RankerModelClient, RerankerModelClient};
 use crate::embeddings_ann::Searcher;
 use crate::ranker_graph_builder::{build_enriched_padded_supergraph, JraphGraph};
 use crate::user_history::{build_user_history, UserHistory};
@@ -12,12 +12,14 @@ use crate::user_history::{build_user_history, UserHistory};
 use crate::pb::{UsersRequest, UsersRankOnlyRequest, RankedMovies, RankOnlyRequest, ApproxNearestNeighborsResponse, RankedMoviesAndRepr, RerankRequest, RerankResponse};
 use tonic::{Request, Response, Status};
 use usearch::ffi::Matches;
+use crate::hard_negative_sampling::HardNegativeSamplingTransform;
 use crate::tensorflow::serving::model_spec::VersionChoice;
 use crate::pb::recommender_service_server::RecommenderService;
 use crate::query_model_metadata::QueryModelMetadata;
 use crate::ranker_model_metadata::RankerModelMetadata;
+use crate::reranker_model_metadata::RerankerModelMetadata;
 use crate::user_db::UserDb;
-use crate::util::{get_top_k_desc_diagnostic, get_top_k_desc_scores};
+use crate::util::{get_pos_and_top_k_neg_desc_diagnostic, get_top_k_desc_diagnostic, get_top_k_desc_scores};
 
 // the number of local_devices attached to the ranker TFS.  e.g. = 2 for the kaggle T4x2 GPUs
 // max_history, num_candidates are hyper-parameters of the ranker_model
@@ -25,19 +27,12 @@ use crate::util::{get_top_k_desc_diagnostic, get_top_k_desc_scores};
 pub struct Orchestrator {
     query_model: QueryModelClient,
     ranker_model: RankerModelClient,
-    query_model_latest_version: AtomicI64,
-    ranker_model_latest_version: AtomicI64,
+    reranker_model: RerankerModelClient,
 
-    query_saved_models_uri : String,
-    ranker_saved_models_uri : String,
-    ranker_serving_is_batched: bool,
-    //query_model_metadata: QueryModelMetadata,
-    //ranker_model_metadata: RankerModelMetadata,
-    query_model_metadata_dict: ArcSwap<HashMap<i64, Arc<QueryModelMetadata>>>,
-    ranker_model_metadata_dict: ArcSwap<HashMap<i64, Arc<RankerModelMetadata>>>,
-    query_metadata_write_lock: Mutex<()>,
-    ranker_metadata_write_lock: Mutex<()>,
+    reranker_model_latest_version: AtomicI64,
 
+    reranker_models_path : String,
+    
     searcher: ArcSwap<Searcher>, // updatable
     user_history: UserHistory,  // can be made updatable in future
     user_db: UserDb,
@@ -45,6 +40,7 @@ pub struct Orchestrator {
     ranker_n_local_devices : usize,
     persisted_index_path: PathBuf,
     pub ranker_top_k: usize, // the number of movie_ids that inference will return for a user
+    pub reranker_top_k: usize, // the number of movie_ids that inference will return for a user
 }
 
 impl Orchestrator {
@@ -54,6 +50,7 @@ impl Orchestrator {
     ///
     /// * `query_uri`: endpoint uri of the deployed twotower query model
     /// * `ranker_uri`: endpoint uri of the deployed graphranker model
+    /// * `reranker_uri`: endpoint uri of the deployed qwen-reranker model
     /// * `query_metadata_uri`: uri for the query model metadata and hyperparameters json file for version 1 query model
     /// * `ranker_metadata_uri`: uri for the ranker model metadata json file for version 1 query model
     /// * `movie_embeddings_uri`: uri to the movie_embeddings parquet file
@@ -74,35 +71,34 @@ impl Orchestrator {
     pub async fn new(
         query_uri: String,
         ranker_uri: String,
-        query_saved_models_uri : String,
-        ranker_saved_models_uri : String,
+        reranker_uri: String,
+        query_models_path : String,
+        ranker_models_path : String,
+        reranker_models_path : String,
         ranker_serving_is_batched: bool,
         movie_embeddings_uri: &str,
         ratings_uris: Vec<&str>,
         ranker_n_local_devices : usize,
-        top_k : usize,
         persisted_index_path: impl AsRef<Path>,
         user_db_path : impl AsRef<Path>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
 
-        let query_metadata_uri = format!(
-            "{}/{}/assets.extra/{}",
-            query_saved_models_uri.trim_end_matches('/'), 1, "hyperparameters.json");
-        let query_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri)?;
-        let mut initial_query_dict = HashMap::new();
-        initial_query_dict.insert(1, Arc::new(query_metadata.clone()));
+        let query_client = QueryModelClient::new(
+            query_uri.clone(), query_models_path).await;
 
-        let filename = if ranker_serving_is_batched {
-            "metadata_batch.json"
-        } else {
-            "metadata_single.json"
-        };
-        let ranker_metadata_uri = format!(
-            "{}/{}/assets.extra/{}",
-            ranker_saved_models_uri.trim_end_matches('/'), 1, filename);
-        let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri)?;
-        let mut initial_ranker_dict = HashMap::new();
-        initial_ranker_dict.insert(1, Arc::new(ranker_metadata.clone()));
+        let ranker_client = RankerModelClient::new(ranker_uri.clone(),
+            ranker_models_path, ranker_serving_is_batched).await;
+
+        let reranker_client = RerankerModelClient::new(reranker_uri,
+            reranker_models_path).await;
+
+
+        let ranker_latest_ver = ranker_client.get_latest_model_version().await?;
+        let reranker_latest_ver = reranker_client.get_latest_model_version().await?;
+
+
+
+
         let num_candidates = ranker_metadata.num_candidates;
 
         if query_metadata.embed_len != ranker_metadata.embed_len {
@@ -115,11 +111,6 @@ impl Orchestrator {
         // we want ANN to return 10x to 100x num_candidates so that scoring will reorder and produce num_candidates top results
 
         let initial_searcher = Searcher::new(movie_embeddings_uri, num_candidates, &persisted_index_path)?;
-        let query_client = QueryModelClient::new(query_uri, ranker_metadata.embed_len).await;
-        let ranker_client = RankerModelClient::new(ranker_uri, ranker_metadata.clone()).await;
-
-        let query_latest_ver = query_client.get_latest_model_version().await?;
-        let ranker_latest_ver = ranker_client.get_latest_model_version().await?;
 
         let user_history: UserHistory = build_user_history(&ratings_uris, 2048).await;
         let user_db : UserDb = UserDb::new(user_db_path).expect("Failed to initialize UserDb from binary path");
@@ -127,21 +118,20 @@ impl Orchestrator {
         Ok(Self {
             query_model: query_client,
             ranker_model: ranker_client,
-            query_model_latest_version: AtomicI64::new(query_latest_ver),
-            ranker_model_latest_version: AtomicI64::new(ranker_latest_ver),
-            query_saved_models_uri : query_saved_models_uri.clone(),
-            ranker_saved_models_uri : ranker_saved_models_uri.clone(),
+            reranker_model: reranker_client,
+
+            reranker_model_latest_version: AtomicI64::new(reranker_latest_ver),
+
+            reranker_models_path : reranker_models_path.clone(),
             ranker_serving_is_batched: ranker_serving_is_batched,
-            query_model_metadata_dict : ArcSwap::from_pointee(initial_query_dict),
-            ranker_model_metadata_dict : ArcSwap::from_pointee(initial_ranker_dict),
-            query_metadata_write_lock: Mutex::new(()),
-            ranker_metadata_write_lock: Mutex::new(()),
+
             searcher: ArcSwap::from_pointee(initial_searcher),
             user_history: user_history,
+            user_db: user_db,
             ranker_n_local_devices: ranker_n_local_devices,
             persisted_index_path: persisted_index_path.as_ref().to_path_buf(),
-            ranker_top_k: top_k,
-            user_db: user_db,
+            ranker_top_k: ranker_metadata.num_candidates,
+            reranker_top_k: reranker_metadata.eval_top_k
         })
     }
 
@@ -150,150 +140,37 @@ impl Orchestrator {
     /// Returns `(latest_query_version, latest_ranker_version)`.
     pub async fn update_latest_model_versions(
         &self,
-    ) -> Result<(i64, i64), Box<dyn std::error::Error + Send + Sync>> {
-        // Query both TFS endpoints concurrently
-        let (query_ver, ranker_ver) = tokio::try_join!(
-            self.query_model.get_latest_model_version(),
-            self.ranker_model.get_latest_model_version()
-        )?;
+    ) -> Result<(i64, i64, i64), Box<dyn std::error::Error + Send + Sync>> {
 
-        self.query_model_latest_version.store(query_ver, Ordering::Release);
-        self.ranker_model_latest_version.store(ranker_ver, Ordering::Release);
+        let query_ver = self.query_model.update_latest_model_version().await?;
+        let ranker_ver = self.ranker_model.update_latest_model_version().await?;
+        let reranker_ver = self.reranker_model.update_latest_model_version().await?;
 
-        Ok((query_ver, ranker_ver))
+        Ok((query_ver, ranker_ver, reranker_ver))
     }
 
     #[inline]
     pub fn get_query_model_latest_version(&self) -> i64 {
-        self.query_model_latest_version.load(Ordering::Acquire)
+        //self.query_model.get_latest_model_version()
+        self.query_model.get_latest_model_version()
     }
 
     #[inline]
     pub fn get_ranker_model_latest_version(&self) -> i64 {
-        self.ranker_model_latest_version.load(Ordering::Acquire)
+        self.ranker_model.get_latest_model_version()
     }
 
-    // filename can be a &str, String, &Path, or anything implementing AsRef<str> or Display
-    fn build_metadata_uri(&self,
-        saved_models_uri: &str,
-        model_version_num: i64,
-        filename: &str,
-    ) -> String {
-        format!(
-            "{}/{}/assets.extra/{}",
-            saved_models_uri.trim_end_matches('/'),
-            model_version_num,
-            filename
-        )
-    }
 
     pub fn get_or_fetch_query_metadata(&self, query_model_version_choice: Option<VersionChoice>)
         -> Result<Arc<QueryModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
 
-        //TODO: consider mapping Default version fallback to max version key in HashMap
-        let query_version_num: i64 = match query_model_version_choice {
-            Some(VersionChoice::Version(v)) => v,
-            _ => self.get_query_model_latest_version(),
-        };
-
-        // FAST Lock-free read.
-        // 99.99% of requests will hit this and return instantly.
-        let map = self.query_model_metadata_dict.load();
-        if let Some(meta) = map.get(&query_version_num) {
-            return Ok(meta.clone());
-        }
-
-        // ACQUIRE LOCK
-        // Only one thread gets past this line at a time.
-        // this is a heavy lock and is dropped when the variable goes out of scope when method is done
-        // but below we add a drop (unlock) for good code form.
-        let _guard = self.query_metadata_write_lock.lock().unwrap();
-
-        // single or batched TFS serving?
-        let filename = "hyperparameters.json";
-
-        let query_metadata_uri = self.build_metadata_uri(&self.query_saved_models_uri,
-            query_version_num, filename);
-        let new_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri)?;
-
-        // FETCH (CPU or I/O bound): Do this outside the map update
-        let new_metadata_arc = Arc::new(new_metadata);
-
-        // COPY-ON-WRITE: Safely update the dictionary
-        // `rcu` automatically loops if another thread modified the map while we were working,
-        // ensuring we don't accidentally overwrite someone else's concurrent insertion.
-        self.query_model_metadata_dict.rcu(|current_map| {
-            // "Shallow clone": copies the i64 keys and Arc pointers. Takes nanoseconds.
-            let mut new_map = (**current_map).clone();
-
-            // Insert our new item
-            new_map.insert(query_version_num, new_metadata_arc.clone());
-
-            Arc::new(new_map)
-        });
-
-        drop(_guard);
-
-        Ok(new_metadata_arc)
+        self.query_model.get_or_fetch_metadata(query_model_version_choice)
     }
 
     pub fn get_or_fetch_ranker_metadata(&self, ranker_model_version_choice: Option<VersionChoice>)
         -> Result<Arc<RankerModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
 
-        //TODO: consider mapping Default version fallback to max version key in HashMap
-        let ranker_version_num: i64 = match ranker_model_version_choice {
-            Some(VersionChoice::Version(v)) => v,
-            _ => self.get_ranker_model_latest_version(),
-        };
-
-        // FAST Lock-free read.
-        // 99.99% of requests will hit this and return instantly.
-        let map = self.ranker_model_metadata_dict.load();
-        if let Some(meta) = map.get(&ranker_version_num) {
-            return Ok(meta.clone());
-        }
-
-        // ACQUIRE LOCK
-        // Only one thread gets past this line at a time.
-        // this is a heavy lock and is dropped when the variable goes out of scope when method is done
-        // but below we add a drop (unlock) for good code form.
-        let _guard = self.ranker_metadata_write_lock.lock().unwrap();
-
-        // DOUBLE CHECK
-        // If we were waiting for the lock, another thread might have just loaded it.
-        let map = self.ranker_model_metadata_dict.load();
-        if let Some(meta) = map.get(&ranker_version_num) {
-            return Ok(meta.clone());
-        }
-
-        // single or batched TFS serving?
-        let filename = if self.ranker_serving_is_batched {
-            "metadata_batch.json"
-        } else {
-            "metadata_single.json"
-        };
-
-        let ranker_metadata_uri = self.build_metadata_uri(&self.ranker_saved_models_uri,
-            ranker_version_num, filename);
-        let new_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri)?;
-
-        // FETCH (CPU or I/O bound): Do this outside the map update
-        let new_metadata_arc = Arc::new(new_metadata);
-
-        // COPY-ON-WRITE: Safely update the dictionary
-        // `rcu` automatically loops if another thread modified the map while we were working,
-        // ensuring we don't accidentally overwrite someone else's concurrent insertion.
-        self.ranker_model_metadata_dict.rcu(|current_map| {
-            // "Shallow clone": copies the i64 keys and Arc pointers. Takes nanoseconds.
-            let mut new_map = (**current_map).clone();
-            // Insert our new item
-            new_map.insert(ranker_version_num, new_metadata_arc.clone());
-            Arc::new(new_map)
-        });
-
-        drop(_guard);
-
-        Ok(new_metadata_arc)
+        self.ranker_model.get_or_fetch_metadata(ranker_model_version_choice)
     }
 
     pub async fn reload_embeddings(&self, movie_embeddings_uri: &str, num_candidates: usize) -> Result<(), Box<dyn std::error::Error>> {
@@ -737,6 +614,134 @@ impl Orchestrator {
             k: self.ranker_top_k as u32,
         }))
     }
+
+    pub async fn _negatives_diagnostic(&self, req: Request<UsersRequest>,
+        query_movie_ids: &[i32],
+        hard_negative_sampling: &HardNegativeSamplingTransform,
+        seed: u64) -> Result<Response<RankedMoviesAndRepr>, Status> {
+
+        let user_reqs = req.into_inner();
+        let n_users = user_reqs.user_ids.len();
+
+        if (query_movie_ids.len() != n_users) {
+            Status::invalid_argument("query_movie_ids.len() must match the numbe of queries in req");
+        }
+
+        let ranker_model_version_choice: Option<VersionChoice> = match user_reqs.ranker_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            _ => None
+        };
+        let ranker_metadata = self.get_or_fetch_ranker_metadata(
+            ranker_model_version_choice.clone())
+            .map_err(|e| {
+                // Optional: log it so you can see the error in your server console
+                eprintln!("Failed to fetch ranker metadata: {}", e);
+                // Convert to a gRPC Status
+                Status::internal(format!("Internal metadata error: {}", e))
+            })?;
+        let ranker_batch_size = ranker_metadata.batch_size;
+        let num_candidates = ranker_metadata.num_candidates;
+        let out_features = ranker_metadata.out_features;
+
+        let query_model_version_choice: Option<VersionChoice> = match user_reqs.query_model_version {
+            Some(v) => Some(VersionChoice::Version(v)),
+            _ => None
+        };
+        // Get user_embeddings from TFS Query model.  flattenend into a single array
+        // length is n_users * embed_len
+        let user_embeddings : Vec<f32> = self.query_model.get_users_embeddings(user_reqs.clone(),
+            query_model_version_choice).await
+            .map_err(|e| Status::internal(format!("user embedding: {}", e)))?;
+
+        let mut final_user_ids: Vec<i32> = Vec::with_capacity(n_users);
+        let mut final_candidate_ids: Vec<i32> = Vec::with_capacity(n_users * self.ranker_top_k);
+        let mut final_scores: Vec<f32> = Vec::with_capacity(n_users * self.ranker_top_k);
+        let mut final_user_reprs: Vec<f32> = Vec::with_capacity(n_users * out_features);
+        let mut final_cand_reprs: Vec<f32> = Vec::with_capacity(n_users * num_candidates * out_features);
+
+        let user_embed_len = ranker_metadata.embed_len;
+        let mut i : usize = 0;
+        for (((chunk_users, chunk_timestamps), chunk_movies)) in user_reqs.user_ids
+            .chunks(ranker_batch_size)
+            .zip(user_reqs.timestamps.chunks(ranker_batch_size))
+            .zip(query_movie_ids.chunks(ranker_batch_size))
+        {
+            let n_users_i = chunk_users.len();
+
+            // get negatives
+            let sampled_candidates  =
+                hard_negative_sampling.sample_candidates_with_pos(
+                    chunk_users,
+                    chunk_movies,
+                    chunk_timestamps,
+                    seed,
+                    false
+                ).expect("Error creating hard negative samples");
+            debug_assert_eq!(sampled_candidates.candidate_ids.len(),  n_users);
+            debug_assert_eq!(sampled_candidates.candidate_ids[0].len(),  hard_negative_sampling.num_candidates());
+
+            // the resulting list of candidates has the positives in position 0 followed by the negatives.
+            // we do not need shuffling since we are getting inference data to write to the parquet files.
+            // we let the downstream reranker shuffle their positions.
+            let candidate_ids: Vec<i32> = sampled_candidates.candidate_ids.iter().flatten().copied().collect();
+
+            let i0 = i * user_embed_len;
+            let i1 = i0 + user_embed_len;
+            // scores shape is    (n_users * num_candidates);
+            // movie_ids is shape (n_users * num_candidates)
+            // user_reprs shape is (n_users * out_features);
+            // cand_reprs shape is (n_users * num_candidates * out_features);
+            let mut ranked_movies_and_reprs = self._make_ranker_diagnostic_request(
+                chunk_users, chunk_timestamps,
+                &user_embeddings[i0..i1],
+                &candidate_ids,
+                ranker_model_version_choice.clone()).await?;
+
+            debug_assert_eq!(ranked_movies_and_reprs.movie_ids.len(),  n_users_i * num_candidates);
+            debug_assert_eq!(ranked_movies_and_reprs.scores.len(), n_users_i * num_candidates);
+            debug_assert_eq!(ranked_movies_and_reprs.cand_reprs.len(), n_users_i * num_candidates * out_features);
+            debug_assert_eq!(ranked_movies_and_reprs.user_reprs.len(), n_users_i  * out_features);
+
+            // the negatives we want to keep are the highest scoring negatives as those are harder to distinguish
+            // from the positive.
+
+            // for each user we keep the first item because it is "positive".
+            // for the remaining num_candidates - 1 for each user, we keep the top_k-1.
+
+            let (top_movie_ids, top_scores, top_cand_repr) = get_pos_and_top_k_neg_desc_diagnostic(
+                n_users_i,
+                &ranked_movies_and_reprs.movie_ids,
+                &ranked_movies_and_reprs.scores,
+                &ranked_movies_and_reprs.cand_reprs,
+                num_candidates,
+                self.ranker_top_k,
+                out_features,
+            );
+
+            debug_assert_eq!(top_movie_ids.len(), self.ranker_top_k * n_users_i);
+            debug_assert_eq!(top_scores.len(), self.ranker_top_k * n_users_i);
+            debug_assert_eq!(top_cand_repr.len(), self.ranker_top_k * n_users_i * out_features);
+            debug_assert_eq!(ranked_movies_and_reprs.user_reprs.len(), n_users_i  * out_features);
+
+            final_user_ids.extend_from_slice(&ranked_movies_and_reprs.user_ids);
+            final_candidate_ids.extend_from_slice(&top_movie_ids);
+            final_scores.extend_from_slice(&top_scores);
+            final_user_reprs.extend_from_slice(&ranked_movies_and_reprs.user_reprs);
+            final_cand_reprs.extend_from_slice(&top_cand_repr);
+
+            i += n_users_i;
+        }
+
+        Ok(Response::new( RankedMoviesAndRepr {
+            user_ids: final_user_ids,
+            movie_ids: final_candidate_ids,
+            scores: final_scores,
+            user_reprs: final_user_reprs,
+            cand_reprs: final_cand_reprs,
+            k: self.ranker_top_k as u32,
+        }))
+    }
+
 
 
     pub async fn _approx_nearest_neighbors(&self, req: Request<UsersRequest>)

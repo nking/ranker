@@ -91,4 +91,8 @@ impl MovieDb {
     ) -> Option<Request<MoviesRequest>> {
         self.catalog.build_movies_request(movie_ids, model_version)
     }
+    
+    pub fn get_all_movie_ids(&self) -> Vec<i32> {
+        self.catalog.get_all_movie_ids()
+    }
 }

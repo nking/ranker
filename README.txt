@@ -165,7 +165,7 @@ inference_src                       # code for the end-to-end inference using ru
     └── test/
         └── rust/
             └── test/
-                └── reranker_prompt_formatter_test.rs # NEW: unit + integration tests
+                └── reranker_prompt_formatter_test.rs # unit + integration tests
 
 
 
@@ -347,8 +347,6 @@ Building the rust py03 bindings reranker prompt wheel
    *NOTE: after any change to Cargo.toml run
        cargo check -p reranker_prompt --features python
 
- cargo check -p reranker_prompt --features python
-
 to build the wheel on your computer:
 
     make sure the project venv is activated
@@ -379,5 +377,5 @@ to build the wheel on your computer:
    python -c "import reranker_prompt; print(reranker_prompt.__file__, reranker_prompt.RerankerPromptFormatter.candidate_labels(5))"
 
    subsequent re-builds of the wheel and copies to reranker/wheels/
-   can use this for the reinstall in the conda environment in the ../reranker directory:
+   can use this for the reinstall in the conda environment in the reranker directory:
        pip install --force-reinstall --no-deps

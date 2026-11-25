@@ -84,4 +84,10 @@ impl MovieCatalog {
     pub fn get_title_and_genres(&self, movie_id: i32) -> (&str, &str) {
         self.get(movie_id).unwrap_or(("", ""))
     }
+
+    pub fn get_all_movie_ids(&self) -> Vec<i32> {
+        let mut keys: Vec<i32> = self.movies.keys().copied().collect();
+        keys.sort_unstable();
+        keys
+    }
 }

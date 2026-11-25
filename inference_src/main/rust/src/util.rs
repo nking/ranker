@@ -285,6 +285,96 @@ pub fn get_top_k_desc_diagnostic(
     (out_movie_ids, out_scores, out_cand_reprs)
 }
 
+/// Preserves candidate index `0` (the positive item) at position `0` for each user,
+/// and selects the `top_k - 1` highest-scoring negatives from indices `1..num_candidates`
+/// in descending order of score.
+///
+/// Runtime complexity is O(n_users * (num_candidates + top_k * log(top_k))).
+///
+/// # Arguments
+/// * `n_users` - Number of users in this batch
+/// * `movie_ids` - Shape: `(n_users * num_candidates)`, with positive at col 0 per user
+/// * `scores` - Shape: `(n_users * num_candidates)`
+/// * `cand_reprs` - Shape: `(n_users * num_candidates * out_features)`
+/// * `num_candidates` - Original number of candidates per user (1 positive + `num_candidates - 1` negatives)
+/// * `top_k` - Total candidates to keep per user (1 positive + `top_k - 1` hardest negatives)
+/// * `out_features` - Embedding dimension of each candidate representation
+///
+/// Returns: `(out_movie_ids, out_scores, out_cand_reprs)` with `safe_top_k` items per user.
+pub fn get_pos_and_top_k_neg_desc_diagnostic(
+    n_users: usize,
+    movie_ids: &[i32],
+    scores: &[f32],
+    cand_reprs: &[f32],
+    num_candidates: usize,
+    top_k: usize,
+    out_features: usize,
+) -> (Vec<i32>, Vec<f32>, Vec<f32>) {
+    if num_candidates == 0 || top_k == 0 || n_users == 0 {
+        return (Vec::new(), Vec::new(), Vec::new());
+    }
+
+    debug_assert_eq!(movie_ids.len(), n_users * num_candidates);
+    debug_assert_eq!(scores.len(), n_users * num_candidates);
+    debug_assert_eq!(cand_reprs.len(), n_users * num_candidates * out_features);
+
+    let safe_top_k = top_k.min(num_candidates);
+    let neg_to_keep = safe_top_k - 1;
+    let n_neg_avail = num_candidates - 1;
+
+    let mut out_movie_ids = Vec::with_capacity(n_users * safe_top_k);
+    let mut out_scores = Vec::with_capacity(n_users * safe_top_k);
+    let mut out_cand_reprs = Vec::with_capacity(n_users * safe_top_k * out_features);
+
+    // Reusable buffer holding negative candidate indices `1..num_candidates`
+    let mut neg_indices: Vec<usize> = (1..num_candidates).collect();
+
+    for u in 0..n_users {
+        let start = u * num_candidates;
+        let end = start + num_candidates;
+
+        let score_chunk = &scores[start..end];
+        let movie_chunk = &movie_ids[start..end];
+        let cand_chunk = &cand_reprs[start * out_features..end * out_features];
+
+        // 1. Always preserve the positive candidate at position 0
+        out_movie_ids.push(movie_chunk[0]);
+        out_scores.push(score_chunk[0]);
+        out_cand_reprs.extend_from_slice(&cand_chunk[0..out_features]);
+
+        if neg_to_keep == 0 {
+            continue;
+        }
+
+        // 2. Reset negative index buffer to `1..num_candidates`
+        for (slot, idx) in neg_indices.iter_mut().enumerate() {
+            *idx = slot + 1;
+        }
+
+        // 3. Select and sort the top `neg_to_keep` highest-scoring negatives
+        let selected_neg_indices = if neg_to_keep < n_neg_avail {
+            neg_indices.select_nth_unstable_by(neg_to_keep - 1, |&a, &b| {
+                score_chunk[b].total_cmp(&score_chunk[a])
+            });
+            let top_negs = &mut neg_indices[0..neg_to_keep];
+            top_negs.sort_unstable_by(|&a, &b| score_chunk[b].total_cmp(&score_chunk[a]));
+            top_negs
+        } else {
+            neg_indices.sort_unstable_by(|&a, &b| score_chunk[b].total_cmp(&score_chunk[a]));
+            &mut neg_indices[..]
+        };
+
+        for &idx in selected_neg_indices.iter() {
+            out_movie_ids.push(movie_chunk[idx]);
+            out_scores.push(score_chunk[idx]);
+            let cand_start = idx * out_features;
+            out_cand_reprs.extend_from_slice(&cand_chunk[cand_start..cand_start + out_features]);
+        }
+    }
+
+    (out_movie_ids, out_scores, out_cand_reprs)
+}
+
 /// get timestamp in seconds for "now".  timestamp is the number of seconds since
 /// January 1st, 1970 at UTC.
 ///
@@ -354,4 +444,42 @@ pub(crate) fn check_path(path_str: &str, description: &str) -> Result<(), Box<dy
     Ok(())
 }
 
+#[test]
+fn test_get_pos_and_top_k_neg_desc_diagnostic() {
+    // 2 users, 5 candidates each (col 0 = positive, cols 1..5 = negatives), out_features = 2
+    // User 0's positive (id 100) has the LOWEST score (-10.0) and must still stay at index 0.
+    let movie_ids = vec![
+        100, 101, 102, 103, 104,
+        200, 201, 202, 203, 204,
+    ];
+    let scores = vec![
+        -10.0, 0.2, 0.9, 0.1, 0.7,
+        0.5, 0.8, 0.3, 0.95, 0.4,
+    ];
+    let cand_reprs: Vec<f32> = movie_ids
+        .iter()
+        .flat_map(|&id| [id as f32, -(id as f32)])
+        .collect();
 
+    let (out_ids, out_scores, out_reprs) =
+        get_pos_and_top_k_neg_desc_diagnostic(2, &movie_ids, &scores, &cand_reprs, 5, 3, 2);
+
+    // User 0: pos=100, top-2 negs = 102 (0.9), 104 (0.7)
+    // User 1: pos=200, top-2 negs = 203 (0.95), 201 (0.8)
+    assert_eq!(out_ids, vec![100, 102, 104, 200, 203, 201]);
+    assert_eq!(out_scores, vec![-10.0, 0.9, 0.7, 0.5, 0.95, 0.8]);
+    assert_eq!(
+        out_reprs,
+        vec![
+            100.0, -100.0, 102.0, -102.0, 104.0, -104.0,
+            200.0, -200.0, 203.0, -203.0, 201.0, -201.0,
+        ]
+    );
+
+    // Edge case: top_k = 1 keeps only positives
+    let (pos_only_ids, pos_only_scores, pos_only_reprs) =
+        get_pos_and_top_k_neg_desc_diagnostic(2, &movie_ids, &scores, &cand_reprs, 5, 1, 2);
+    assert_eq!(pos_only_ids, vec![100, 200]);
+    assert_eq!(pos_only_scores, vec![-10.0, 0.5]);
+    assert_eq!(pos_only_reprs, vec![100.0, -100.0, 200.0, -200.0]);
+}

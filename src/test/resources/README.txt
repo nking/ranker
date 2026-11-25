@@ -66,6 +66,9 @@ the model_repositories contents:
    github.com/nking/recommender_systems.git
 - the cross-encoder graph-ranker model was built from
   export_src/test/python/movie_lens_ranker_export/test_export.py
+- the reranker cross-encoder was built from the hugging face/pytorch
+  pipeline in github.com/nking/reranker.git
+  
 
 the checkpoint-bucket contents were trained on Kaggle T4x2 GPUs:
    https://www.kaggle.com/code/nicholeasuniquename/ranker-cross-encoder-w-gatv2

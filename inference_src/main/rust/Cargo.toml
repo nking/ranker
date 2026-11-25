@@ -151,3 +151,11 @@ path = "../../test/rust/test/write_reranker_parquet.rs"
 [[test]]
 name = "reranker_prompt_formatter_test"
 path = "../../test/rust/test/reranker_prompt_formatter_test.rs"
+
+[[test]]
+name = "hard_negative_sampling_test"
+path = "../../test/rust/test/hard_negative_sampling_test.rs"
+
+[[test]]
+name = "util_sampling_test"
+path = "../../test/rust/test/util_sampling_test.rs"

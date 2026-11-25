@@ -75,17 +75,24 @@ pub struct AppConfig {
     //     of saved model directories.  one of those is assets.extra and that directory contains
     //     the hyperparameters.json file for the model metadata
     #[arg(long, env = "QUERY_SAVED_MODELS_URI")]
-    pub query_saved_models_uri : String,
+    pub query_models_path : String,
 
     // path to the ranker saved_models directory holding the query saved_models..   expecting to see
-    //   sub-directory of version numbers e.g. 1,2 and those subdirectories have the contents
+    //   sub-directory of version numbers e.g. 1, 2 and those subdirectories have the contents
     //   of saved model directories.  one of those is assets.extra and that directory contains
     //   the hyperparameters.json file for the model metadata
     #[arg(long, env = "RANKER_SAVED_MODELS_URI")]
-    pub ranker_saved_models_uri : String,
+    pub ranker_models_path : String,
 
-    // whether the ranker saved models are serveving the batch signatures else single inference signatures
-    #[arg(long, env = "RANKER_SERVING_IS_BATCHED")]
+    // path to the reranker triton directory.   expecting to see
+    //   sub-directory of version numbers e.g. 1, 2 and those subdirectories have the contents
+    //   of triton model directories.  each directory also contains
+    #[arg(long, env = "RERANKER_SAVED_MODELS_URI")]
+    pub reranker_models_path : String,
+
+    // whether the ranker saved models are serving the batch signatures else single inference signatures
+    #[arg(long, env = "RANKER_SERVING_IS_BATCHED",
+        default_value_t = true, action = clap::ArgAction::Set)]
     pub ranker_serving_is_batched : bool,
 }
 
@@ -126,8 +133,9 @@ impl AppConfig {
         self.movie_embeddings_path = Self::resolve_string_path(base_dir, &self.movie_embeddings_path);
         self.movies_path = Self::resolve_string_path(base_dir, &self.movies_path);
         self.movie_tiers_path = Self::resolve_string_path(base_dir, &self.movie_tiers_path);
-        self.query_saved_models_uri = Self::resolve_string_path(base_dir, &self.query_saved_models_uri);
-        self.ranker_saved_models_uri = Self::resolve_string_path(base_dir, &self.ranker_saved_models_uri);
+        self.query_models_path = Self::resolve_string_path(base_dir, &self.query_models_path);
+        self.ranker_models_path = Self::resolve_string_path(base_dir, &self.ranker_models_path);
+        self.reranker_models_path = Self::resolve_string_path(base_dir, &self.reranker_models_path);
 
         self.ratings_uris = self
             .ratings_uris

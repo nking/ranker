@@ -31,7 +31,7 @@ pub struct RankerModelMetadata {
     #[arg(long, env = "NUM_CANDIDATES",  default_value_t = 70)]
     pub num_candidates : usize,
 
-    #[arg(long, env = "EMBED_LEN",  default_value_t = 32)]
+    #[arg(long, env = "EMBED_LEN",  default_value_t = 16)]
     pub embed_len : usize,
 
     #[arg(long, env = "NUM_CATALOG_USERS",  default_value_t = 6040)]

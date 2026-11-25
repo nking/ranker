@@ -163,7 +163,7 @@ pub fn get_ranker_metadata_uri(config: AppConfig) -> String {
     };
     let ranker_metadata_uri = format!(
         "{}/{}/assets.extra/{}",
-        config.ranker_saved_models_uri.trim_end_matches('/'), 1, filename);
+        config.ranker_models_path.trim_end_matches('/'), 1, filename);
 
     ranker_metadata_uri
 }
@@ -173,7 +173,7 @@ pub fn get_ranker_training_hyperparameters_uri(config: AppConfig) -> String {
     let filename = "training_hyperparameters.json";
     let ranker_metadata_uri = format!(
         "{}/{}/assets.extra/{}",
-        config.ranker_saved_models_uri.trim_end_matches('/'), 1, filename);
+        config.ranker_models_path.trim_end_matches('/'), 1, filename);
 
     ranker_metadata_uri
 }

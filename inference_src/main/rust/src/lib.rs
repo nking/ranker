@@ -20,6 +20,9 @@ pub mod app_config;
 pub mod ranker_model_metadata;
 pub mod query_model_metadata;
 
+pub mod util_sampling;
+pub mod hard_negative_sampling;
+
 pub mod reranker_model_metadata;
 pub mod reranker_prompt_formatter;
 

@@ -34,8 +34,11 @@ mod app_config_tests {
               "ranker_n_local_devices": 1,
               "ranker_top_k": 20,
               "persisted_index_path": "./target/movie_embeddings_indexer",
-              "query_saved_models_uri": "../../../src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/",
-              "ranker_saved_models_uri": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/",
+              "query_models_path": "../../../src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/",
+              "ranker_models_path": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/",
+              "reranker_models_path": "../../../src/test/resources/model_repositories/triton_models/qwen-reranker/",
+              "query_yaml_uri" : "../../../src/test/resources/prompts/query-v2.0.0.yaml",
+              "passages_yaml_uri" : "../../../src/test/resources/prompts/passages-v2.0.0.yaml",
               "ranker_serving_is_batched" : true
         }"#;
 

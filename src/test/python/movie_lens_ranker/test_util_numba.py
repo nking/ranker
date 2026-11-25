@@ -18,7 +18,7 @@ class NumbaOpsTest(TestCase):
         
         np.testing.assert_array_equal(c, expected, strict=True)
     
-    def row_wise_subtract(self):
+    def test_row_wise_subtract(self):
         #def row_wise_subtract(arr1:np.ndarray, arr2:np.ndarray, pad_value:int) -> np.ndarray:
         pad_value = -1
         a = np.array([[row * 4 + col for col in range(4)] for row in range(2)])
@@ -31,7 +31,7 @@ class NumbaOpsTest(TestCase):
         
         np.testing.assert_array_equal(c, expected, strict=True)
     
-    def simultaneous_shuffle(self):
+    def test_simultaneous_shuffle(self):
         seed = 0
         a = np.array([[row * 4 + col for col in range(4)] for row in range(2)])
         b = np.roll(a, shift=1, axis=1)

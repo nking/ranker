@@ -1,10 +1,14 @@
 use std::collections::HashMap;
 use std::error::Error;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
+use arc_swap::ArcSwap;
 use tonic::transport::{Channel, Endpoint};
 // use crate:: means look inside this project
 use crate::ranker_graph_builder::{JraphGraph};
 use crate::pb::{UsersRequest, MoviesRequest};
+use crate::query_model_metadata::QueryModelMetadata;
 use crate::ranker_model_metadata::RankerModelMetadata;
 use crate::reranker_model_metadata::RerankerModelMetadata;
 use crate::tensorflow::{
@@ -20,37 +24,55 @@ use crate::tensorflow::serving::model_service_client::ModelServiceClient;
 use crate::tensorflow::serving::model_spec::VersionChoice;
 use crate::tensorflow::serving::model_version_status::State;
 
-use crate::triton::{grpc_inference_service_client::GrpcInferenceServiceClient, model_infer_request::{InferInputTensor, InferRequestedOutputTensor}, InferTensorContents, ModelInferRequest, ModelReadyRequest, ModelMetadataRequest};
+use crate::triton::{grpc_inference_service_client::GrpcInferenceServiceClient,
+    model_infer_request::{InferInputTensor, InferRequestedOutputTensor},
+    InferTensorContents, ModelInferRequest, ModelReadyRequest, ModelMetadataRequest};
 const CLIENT_CONNECT_TIMEOUT: u64 = 5;
 
 #[derive(Debug)]
 pub struct QueryModelClient {
     pub client: PredictionServiceClient<Channel>,
     pub model_service_client: ModelServiceClient<Channel>,
-    pub embed_len: usize,
+    model_metadata_dict: ArcSwap<HashMap<i64, Arc<QueryModelMetadata>>>,
+    metadata_write_lock: Mutex<()>,
+    model_latest_version: AtomicI64,
+    models_path : String,
 }
 
 #[derive(Debug)]
 pub struct CandidateModelClient {
+    // because candidate is a complement tower model to QueryModelClient,
+    // the QueryModelClient metadata dict is usable for this client too
     pub client: PredictionServiceClient<Channel>,
-    pub embed_len: usize
+    pub model_service_client: ModelServiceClient<Channel>,
+    model_metadata_dict: ArcSwap<HashMap<i64, Arc<QueryModelMetadata>>>,
+    metadata_write_lock: Mutex<()>,
+    model_latest_version: AtomicI64,
+    models_path : String,
 }
 
 #[derive(Debug)]
 pub struct RankerModelClient {
     pub client: PredictionServiceClient<Channel>,
-    pub metadata: RankerModelMetadata,
     pub model_service_client: ModelServiceClient<Channel>,
+    model_metadata_dict: ArcSwap<HashMap<i64, Arc<RankerModelMetadata>>>,
+    metadata_write_lock: Mutex<()>,
+    pub model_latest_version: AtomicI64,
+    models_path : String,
+    ranker_serving_is_batched: bool,
 }
 
 #[derive(Debug)]
 pub struct RerankerModelClient {
     pub client: GrpcInferenceServiceClient<Channel>,
-    pub metadata: RerankerModelMetadata,
+    model_metadata_dict: ArcSwap<HashMap<i64, Arc<RerankerModelMetadata>>>,
+    metadata_write_lock: Mutex<()>,
+    pub model_latest_version: AtomicI64,
+    models_path : String,
 }
 
 impl QueryModelClient {
-    pub async fn new(uri: String, embed_len: usize) -> Self {
+    pub async fn new(uri: String, query_models_path : String) -> Self {
 
         let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
 
@@ -60,11 +82,27 @@ impl QueryModelClient {
             .await
             .expect("Failed to connect to TFS for query model");
 
+        let client = ModelServiceClient::new(channel.clone());
+        let mut versions = get_all_model_versions("query", client).await
+            .expect("Failed to fetch query model versions");
+        versions.sort_unstable();
+        let query_latest_ver = versions[versions.len() - 1];
+
+        let query_metadata_uri = format!(
+            "{}/{}/assets.extra/{}",
+            query_models_path.trim_end_matches('/'), query_latest_ver, "hyperparameters.json");
+        let query_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri)?;
+        let mut initial_query_dict = HashMap::new();
+        initial_query_dict.insert(query_latest_ver, Arc::new(query_metadata.clone()));
+
         Self {
             // Channel is an Arc-backed handle; cloning it shares the exact same TCP connection
             client: PredictionServiceClient::new(channel.clone()),
-            model_service_client: ModelServiceClient::new(channel),
-            embed_len,
+            model_service_client: client,
+            model_metadata_dict : ArcSwap::from_pointee(initial_query_dict),
+            metadata_write_lock: Mutex::new(()),
+            model_latest_version: AtomicI64::new(query_latest_ver),
+            models_path: query_models_path.clone()
         }
 
     }
@@ -82,12 +120,66 @@ impl QueryModelClient {
         Ok(versions[versions.len() - 1])
     }
 
+    pub async fn get_or_fetch_metadata(
+        &self,
+        query_model_version_choice: Option<VersionChoice>,
+    ) -> Result<Arc<QueryModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
+        let query_version_num: i64 = match query_model_version_choice {
+            Some(VersionChoice::Version(v)) => v,
+            _ => self.get_latest_model_version().await?,
+        };
+
+        // FAST Lock-free read.
+        // 99.99% of requests will hit this and return instantly.
+        let map = self.model_metadata_dict.load();
+        if let Some(meta) = map.get(&query_version_num) {
+            return Ok(meta.clone());
+        }
+
+        // ACQUIRE LOCK
+        // Only one thread gets past this line at a time.
+        // this is a heavy lock and is dropped when the variable goes out of scope when method is done
+        // but below we add a drop (unlock) for good code form.
+        let _guard = self.metadata_write_lock.lock().unwrap();
+
+        // single or batched TFS serving?
+        let filename = "hyperparameters.json";
+
+        let query_metadata_uri = build_tfs_metadata_uri(&self.models_path,
+            query_version_num, filename);
+        let new_metadata = QueryModelMetadata::load_from_file(&query_metadata_uri)?;
+
+        // FETCH (CPU or I/O bound): Do this outside the map update
+        let new_metadata_arc = Arc::new(new_metadata);
+
+        // COPY-ON-WRITE: Safely update the dictionary
+        // `rcu` automatically loops if another thread modified the map while we were working,
+        // ensuring we don't accidentally overwrite someone else's concurrent insertion.
+        self.model_metadata_dict.rcu(|current_map| {
+            // "Shallow clone": copies the i64 keys and Arc pointers. Takes nanoseconds.
+            let mut new_map = (**current_map).clone();
+
+            // Insert our new item
+            new_map.insert(query_version_num, new_metadata_arc.clone());
+
+            Arc::new(new_map)
+        });
+
+        drop(_guard);
+
+        Ok(new_metadata_arc)
+    }
+
     pub async fn get_users_embeddings(&self, request: UsersRequest,
         query_model_version_choice: Option<VersionChoice>) -> Result<Vec<f32>, Box<dyn Error>> {
 
         let n_valid_users : usize = request.n_users as usize;
 
         let predict_req: PredictRequest = build_query_model_inputs(request, query_model_version_choice);
+
+        let query_metadata = self.get_or_fetch_metadata(query_model_version_choice.clone())
+            .await.expect("error fetching query metadata");
+        let embed_len = query_metadata.embed_len;
 
         // Send the request
         let response = self.client.clone().predict(predict_req).await?;
@@ -111,7 +203,7 @@ impl QueryModelClient {
             };
 
             // Reshape into batched vectors
-            let valid_len = n_valid_users * self.embed_len;
+            let valid_len = n_valid_users * embed_len;
 
             // 3. Truncate the flat vector to drop padding graphs at the end
             if flat_embedding.len() > valid_len {
@@ -124,11 +216,22 @@ impl QueryModelClient {
         }
     }
 
+    pub async fn update_latest_model_version(
+        &self,
+    ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+        // Query both TFS endpoints concurrently
+        let query_ver = self.get_latest_model_version().await.expect("Error getting latest model version");
+
+        self.model_latest_version.store(query_ver, Ordering::Release);
+
+        Ok(query_ver)
+    }
+
 }
 
 impl RankerModelClient {
 
-    pub async fn new(uri: String, metadata: RankerModelMetadata) -> Self {
+    pub async fn new(uri: String, ranker_models_path : String,  ranker_serving_is_batched: bool) -> Self {
 
         let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
 
@@ -144,11 +247,34 @@ impl RankerModelClient {
             .max_decoding_message_size(MAX_MESSAGE_SIZE)
             .max_encoding_message_size(MAX_MESSAGE_SIZE);
 
+        let client = ModelServiceClient::new(channel.clone());
+        let mut versions = get_all_model_versions("graph-ranker", client).await
+            .expect("Failed to fetch graph-ranker model versions");
+        versions.sort_unstable();
+        let latest_ver = versions[versions.len() - 1];
+
+        let filename = if ranker_serving_is_batched {
+            "metadata_batch.json"
+        } else {
+            "metadata_single.json"
+        };
+
+        let ranker_metadata_uri = format!(
+            "{}/{}/assets.extra/{}",
+            ranker_models_path.trim_end_matches('/'), latest_ver, filename);
+        let ranker_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri)?;
+        let mut initial_ranker_dict = HashMap::new();
+        initial_ranker_dict.insert(latest_ver, Arc::new(ranker_metadata.clone()));
+
         // Channel is an Arc-backed handle; cloning it shares the exact same TCP connection
         Self {
             client: tfs_client,
-            metadata: metadata,
             model_service_client: ModelServiceClient::new(channel),
+            model_metadata_dict : ArcSwap::from_pointee(initial_ranker_dict),
+            metadata_write_lock: Mutex::new(()),
+            model_latest_version: AtomicI64::new(latest_ver),
+            models_path: ranker_models_path.clone(),
+            ranker_serving_is_batched: ranker_serving_is_batched
         }
     }
 
@@ -165,11 +291,84 @@ impl RankerModelClient {
         Ok(versions[versions.len()-1])
     }
 
+    pub async fn update_latest_model_version(
+        &self,
+    ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+        // Query both TFS endpoints concurrently
+        let query_ver = self.get_latest_model_version().await.expect("Error getting latest model version");
+
+        self.model_latest_version.store(query_ver, Ordering::Release);
+
+        Ok(query_ver)
+    }
+
+    pub async fn get_or_fetch_metadata(&self, ranker_model_version_choice: Option<VersionChoice>)
+        -> Result<Arc<RankerModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
+
+        let ranker_version_num: i64 = match ranker_model_version_choice {
+            Some(VersionChoice::Version(v)) => v,
+            _ => self.get_latest_model_version().await?,
+        };
+
+        // FAST Lock-free read.
+        // 99.99% of requests will hit this and return instantly.
+        let map = self.model_metadata_dict.load();
+        if let Some(meta) = map.get(&ranker_version_num) {
+            return Ok(meta.clone());
+        }
+
+        // ACQUIRE LOCK
+        // Only one thread gets past this line at a time.
+        // this is a heavy lock and is dropped when the variable goes out of scope when method is done
+        // but below we add a drop (unlock) for good code form.
+        let _guard = self.metadata_write_lock.lock().unwrap();
+
+        // DOUBLE CHECK
+        // If we were waiting for the lock, another thread might have just loaded it.
+        let map = self.model_metadata_dict.load();
+        if let Some(meta) = map.get(&ranker_version_num) {
+            return Ok(meta.clone());
+        }
+
+        // single or batched TFS serving?
+        let filename = if self.ranker_serving_is_batched {
+            "metadata_batch.json"
+        } else {
+            "metadata_single.json"
+        };
+
+        let ranker_metadata_uri = build_tfs_metadata_uri(&self.models_path,
+            ranker_version_num, filename);
+        let new_metadata = RankerModelMetadata::load_from_file(&ranker_metadata_uri)?;
+
+        // FETCH (CPU or I/O bound): Do this outside the map update
+        let new_metadata_arc = Arc::new(new_metadata);
+
+        // COPY-ON-WRITE: Safely update the dictionary
+        // `rcu` automatically loops if another thread modified the map while we were working,
+        // ensuring we don't accidentally overwrite someone else's concurrent insertion.
+        self.model_metadata_dict.rcu(|current_map| {
+            // "Shallow clone": copies the i64 keys and Arc pointers. Takes nanoseconds.
+            let mut new_map = (**current_map).clone();
+            // Insert our new item
+            new_map.insert(ranker_version_num, new_metadata_arc.clone());
+            Arc::new(new_map)
+        });
+
+        drop(_guard);
+
+        Ok(new_metadata_arc)
+    }
+
+
     pub async fn get_candidate_ranks(&self, padded_super_graph: JraphGraph, embed_len : usize,
         ranker_model_version_choice: Option<VersionChoice>) -> Result<Vec<f32>, Box<dyn Error>> {
 
+        let metadata = self.get_or_fetch_metadata(
+            ranker_model_version_choice.clone())
+            .await.expect("Error fetching ranker metadata");
         let predict_req : PredictRequest = build_graph_ranker_proto_inputs(padded_super_graph,
-            embed_len, self.metadata.batch_size > 1, ranker_model_version_choice);
+            embed_len, metadata.batch_size > 1, ranker_model_version_choice);
 
         //println!("Sending gRPC request to TF Serving for GraphRanker...");
 
@@ -258,12 +457,10 @@ impl RankerModelClient {
 
         Ok((outputs, user_reprs, cand_reprs))
     }
-
 }
 
-
 impl CandidateModelClient {
-    pub async fn new(uri: String, embed_len: usize) -> Self {
+    pub async fn new(uri: String, models_path: String) -> Self {
         let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
 
         let channel = endpoint
@@ -271,10 +468,93 @@ impl CandidateModelClient {
             .connect()
             .await
             .expect("Failed to connect to TFS for candidate model");
+
+        let client = ModelServiceClient::new(channel.clone());
+        let mut versions = get_all_model_versions("candidate", client).await
+            .expect("Failed to fetch candidate model versions");
+        versions.sort_unstable();
+        let latest_ver = versions[versions.len() - 1];
+
+        let metadata_uri = format!(
+            "{}/{}/assets.extra/{}",
+            models_path.trim_end_matches('/'), latest_ver, "hyperparameters.json");
+        let query_metadata = QueryModelMetadata::load_from_file(&metadata_uri)?;
+        let mut initial_query_dict = HashMap::new();
+        initial_query_dict.insert(latest_ver, Arc::new(query_metadata.clone()));
+
         Self {
             client: PredictionServiceClient::new(channel),
-            embed_len: embed_len
+            model_service_client: client,
+            model_metadata_dict: ArcSwap::from_pointee(initial_query_dict),
+            metadata_write_lock: Mutex::new(()),
+            model_latest_version: AtomicI64::new(latest_ver),
+            models_path: models_path.clone()
         }
+    }
+
+
+    pub async fn get_or_fetch_metadata(
+        &self,
+        model_version_choice: Option<VersionChoice>,
+    ) -> Result<Arc<QueryModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
+        let version_num: i64 = match model_version_choice {
+            Some(VersionChoice::Version(v)) => v,
+            _ => self.get_latest_model_version().await?,
+        };
+
+        // FAST Lock-free read.
+        // 99.99% of requests will hit this and return instantly.
+        let map = self.model_metadata_dict.load();
+        if let Some(meta) = map.get(&version_num) {
+            return Ok(meta.clone());
+        }
+
+        // ACQUIRE LOCK
+        // Only one thread gets past this line at a time.
+        // this is a heavy lock and is dropped when the variable goes out of scope when method is done
+        // but below we add a drop (unlock) for good code form.
+        let _guard = self.metadata_write_lock.lock().unwrap();
+
+        // single or batched TFS serving?
+        let filename = "hyperparameters.json";
+
+        let metadata_uri = build_tfs_metadata_uri(&self.models_path,
+            version_num, filename);
+        // same metadata as Query model so use template:
+        let new_metadata = QueryModelMetadata::load_from_file(&metadata_uri)?;
+
+        // FETCH (CPU or I/O bound): Do this outside the map update
+        let new_metadata_arc = Arc::new(new_metadata);
+
+        // COPY-ON-WRITE: Safely update the dictionary
+        // `rcu` automatically loops if another thread modified the map while we were working,
+        // ensuring we don't accidentally overwrite someone else's concurrent insertion.
+        self.model_metadata_dict.rcu(|current_map| {
+            // "Shallow clone": copies the i64 keys and Arc pointers. Takes nanoseconds.
+            let mut new_map = (**current_map).clone();
+
+            // Insert our new item
+            new_map.insert(version_num, new_metadata_arc.clone());
+
+            Arc::new(new_map)
+        });
+
+        drop(_guard);
+
+        Ok(new_metadata_arc)
+    }
+
+    pub async fn get_latest_model_version(
+        &self,
+    ) -> Result<i64, Box<dyn Error + Send + Sync>> {
+
+        let client = self.model_service_client.clone();
+
+        let mut versions = get_all_model_versions("candidate", client).await
+            .expect("Failed to fetch candidate model versions");
+
+        versions.sort_unstable();
+        Ok(versions[versions.len() - 1])
     }
 
     pub async fn get_movies_embeddings(&self, request: MoviesRequest,
@@ -283,6 +563,9 @@ impl CandidateModelClient {
         let n_valid_movies : usize = request.n_movies as usize;
 
         let predict_req: PredictRequest = build_candidate_model_inputs(request, candidate_model_version_choice);
+
+        let metadata = self.get_or_fetch_metadata(candidate_model_version_choice.clone())
+            .await.expect("Error getting metadata for candidate model");
 
         // Send the request
         let response = self.client.clone().predict(predict_req).await?;
@@ -306,7 +589,7 @@ impl CandidateModelClient {
             };
 
             // Reshape into batched vectors
-            let valid_len = n_valid_movies * self.embed_len;
+            let valid_len = n_valid_movies * metadata.embed_len;
 
             // 3. Truncate the flat vector to drop padding graphs at the end
             if flat_embedding.len() > valid_len {
@@ -321,7 +604,8 @@ impl CandidateModelClient {
 }
 
 impl RerankerModelClient {
-    pub async fn new(uri: String, metadata: RerankerModelMetadata) -> Self {
+    pub async fn new(uri: String, reranker_models_path : String) -> Self {
+
         let endpoint = Endpoint::from_shared(uri).expect("Invalid URI format");
 
         let channel = endpoint
@@ -335,9 +619,44 @@ impl RerankerModelClient {
             .max_decoding_message_size(MAX_MESSAGE_SIZE)
             .max_encoding_message_size(MAX_MESSAGE_SIZE);
 
+        let model_name = "qwen-reranker";
+        // get latest model version
+        let req = ModelMetadataRequest {
+            name: model_name.clone().into(),
+            version: String::new(), // Empty string queries all active versions
+        };
+
+        let resp = triton_client.clone().model_metadata(req)
+            .await.expect("Failed to fetch qwen-reranker metadata")
+            .into_inner();
+
+        let mut versions: Vec<i64> = resp
+            .versions
+            .into_iter()
+            .filter_map(|v| v.parse::<i64>().ok())
+            .collect();
+
+        if versions.is_empty() {
+            return Err(format!(
+                "No valid numeric versions found in Triton for model '{}'",
+                model_name
+            ).into());
+        }
+
+        versions.sort_unstable();
+        let latest_ver = *versions.last().unwrap();
+
+
+        let reranker_metadata_uri = format!(
+            "{}/{}/{}",
+            reranker_models_path.trim_end_matches('/'), latest_ver, "training_hyperparameters.json");
+        let reranker_metadata = RerankerModelMetadata::load_from_file(&reranker_metadata_uri)?;
+        let mut initial_reranker_dict = HashMap::new();
+        initial_reranker_dict.insert(latest_ver, Arc::new(reranker_metadata.clone()));
+
         Self {
             client: triton_client,
-            metadata,
+            model_metadata_dict
         }
     }
 
@@ -346,6 +665,7 @@ impl RerankerModelClient {
         &self,
         model_version: Option<i64>,
     ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+        editing
         let req = ModelReadyRequest {
             name: self.metadata.model_name.clone(),
             version: model_version.map(|v| v.to_string()).unwrap_or_default(),
@@ -949,3 +1269,18 @@ impl IntoTensorProto for Vec<String> {
         unimplemented!("Conversion to 64-bit tensor is invalid for Vec<String>")
     }
 }
+
+// filename can be a &str, String, &Path, or anything implementing AsRef<str> or Display
+fn build_tfs_metadata_uri(
+    saved_models_uri: &str,
+    model_version_num: i64,
+    filename: &str,
+) -> String {
+    format!(
+        "{}/{}/assets.extra/{}",
+        saved_models_uri.trim_end_matches('/'),
+        model_version_num,
+        filename
+    )
+}
+
