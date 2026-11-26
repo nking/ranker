@@ -1,9 +1,9 @@
 ﻿use std::cmp::min;
-use std::collections::{HashMap, HashSet};
-use std::error::Error;
+use std::collections::{HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, atomic::{AtomicI64, Ordering}};
+use std::sync::{Arc};
 use arc_swap::{ArcSwap, Guard};
+use futures::TryFutureExt;
 use crate::model_client::{QueryModelClient, RankerModelClient, RerankerModelClient};
 use crate::embeddings_ann::Searcher;
 use crate::ranker_graph_builder::{build_enriched_padded_supergraph, JraphGraph};
@@ -150,16 +150,22 @@ impl Orchestrator {
     }
 
 
-    pub fn get_or_fetch_query_metadata(&self, query_model_version_choice: Option<VersionChoice>)
+    pub async fn get_or_fetch_query_metadata(&self, query_model_version_choice: Option<VersionChoice>)
         -> Result<Arc<QueryModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
 
-        self.query_model.get_or_fetch_metadata(query_model_version_choice)
+        self.query_model.get_or_fetch_metadata(query_model_version_choice).await
     }
 
-    pub fn get_or_fetch_ranker_metadata(&self, ranker_model_version_choice: Option<VersionChoice>)
+    pub async fn get_or_fetch_ranker_metadata(&self, ranker_model_version_choice: Option<VersionChoice>)
         -> Result<Arc<RankerModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
 
-        self.ranker_model.get_or_fetch_metadata(ranker_model_version_choice)
+        self.ranker_model.get_or_fetch_metadata(ranker_model_version_choice).await
+    }
+
+    pub async fn get_or_fetch_reranker_metadata(&self, reranker_model_version_choice: Option<i64>)
+        -> Result<Arc<RerankerModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
+
+        self.reranker_model.get_or_fetch_metadata(reranker_model_version_choice).await
     }
 
     pub async fn reload_embeddings(&self, movie_embeddings_uri: &str, num_candidates: usize) -> Result<(), Box<dyn std::error::Error>> {
@@ -219,8 +225,34 @@ impl Orchestrator {
 
     pub fn get_ranker_batch_size(&self, ranker_model_version_choice: Option<VersionChoice>)
     -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
-        let ranker_metadata
-            = self.get_or_fetch_ranker_metadata(ranker_model_version_choice)?;
+        /*
+        3 ways to block on the future self.get_or_fetch_ranker_metadata
+        (1) No Tokio Runtime Exists Yet (Dedicated Runtime)
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            let ranker_metadata = rt.block_on(
+                self.get_or_fetch_ranker_metadata(ranker_model_version_choice)
+            )?;
+            Ok(ranker_metadata.batch_size)
+         (2) Sync Code Called From an Async Context (Handle::current())
+            let handle = tokio::runtime::Handle::current();
+            let ranker_metadata = handle.block_on(
+                self.get_or_fetch_ranker_metadata(ranker_model_version_choice)
+            )?;
+            Ok(ranker_metadata.batch_size)
+         (3) Unknown Context (futures::executor::block_on).  do not use if method relies on
+            Tokio's I/O reactor or timers (for example, if it only awaits a futures::lock::Mutex or an in-memory channel).
+            If it uses tokio::net, tokio::time, or tonic gRPC channels, user pattern (1) or (2)
+                let ranker_metadata = futures::executor::block_on(
+                    self.get_or_fetch_ranker_metadata(ranker_model_version_choice)
+                )?;
+                Ok(ranker_metadata.batch_size)
+         */
+        let handle = tokio::runtime::Handle::current();
+        let ranker_metadata = handle.block_on(
+            self.get_or_fetch_ranker_metadata(ranker_model_version_choice)
+        )?;
         Ok(ranker_metadata.batch_size)
     }
 
@@ -234,6 +266,7 @@ impl Orchestrator {
     ) -> Result<RankedMovies, Status> {
 
         let _ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .await
             .map_err(|e| {
                 eprintln!("Failed to fetch ranker metadata: {}", e);
                 Status::internal(format!("Internal metadata error: {}", e))
@@ -266,7 +299,8 @@ impl Orchestrator {
 
         let n_users = user_ids.len();
 
-        let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+        let ranker_metadata
+            = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone()).await
             .map_err(|e| {
                 eprintln!("Failed to fetch ranker metadata: {}", e);
                 Status::internal(format!("Internal metadata error: {}", e))
@@ -347,6 +381,7 @@ impl Orchestrator {
         let n_users = user_ids.len();
 
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .await
             .map_err(|e| {
                 eprintln!("Failed to fetch ranker metadata: {}", e);
                 Status::internal(format!("Internal metadata error: {}", e))
@@ -381,7 +416,8 @@ impl Orchestrator {
             self.ranker_n_local_devices
         );
 
-        let final_response :  Result<(Vec<f32>, Vec<f32>, Vec<f32>), Box<dyn Error>> = self.ranker_model.get_candidate_diagnostics(
+        let final_response :  Result<(Vec<f32>, Vec<f32>, Vec<f32>), Box<dyn std::error::Error + Send + Sync>>
+            = self.ranker_model.get_candidate_diagnostics(
             padded_super_graph_arrays, searcher.get_embed_len(), ranker_model_version_choice).await;
 
         /*
@@ -453,6 +489,7 @@ impl Orchestrator {
             ranker_model_version_choice.clone()).await?;
 
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .await
             .map_err(|e| {
                 // Optional: log it so you can see the error in your server console
                 eprintln!("Failed to fetch ranker metadata: {}", e);
@@ -502,6 +539,7 @@ impl Orchestrator {
             &user_ids, &user_reqs.timestamps, &user_embeddings, &ann_movie_ids, ranker_model_version_choice.clone()).await?;
 
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .await
             .map_err(|e| {
                 // Optional: log it so you can see the error in your server console
                 eprintln!("Failed to fetch ranker metadata: {}", e);
@@ -564,6 +602,7 @@ impl Orchestrator {
             &user_ids, &user_reqs.timestamps, &user_embeddings, &ann_movie_ids, ranker_model_version_choice.clone()).await?;
 
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .await
             .map_err(|e| {
                 // Optional: log it so you can see the error in your server console
                 eprintln!("Failed to fetch ranker metadata: {}", e);
@@ -621,7 +660,7 @@ impl Orchestrator {
             _ => None
         };
         let ranker_metadata = self.get_or_fetch_ranker_metadata(
-            ranker_model_version_choice.clone())
+            ranker_model_version_choice.clone()).await
             .map_err(|e| {
                 // Optional: log it so you can see the error in your server console
                 eprintln!("Failed to fetch ranker metadata: {}", e);
@@ -877,6 +916,7 @@ impl Orchestrator {
         );
 
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .await
             .map_err(|e| {
                 // Optional: log it so you can see the error in your server console
                 eprintln!("Failed to fetch ranker metadata: {}", e);
@@ -1006,6 +1046,7 @@ impl RecommenderService for Orchestrator {
             _ => None
         };
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .await
             .map_err(|e| {
                 // Optional: log it so you can see the error in your server console
                 eprintln!("Failed to fetch ranker metadata: {}", e);
@@ -1078,6 +1119,7 @@ impl RecommenderService for Orchestrator {
             _ => None
         };
         let ranker_metadata = self.get_or_fetch_ranker_metadata(ranker_model_version_choice.clone())
+            .await
             .map_err(|e| {
                 // Optional: log it so you can see the error in your server console
                 eprintln!("Failed to fetch ranker metadata: {}", e);

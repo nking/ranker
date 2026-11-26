@@ -45,13 +45,63 @@ fn flat_to_rows(flat: &[i32], n_rows: usize, row_width: usize, pad_value: i32) -
         .collect()
 }
 
-/// Port of `HardNegativeSamplingTransform.py` wired directly to `UserHistory` and
-/// `RecommendedMovies`.
+/// Reads each user's valid movie IDs strictly `< target_ts` directly from `UserHistory`'s
+/// read-only dense arrays without allocating an intermediate `(batch_size * max_history)`
+/// padded buffer. Optionally prepends `prepend_ids[i]` at column 0 of each row.
+fn extract_history_before_timestamp(
+    history: &UserHistory,
+    user_ids: &[i32],
+    timestamps: &[i64],
+    prepend_ids: Option<&[i32]>,
+) -> Vec<Vec<i32>> {
+    let max_hist = history.max_history;
+    let pad_val = history.pad_value;
+    let ts_pad = history.ts_pad_value;
+
+    if max_hist == 0 {
+        return match prepend_ids {
+            Some(ids) => ids.iter().map(|&id| vec![id]).collect(),
+            None => vec![Vec::new(); user_ids.len()],
+        };
+    }
+
+    user_ids
+        .par_iter()
+        .zip(timestamps.par_iter())
+        .enumerate()
+        .map(|(i, (&uid, &target_ts))| {
+            let user_idx = history.resolve_user_idx(uid);
+            let start = user_idx * max_hist;
+            let end = start + max_hist;
+
+            let user_movies = &history.movie_ids[start..end];
+            let user_timestamps = &history.timestamps[start..end];
+
+            let cutoff_ts = target_ts.min(ts_pad);
+            let valid_end = user_timestamps.partition_point(|&ts| ts < cutoff_ts);
+
+            let extra = usize::from(prepend_ids.is_some());
+            let mut row = Vec::with_capacity(extra + valid_end);
+            if let Some(ids) = prepend_ids {
+                row.push(ids[i]);
+            }
+            for &m in &user_movies[..valid_end] {
+                if m != pad_val {
+                    row.push(m);
+                }
+            }
+            row
+        })
+        .collect()
+}
+
+/// Port of `HardNegativeSamplingTransform.py` wired directly to shared read-only `UserHistory`
+/// handles and owned catalog / `RecommendedMovies` data.
 pub struct HardNegativeSamplingTransform {
     history_lookup: Arc<UserHistory>,
     history_lookup_disliked: Arc<UserHistory>,
     all_movie_ids: Vec<i32>,
-    recommendations: Arc<RecommendedMovies>,
+    recommendations: RecommendedMovies,
     num_candidates: usize,
     strategy: SamplingStrategy,
     num_1_negatives: usize,
@@ -65,7 +115,7 @@ impl HardNegativeSamplingTransform {
         history_lookup: Arc<UserHistory>,
         history_lookup_disliked: Arc<UserHistory>,
         all_movie_ids: Vec<i32>,
-        recommendations: Arc<RecommendedMovies>,
+        recommendations: RecommendedMovies,
         num_candidates: usize,
         strategy: SamplingStrategy,
     ) -> Result<Self, String> {
@@ -148,7 +198,7 @@ impl HardNegativeSamplingTransform {
         }
 
         user_ids
-            .iter()
+            .par_iter()
             .map(|&uid| {
                 if uid < 1 || (uid as usize) > self.recommendations.num_users {
                     return Vec::new();
@@ -204,42 +254,19 @@ impl HardNegativeSamplingTransform {
             return Ok((vec![Vec::new(); n_users], rng));
         }
 
-        let movie_histories = {
-            let max_hist = self.history_lookup.max_history;
-            let flat = self.history_lookup.get_movieids_before_timestamp(
-                user_ids,
-                timestamps,
-                max_hist,
-                false,
-            );
-            flat_to_rows(&flat, n_users, max_hist, self.pad_value)
-        };
-
-        let movie_histories_disliked = {
-            let max_hist = self.history_lookup_disliked.max_history;
-            let flat = self.history_lookup_disliked.get_movieids_before_timestamp(
-                user_ids,
-                timestamps,
-                max_hist,
-                false,
-            );
-            flat_to_rows(&flat, n_users, max_hist, self.pad_value)
-        };
-
-        // Prepend positive_ids (when provided) so exclusion checks omit both history and positive
-        let watched_and_positive: Vec<Vec<i32>> = match positive_ids {
-            Some(pos_ids) => pos_ids
-                .iter()
-                .zip(movie_histories.iter())
-                .map(|(&pos_id, hist_row)| {
-                    let mut row = Vec::with_capacity(1 + hist_row.len());
-                    row.push(pos_id);
-                    row.extend_from_slice(hist_row);
-                    row
-                })
-                .collect(),
-            None => movie_histories,
-        };
+        // Read directly from shared read-only UserHistory buffers in one pass (no 2048-wide temp alloc)
+        let watched_and_positive = extract_history_before_timestamp(
+            &self.history_lookup,
+            user_ids,
+            timestamps,
+            positive_ids,
+        );
+        let movie_histories_disliked = extract_history_before_timestamp(
+            &self.history_lookup_disliked,
+            user_ids,
+            timestamps,
+            None,
+        );
 
         let seed1 = rng.next_u64() & 0x7FFF_FFFF;
         let type_4_neg = generate_type_4_negatives(
@@ -336,12 +363,24 @@ impl HardNegativeSamplingTransform {
             }
         };
 
-        // Backfill any leftover pad_values from the catalog
+        // Backfill any leftover pad_values from the catalog, avoiding the positive item and duplicates
         let n_catalog = self.all_movie_ids.len();
-        for neg_row in &mut negatives {
-            for slot in neg_row.iter_mut() {
-                if *slot == self.pad_value {
-                    *slot = self.all_movie_ids[rng.gen_range_usize(n_catalog)];
+        for (row_idx, neg_row) in negatives.iter_mut().enumerate() {
+            let excluded_pos = positive_ids.map(|ids| ids[row_idx]);
+            for slot_idx in 0..neg_row.len() {
+                if neg_row[slot_idx] == self.pad_value {
+                    let mut chosen = self.all_movie_ids[rng.gen_range_usize(n_catalog)];
+                    for _ in 0..64 {
+                        let cand = self.all_movie_ids[rng.gen_range_usize(n_catalog)];
+                        if cand != self.pad_value
+                            && excluded_pos != Some(cand)
+                            && !neg_row.contains(&cand)
+                        {
+                            chosen = cand;
+                            break;
+                        }
+                    }
+                    neg_row[slot_idx] = chosen;
                 }
             }
         }

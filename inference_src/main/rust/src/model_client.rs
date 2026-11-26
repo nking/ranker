@@ -160,7 +160,7 @@ impl QueryModelClient {
     pub async fn get_or_fetch_metadata(
         &self,
         query_model_version_choice: Option<VersionChoice>,
-    ) -> Result<Arc<QueryModelMetadata>, BoxError> {
+    ) -> Result<Arc<QueryModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
         let query_version_num: i64 = match query_model_version_choice {
             Some(VersionChoice::Version(v)) => v,
             _ => {
@@ -312,7 +312,7 @@ impl RankerModelClient {
     pub async fn get_or_fetch_metadata(
         &self,
         ranker_model_version_choice: Option<VersionChoice>,
-    ) -> Result<Arc<RankerModelMetadata>, BoxError> {
+    ) -> Result<Arc<RankerModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
         let ranker_version_num: i64 = match ranker_model_version_choice {
             Some(VersionChoice::Version(v)) => v,
             _ => {
@@ -396,7 +396,7 @@ impl RankerModelClient {
         padded_super_graph: JraphGraph,
         embed_len: usize,
         ranker_model_version_choice: Option<VersionChoice>,
-    ) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), BoxError> {
+    ) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), Box<dyn std::error::Error + Send + Sync>> {
         let predict_req = build_graph_ranker_diagnostics_proto_inputs(
             padded_super_graph,
             embed_len,
@@ -469,7 +469,7 @@ impl CandidateModelClient {
     pub async fn get_or_fetch_metadata(
         &self,
         model_version_choice: Option<VersionChoice>,
-    ) -> Result<Arc<QueryModelMetadata>, BoxError> {
+    ) -> Result<Arc<QueryModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
         let version_num: i64 = match model_version_choice {
             Some(VersionChoice::Version(v)) => v,
             _ => {
@@ -626,7 +626,7 @@ impl RerankerModelClient {
     pub async fn get_or_fetch_metadata(
         &self,
         model_version: Option<i64>,
-    ) -> Result<Arc<RerankerModelMetadata>, BoxError> {
+    ) -> Result<Arc<RerankerModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
         let version_num: i64 = match model_version {
             Some(v) => v,
             None => {
