@@ -149,6 +149,10 @@ impl QueryModelClient {
         }
     }
 
+    pub fn get_models_path(&self) -> &str {
+        self.models_path.as_str()
+    }
+
     pub async fn get_latest_model_version(&self) -> Result<i64, BoxError> {
         let versions = get_all_model_versions("query", self.model_service_client.clone()).await?;
         versions
@@ -208,7 +212,7 @@ impl QueryModelClient {
         &self,
         request: UsersRequest,
         query_model_version_choice: Option<VersionChoice>,
-    ) -> Result<Vec<f32>, BoxError> {
+    ) -> Result<Vec<f32>, Box<dyn std::error::Error + Send + Sync>> {
         let n_valid_users: usize = request.n_users as usize;
 
         let predict_req =
@@ -292,6 +296,10 @@ impl RankerModelClient {
             models_path: ranker_models_path,
             ranker_serving_is_batched,
         }
+    }
+
+    pub fn get_models_path(&self) -> &str {
+        self.models_path.as_str()
     }
 
     pub async fn get_latest_model_version(&self) -> Result<i64, BoxError> {
@@ -466,6 +474,10 @@ impl CandidateModelClient {
         }
     }
 
+    pub fn get_models_path(&self) -> &str {
+        self.models_path.as_str()
+    }
+
     pub async fn get_or_fetch_metadata(
         &self,
         model_version_choice: Option<VersionChoice>,
@@ -621,6 +633,10 @@ impl RerankerModelClient {
             models_path: reranker_models_path,
             model_name,
         }
+    }
+    
+    pub fn get_models_path(&self) -> &str {
+        self.models_path.as_str()
     }
 
     pub async fn get_or_fetch_metadata(

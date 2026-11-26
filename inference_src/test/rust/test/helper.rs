@@ -77,13 +77,10 @@ pub fn get_train_val_test_liked_uris(
 }
 
 #[allow(dead_code)]
-pub fn get_embeddings_uris(two_tower_version: Option<i32>) -> (String, String) {
+pub fn get_embeddings_uris(two_tower_version: i32) -> (String, String) {
 
     let base_dir = get_project_dir().expect("Failed to get project directory");
-    let data_dir = match two_tower_version {
-        Some(version) => format!("src/test/resources/data/bi-encoder/{}/", version),
-        None => "src/test/resources/data/bi-encoder/1/".to_string(),
-    };
+    let data_dir = format!("src/test/resources/data/bi-encoder/{}/", two_tower_version);
 
     let user_embedding_uri = base_dir
         .join(&data_dir)
@@ -100,12 +97,9 @@ pub fn get_embeddings_uris(two_tower_version: Option<i32>) -> (String, String) {
 }
 
 #[allow(dead_code)]
-pub fn get_embeddings_metadata_uris(two_tower_version: Option<i32>) -> (String, String) {
+pub fn get_embeddings_metadata_uris(two_tower_version: i32) -> (String, String) {
     let base_dir = get_project_dir().expect("Failed to get project directory");
-    let data_dir = match two_tower_version {
-        Some(version) => format!("src/test/resources/data/bi-encoder/{}/", version),
-        None => "src/test/resources/data/bi-encoder/1/".to_string(),
-    };
+    let data_dir = format!("src/test/resources/data/bi-encoder/{}/", two_tower_version);
 
     let user_uri = base_dir
         .join(&data_dir)
@@ -122,13 +116,10 @@ pub fn get_embeddings_metadata_uris(two_tower_version: Option<i32>) -> (String, 
 }
 
 #[allow(dead_code)]
-pub fn get_recommended_movies_uris(two_tower_version: Option<i32>) -> (String, String) {
+pub fn get_recommended_movies_uris(two_tower_version: i32) -> (String, String) {
 
     let base_dir = get_project_dir().expect("Failed to get project directory");
-    let data_dir = match two_tower_version {
-        Some(version) => format!("src/test/resources/data/bi-encoder/{}/", version),
-        None => "src/test/resources/data/bi-encoder/1/".to_string(),
-    };
+    let data_dir = format!("src/test/resources/data/bi-encoder/{}/", two_tower_version);
 
     let movies_rec_uri = base_dir
         .join(&data_dir)
@@ -179,13 +170,13 @@ pub fn get_ranker_training_hyperparameters_uri(config: AppConfig) -> String {
 }
 
 #[allow(dead_code)]
-pub fn get_ranker_metadata_single_uri(cross_encoder_version: Option<i32>) -> String {
+pub fn get_ranker_metadata_single_uri(cross_encoder_version:i32) -> String {
 
     let base_dir = get_project_dir().expect("Failed to get project directory");
-    let data_dir = match cross_encoder_version {
-        Some(version) => format!("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/{}/", version),
-        None => "src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/".to_string(),
-    };
+    let data_dir =
+        format!("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/{}/",
+            cross_encoder_version);
+
     let file_uri = base_dir
         .join(&data_dir)
         .join("assets.extra/metadata_single.json");
@@ -195,13 +186,12 @@ pub fn get_ranker_metadata_single_uri(cross_encoder_version: Option<i32>) -> Str
 }
 
 #[allow(dead_code)]
-pub fn get_ranker_metadata_batch_uri(cross_encoder_version: Option<i32>) -> String {
+pub fn get_ranker_metadata_batch_uri(cross_encoder_version: i32) -> String {
 
     let base_dir = get_project_dir().expect("Failed to get project directory");
-    let data_dir = match cross_encoder_version {
-        Some(version) => format!("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/{}/", version),
-        None => "src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/".to_string(),
-    };
+    let data_dir =  format!("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/{}/",
+        cross_encoder_version);
+
     let file_uri = base_dir
         .join(&data_dir)
         .join("assets.extra/metadata_batch.json");
@@ -210,12 +200,10 @@ pub fn get_ranker_metadata_batch_uri(cross_encoder_version: Option<i32>) -> Stri
 }
 
 #[allow(dead_code)]
-pub fn get_query_metadata_uri(cross_encoder_version: Option<i32>) -> String {
+pub fn get_query_metadata_uri(cross_encoder_version: i32) -> String {
     let base_dir = get_project_dir().expect("Failed to get project directory");
-    let data_dir = match cross_encoder_version {
-        Some(version) => format!("src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/{}/", version),
-        None => "src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/1/".to_string(),
-    };
+    let data_dir =  format!("src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/{}/",
+        cross_encoder_version);
     let file_uri = base_dir
         .join(&data_dir)
         .join("assets.extra/hyperparameters.json");
@@ -225,13 +213,11 @@ pub fn get_query_metadata_uri(cross_encoder_version: Option<i32>) -> String {
 }
 
 #[allow(dead_code)]
-pub fn get_model_param_json_uri(cross_encoder_version: Option<i32>) -> String {
+pub fn get_model_param_json_uri(cross_encoder_version: i32) -> String {
 
     let base_dir = get_project_dir().expect("Failed to get project directory");
-    let data_dir = match cross_encoder_version {
-        Some(version) => format!("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/{}/", version),
-        None => "src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/1/".to_string(),
-    };
+    let data_dir = format!("src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/{}/",
+        cross_encoder_version);
     let file_uri = base_dir
         .join(&data_dir)
         .join("assets.extra/metadata_single.json");

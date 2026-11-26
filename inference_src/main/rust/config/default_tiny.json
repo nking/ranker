@@ -22,6 +22,7 @@
   "persisted_index_path": "./target/movie_embeddings_indexer",
   "query_models_path": "../../../src/test/resources/model_repositories/saved_model_formats/bi-encoder/query/",
   "ranker_models_path": "../../../src/test/resources/model_repositories/saved_model_formats/cross-encoder/graph-ranker/",
+  "candidate_models_path": "../../../src/test/resources/model_repositories/saved_model_formats/bi-encoder/candidate/",
   "reranker_models_path": "../../../src/test/resources/model_repositories/triton_models/qwen-reranker/",
   "ranker_serving_is_batched" : true
 }

@@ -77,6 +77,9 @@ pub struct AppConfig {
     #[arg(long, env = "QUERY_SAVED_MODELS_URI")]
     pub query_models_path : String,
 
+    #[arg(long, env = "CANDIDATE_SAVED_MODELS_URI")]
+    pub candidate_models_path : String,
+
     // path to the ranker saved_models directory holding the query saved_models..   expecting to see
     //   sub-directory of version numbers e.g. 1, 2 and those subdirectories have the contents
     //   of saved model directories.  one of those is assets.extra and that directory contains
