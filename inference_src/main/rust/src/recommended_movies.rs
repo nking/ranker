@@ -1,11 +1,14 @@
 use arrow_array::{FixedSizeListArray, Int32Array, Int64Array};
 use arrow_schema::DataType;
+use clap::Parser;
 use futures::stream::StreamExt;
 use object_store::ObjectStoreExt;
 use parquet::arrow::async_reader::{ParquetObjectReader, ParquetRecordBatchStreamBuilder};
+use serde::Deserialize;
 use tokio::runtime::Runtime;
 use crate::util;
 
+#[derive(Clone, Default)]
 pub struct RecommendedMovies {
     pub movie_ids: Vec<i32>,
     pub timestamps: Vec<i64>,

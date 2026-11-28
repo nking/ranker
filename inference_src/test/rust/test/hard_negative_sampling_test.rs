@@ -17,14 +17,14 @@ mod hard_negative_sampling_test {
 
     #[test]
     fn sample_negative_candidates_returns_only_negatives() {
-        let (history, disliked, recs, catalog)
+        let (history, disliked, recommends, catalog)
             = make_fixture();
 
         let transform = HardNegativeSamplingTransform::new(
             history,
             disliked,
             catalog,
-            *recs,
+            recommends,
             20,
             SamplingStrategy::MixedHard,
         )
@@ -109,7 +109,7 @@ mod hard_negative_sampling_test {
         }
     }
 
-    fn make_fixture() -> (Arc<UserHistory>, Arc<UserHistory>, Arc<RecommendedMovies>, Vec<i32>) {
+    fn make_fixture() -> (Arc<UserHistory>, Arc<UserHistory>, RecommendedMovies, Vec<i32>) {
         let history = Arc::new(make_user_history(
             &[
                 &[(1, 5, 100), (2, 4, 200), (3, 5, 300), (10, 1, 400)],
@@ -124,7 +124,7 @@ mod hard_negative_sampling_test {
             ],
             8,
         ));
-        let recs = Arc::new(make_recommended_movies(
+        let recs = make_recommended_movies(
             &[
                 &[
                     (10, 400),
@@ -137,21 +137,21 @@ mod hard_negative_sampling_test {
                 &[(20, 350), (40, 2500), (41, 2600), (42, 2700), (43, 2800)],
             ],
             8,
-        ));
+        );
         let catalog: Vec<i32> = (1..=100).collect();
         (history, disliked, recs, catalog)
     }
 
     #[test]
     fn sample_candidates_with_pos_preserves_positive_and_no_padding() {
-        let (history, disliked, recs, catalog) = make_fixture();
+        let (history, disliked, recommends, catalog) = make_fixture();
 
         for strategy in [SamplingStrategy::MixedHard, SamplingStrategy::WorstRecommended] {
             let transform = HardNegativeSamplingTransform::new(
                 Arc::clone(&history),
                 Arc::clone(&disliked),
                 catalog.clone(),
-                *recs,
+                recommends.clone(),
                 20,
                 strategy,
             )
