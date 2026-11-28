@@ -31,7 +31,8 @@ mod embedding_ann_tests {
         let _num_catalog_users = dict.get("num_catalog_users").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let num_movies = dict.get("num_catalog_movies").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
-        let (_user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris(Some(1));
+        let q_ver = 1;
+        let (_user_embeddings_uri, movie_embeddings_uri) = get_embeddings_uris(q_ver);
 
         let persisted_index_path: std::path::PathBuf = PathBuf::from("./target/movie_embeddings_indexer");
 

@@ -876,7 +876,7 @@ mod post_training_analysis {
         let client = CandidateModelClient::new(harness.candidate_uri.clone(),
             query_model_path.parse()?).await;
 
-        let results : Result<Vec<f32>, Box<dyn Error>> = client.get_movies_embeddings(movies_request,
+        let results : Result<Vec<f32>, Box<dyn std::error::Error + Send + Sync>> = client.get_movies_embeddings(movies_request,
             candidate_model_version).await;
 
         let new_embeddings : Vec<f32> = results.expect("Error trying to create movie embeddings with OOV 0 for movie_ids");
@@ -984,7 +984,7 @@ mod post_training_analysis {
             debug_assert_eq!(n_sampled, new_user_ids.len());
             let ranker_metadata = harness.orchestrator.get_or_fetch_ranker_metadata(
                 ranker_model_version.clone()
-            ).expect("error fetching ranker metadata");
+            ).await.expect("error fetching ranker metadata");
             let num_candidates = ranker_metadata.num_candidates;
             debug_assert_eq!(n_sampled * num_candidates, ann.candidate_ids.len());
             debug_assert_eq!(n_sampled * ranker_metadata.embed_len, ann.user_embeddings.len());

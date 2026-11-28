@@ -10,7 +10,7 @@ mod recommended_movies_tests {
     #[test]
     pub fn test_movie_recomendations_build() {
         let q_ver = 1;
-        let (movies_rec_uri, movies_rec_ts_uri) = get_recommended_movies_uris(Some(q_ver));
+        let (movies_rec_uri, movies_rec_ts_uri) = get_recommended_movies_uris(q_ver);
 
         let num_users: usize = 6040;
 

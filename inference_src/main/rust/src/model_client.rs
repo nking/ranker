@@ -559,7 +559,7 @@ impl CandidateModelClient {
         &self,
         request: MoviesRequest,
         candidate_model_version_choice: Option<VersionChoice>,
-    ) -> Result<Vec<f32>, Box<dyn Error>> {
+    ) -> Result<Vec<f32>, Box<dyn std::error::Error + Send + Sync>> {
         let n_valid_movies: usize = request.n_movies as usize;
 
         let predict_req =

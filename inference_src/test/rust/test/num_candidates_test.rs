@@ -62,13 +62,14 @@ impl TestHarness {
         let orchestrator = Orchestrator::new(
             query_uri,
             ranker_uri,
+            config.ranker_uri,
             config.query_models_path,
             config.ranker_models_path,
+            config.reranker_models_path,
             config.ranker_serving_is_batched,
             &movie_embeddings_uri,
             ratings_uris,
             ranker_n_local_devices,
-            top_k,
             persisted_index_path,
             user_db_path
         ).await.unwrap();
