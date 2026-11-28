@@ -1,9 +1,10 @@
 #[cfg(test)]
 mod util_tests {
     use std::collections::HashSet;
+    use std::path::Path;
     //use std::error::Error;
-    use inference_engine::util::{calc_number_jax_graph_components, ceiling_search, get_top_k_desc_diagnostic, sort_in_place_by_desc_scores};
-    use crate::util_tests::helper::assert_slices_nearly_equal;
+    use inference_engine::util::{calc_number_jax_graph_components, ceiling_search, get_top_k_desc_diagnostic, resolve_unique_file, sort_in_place_by_desc_scores};
+    use crate::util_tests::helper::{assert_slices_nearly_equal, get_project_dir};
 
     //use super::*;
     mod helper {
@@ -82,6 +83,21 @@ mod util_tests {
             let idx = ceiling_search(&ids, srchs[i]);
             assert_eq!(expected[i], idx);
         }
+    }
+
+    #[test]
+    fn test_resolve_unique_file(){
+
+        let base_dir = get_project_dir().expect("Failed to get project directory");
+        let data_dir = format!("src/test/resources/data/bi-encoder/{}/", 1);
+        let pattern = "user_emb*parquet";
+
+        let resolved = resolve_unique_file(
+            (&data_dir).as_ref(), pattern);
+        assert!(resolved.is_ok());
+        let resolved = resolved.unwrap();
+
+        assert!(Path::new(&resolved).exists());
     }
 
     #[test]

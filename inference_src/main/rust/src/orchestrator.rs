@@ -149,7 +149,6 @@ impl Orchestrator {
         self.reranker_model.get_latest_model_version().await.expect("Error getting latest reranker model version")
     }
 
-
     pub async fn get_or_fetch_query_metadata(&self, query_model_version_choice: Option<VersionChoice>)
         -> Result<Arc<QueryModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
 
@@ -457,10 +456,9 @@ impl Orchestrator {
         (searcher.get_movies_embedding_catalog_ref().clone(), searcher.get_offset_to_id())
     }
 
-    pub fn _get_user_history(&self) -> UserHistory {
-        self.user_history.clone()
+    pub fn _get_user_history(&self) -> Arc<UserHistory> {
+        Arc::clone(&self.user_history)
     }
-
     pub fn _get_searcher(&self) -> Guard<Arc<Searcher>> {
         self.searcher.load()
     }

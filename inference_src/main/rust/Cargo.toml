@@ -49,6 +49,8 @@ tempfile = "3.27.0"
 tokio-stream = "0.1.18"
 oneshot = "0.2.1"
 
+tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"] }
+
 [build-dependencies]
 tonic-prost-build = "0.14.6"
 

@@ -30,6 +30,26 @@ pub fn from_movie_db_and_yaml_files(
 /// Convenience helper for `inference_engine`: queries `UserHistory` for padded
 /// `(movie_ids, ratings, timestamps)` ordered most-recent-first and delegates to
 /// `reranker_prompt::RerankerPromptFormatter`.
+/// # Arguments
+///
+/// * `formatter`:
+/// * `user_history`: includes all history, not jsut the positive
+/// * `user_ids`:
+/// * `movie_ids`:
+/// * `timestamps`:
+/// * `candidate_ids_batch`:
+/// * `candidate_scores_batch`:
+/// * `user_embeddings_batch`:
+/// * `candidate_embeddings_batch`:
+/// * `preserve_positive`:
+///
+/// returns: FormattedBatch
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
 #[allow(clippy::too_many_arguments)]
 pub fn format_batch_with_user_history(
     formatter: &RerankerPromptFormatter,
@@ -47,6 +67,24 @@ pub fn format_batch_with_user_history(
     let (hist_movie_ids, hist_ratings, hist_timestamps) = user_history
         .get_all_history_before_timestamp(user_ids, timestamps, hist_width, true);
 
+    /*
+    example row indices in training:
+        pf = pq.ParquetFile(parquet_path)
+        row_offset = 0
+        for record_batch in pf.iter_batches(batch_size=2048):
+            n = record_batch.num_rows
+            indices = list(range(row_offset, row_offset + n))
+            row_offset += n
+            ...
+            out = rust_fmt.format_batch(
+                ...,
+                indices=indices,
+                seed=42,
+                training=True,
+                preserve_positive=True,
+            )
+
+     */
     formatter.format_batch_from_padded_i32(
         user_ids,
         movie_ids,
@@ -60,7 +98,7 @@ pub fn format_batch_with_user_history(
         candidate_scores_batch,
         user_embeddings_batch,
         candidate_embeddings_batch,
-        &[],
+        &[], // use &[] for inference
         42,
         false,
         preserve_positive,

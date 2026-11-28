@@ -5,6 +5,18 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use serde::Deserialize;
+use tokenizers::utils::padding::{PaddingDirection, PaddingParams, PaddingStrategy};
+use tokenizers::utils::truncation::{TruncationDirection, TruncationParams, TruncationStrategy};
+use tokenizers::Tokenizer;
+
+#[derive(Debug, Deserialize)]
+struct TokenizerConfig {
+    pad_token: Option<String>,
+    eos_token: Option<String>,
+}
+
+
 use arc_swap::ArcSwap;
 use tonic::transport::{Channel, Endpoint};
 
@@ -30,6 +42,7 @@ use crate::triton::{
     model_infer_request::{InferInputTensor, InferRequestedOutputTensor},
     ModelInferRequest, ModelMetadataRequest, ModelReadyRequest,
 };
+use crate::util::resolve_unique_file;
 
 const CLIENT_CONNECT_TIMEOUT: u64 = 5;
 // Handles large batched responses (e.g., RankedMovies for 700_000 user_ids)
@@ -75,6 +88,8 @@ pub struct RerankerModelClient {
     pub client: GrpcInferenceServiceClient<Channel>,
     model_metadata_dict: ArcSwap<HashMap<i64, Arc<RerankerModelMetadata>>>,
     metadata_write_lock: Mutex<()>,
+    model_tokenizer_dict: ArcSwap<HashMap<i64, Arc<Tokenizer>>>,
+    tokenizer_write_lock: Mutex<()>,
     pub model_latest_version: AtomicI64,
     models_path: String,
     model_name: String, // for Triton model latest-version / readiness calls
@@ -589,7 +604,7 @@ impl RerankerModelClient {
         let model_name = "qwen-reranker".to_string();
         let req = ModelMetadataRequest {
             name: model_name.clone(),
-            version: String::new(), // Empty string queries all active versions
+            version: String::new(),
         };
 
         let resp = triton_client
@@ -605,12 +620,10 @@ impl RerankerModelClient {
             .filter_map(|v| v.parse::<i64>().ok())
             .collect();
 
-        if versions.is_empty() {
-            panic!(
-                "No valid numeric versions found in Triton for model '{}'",
-                model_name
-            );
-        }
+        assert!(
+            !versions.is_empty(),
+            "No valid numeric versions found in Triton for model '{model_name}'"
+        );
 
         versions.sort_unstable();
         let latest_ver = *versions.last().unwrap();
@@ -622,54 +635,130 @@ impl RerankerModelClient {
         );
         let reranker_metadata = RerankerModelMetadata::load_from_file(&reranker_metadata_uri)
             .expect("Error while reading reranker metadata");
+
+        let tokenizer = load_reranker_tokenizer(
+            &reranker_models_path,
+            latest_ver,
+            reranker_metadata.max_seq_token_length,
+        )
+            .expect("Error while loading reranker tokenizer");
+
         let mut initial_reranker_dict = HashMap::new();
         initial_reranker_dict.insert(latest_ver, Arc::new(reranker_metadata));
+
+        let mut initial_tokenizer_dict = HashMap::new();
+        initial_tokenizer_dict.insert(latest_ver, Arc::new(tokenizer));
 
         Self {
             client: triton_client,
             model_metadata_dict: ArcSwap::from_pointee(initial_reranker_dict),
             metadata_write_lock: Mutex::new(()),
+            model_tokenizer_dict: ArcSwap::from_pointee(initial_tokenizer_dict),
+            tokenizer_write_lock: Mutex::new(()),
             model_latest_version: AtomicI64::new(latest_ver),
             models_path: reranker_models_path,
             model_name,
         }
     }
-    
+
     pub fn get_models_path(&self) -> &str {
         self.models_path.as_str()
+    }
+
+    async fn resolve_version(&self, model_version: Option<i64>) -> Result<i64, BoxError> {
+        match model_version {
+            Some(v) => Ok(v),
+            None => {
+                let cached = self.model_latest_version.load(Ordering::Acquire);
+                if cached > 0 {
+                    Ok(cached)
+                } else {
+                    self.update_latest_model_version().await
+                }
+            }
+        }
+    }
+
+    /// Returns the cached `Arc<Tokenizer>` for `model_version` (or latest if `None`),
+    /// loading and configuring it once per model version with LEFT padding and RIGHT truncation.
+    pub async fn get_or_fetch_tokenizer(
+        &self,
+        model_version: Option<i64>,
+    ) -> Result<Arc<Tokenizer>, BoxError> {
+        let version_num = self.resolve_version(model_version).await?;
+
+        // 1. Lock-free fast path
+        if let Some(tok) = self.model_tokenizer_dict.load().get(&version_num) {
+            return Ok(Arc::clone(tok));
+        }
+
+        // 2. Fetch version metadata BEFORE locking so no MutexGuard is held across `.await`
+        let metadata = self.get_or_fetch_metadata(Some(version_num)).await?;
+
+        // 3. Serialize cache-miss load with `tokenizer_write_lock` (pure sync work under lock)
+        let _guard = self
+            .tokenizer_write_lock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        if let Some(tok) = self.model_tokenizer_dict.load().get(&version_num) {
+            return Ok(Arc::clone(tok));
+        }
+
+        let tokenizer = Arc::new(load_reranker_tokenizer(
+            &self.models_path,
+            version_num,
+            metadata.max_seq_token_length,
+        )?);
+
+        self.model_tokenizer_dict.rcu(|current_map| {
+            let mut new_map = (**current_map).clone();
+            new_map.insert(version_num, Arc::clone(&tokenizer));
+            Arc::new(new_map)
+        });
+
+        Ok(tokenizer)
+    }
+
+    /// Gets `(query_yaml_path, passages_yaml_path)` from the reranker model version directory,
+    /// falling back to the model root directory if not found under `{version}/`.
+    pub async fn get_prompt_yaml_paths(
+        &self,
+        model_version: Option<i64>,
+    ) -> Result<(String, String), BoxError> {
+        let version_num = self.resolve_version(model_version).await?;
+
+        let version_dir = Path::new(&self.models_path).join(version_num.to_string());
+        let root_dir = Path::new(&self.models_path);
+
+        let resolve_yaml = |pattern: &str| -> Result<String, BoxError> {
+            let path = resolve_unique_file(&version_dir, pattern)
+                .or_else(|_| resolve_unique_file(root_dir, pattern))?;
+            path.into_os_string()
+                .into_string()
+                .map_err(|p| format!("Non-UTF-8 yaml path: {p:?}").into())
+        };
+
+        Ok((resolve_yaml("query*.yaml")?, resolve_yaml("passages*.yaml")?))
     }
 
     pub async fn get_or_fetch_metadata(
         &self,
         model_version: Option<i64>,
-    ) -> Result<Arc<RerankerModelMetadata>, Box<dyn std::error::Error + Send + Sync>> {
-        let version_num: i64 = match model_version {
-            Some(v) => v,
-            None => {
-                let cached = self.model_latest_version.load(Ordering::Acquire);
-                if cached > 0 {
-                    cached
-                } else {
-                    self.update_latest_model_version().await?
-                }
-            }
-        };
+    ) -> Result<Arc<RerankerModelMetadata>, BoxError> {
+        let version_num = self.resolve_version(model_version).await?;
 
-        // Fast lock-free read
-        let map = self.model_metadata_dict.load();
-        if let Some(meta) = map.get(&version_num) {
-            return Ok(meta.clone());
+        if let Some(meta) = self.model_metadata_dict.load().get(&version_num) {
+            return Ok(Arc::clone(meta));
         }
 
-        // Acquire write lock + double-check
         let _guard = self
             .metadata_write_lock
             .lock()
             .unwrap_or_else(|e| e.into_inner());
 
-        let map = self.model_metadata_dict.load();
-        if let Some(meta) = map.get(&version_num) {
-            return Ok(meta.clone());
+        if let Some(meta) = self.model_metadata_dict.load().get(&version_num) {
+            return Ok(Arc::clone(meta));
         }
 
         let metadata_uri = resolve_triton_metadata_uri(
@@ -677,16 +766,14 @@ impl RerankerModelClient {
             version_num,
             "training_hyperparameters.json",
         );
-        let new_metadata_arc =
-            Arc::new(RerankerModelMetadata::load_from_file(&metadata_uri)?);
+        let new_metadata_arc = Arc::new(RerankerModelMetadata::load_from_file(&metadata_uri)?);
 
         self.model_metadata_dict.rcu(|current_map| {
             let mut new_map = (**current_map).clone();
-            new_map.insert(version_num, new_metadata_arc.clone());
+            new_map.insert(version_num, Arc::clone(&new_metadata_arc));
             Arc::new(new_map)
         });
 
-        drop(_guard);
         Ok(new_metadata_arc)
     }
 
@@ -696,7 +783,6 @@ impl RerankerModelClient {
         Ok(ver)
     }
 
-    /// Checks whether the Triton model (and optional specific version) is loaded and ready.
     pub async fn is_model_ready(&self, model_version: Option<i64>) -> Result<bool, BoxError> {
         let req = ModelReadyRequest {
             name: self.model_name.clone(),
@@ -706,11 +792,10 @@ impl RerankerModelClient {
         Ok(resp.into_inner().ready)
     }
 
-    /// Queries Triton's ModelMetadata RPC to return the highest available numeric version.
     pub async fn get_latest_model_version(&self) -> Result<i64, BoxError> {
         let req = ModelMetadataRequest {
             name: self.model_name.clone(),
-            version: String::new(), // Empty string queries all active versions
+            version: String::new(),
         };
 
         let resp = self.client.clone().model_metadata(req).await?.into_inner();
@@ -733,13 +818,6 @@ impl RerankerModelClient {
         Ok(*versions.last().unwrap())
     }
 
-    /// Sends tokenized `[batch_size, seq_len]` inputs and optional FP32 `ranker_embs` of shape
-    /// `[batch_size, 1 + num_candidates, ranker_emb_dim]` to Triton ONNX Runtime, returning
-    /// flat FP32 `candidate_log_probs` of shape `[batch_size, num_candidates]`.
-    ///
-    /// When `metadata.include_ranker_embeddings == false`, a zero-filled FP32 tensor of shape
-    /// `[batch_size, 1 + num_candidates, ranker_emb_dim]` is sent automatically to satisfy
-    /// the ONNX / Triton `config.pbtxt` signature.
     pub async fn get_reranked_scores(
         &self,
         input_ids: &[i64],
@@ -756,7 +834,9 @@ impl RerankerModelClient {
             return Err("seq_len must be > 0".into());
         }
 
-        let model_metadata = self.get_or_fetch_metadata(model_version).await?;
+        // Resolve once so metadata and Triton RPC always target the exact same version
+        let version_num = self.resolve_version(model_version).await?;
+        let model_metadata = self.get_or_fetch_metadata(Some(version_num)).await?;
 
         let infer_req = build_triton_reranker_infer_request(
             &model_metadata,
@@ -765,14 +845,13 @@ impl RerankerModelClient {
             ranker_embs,
             batch_size,
             seq_len,
-            model_version,
+            Some(version_num),
         )?;
 
         let response = self.client.clone().model_infer(infer_req).await?;
         let inner = response.into_inner();
         let expected_out_len = batch_size * model_metadata.num_candidates;
 
-        // 1. Fast path: Triton C++ backend places raw little-endian bytes in `raw_output_contents`
         if let Some(raw_bytes) = inner.raw_output_contents.first() {
             if !raw_bytes.is_empty() {
                 if raw_bytes.len() % 4 != 0 {
@@ -784,19 +863,12 @@ impl RerankerModelClient {
                 }
                 let mut scores = Vec::with_capacity(raw_bytes.len() / 4);
                 for chunk in raw_bytes.chunks_exact(4) {
-                    scores.push(f32::from_le_bytes(
-                        chunk
-                            .try_into()
-                            .map_err(|_| "Failed to parse f32 bytes from Triton")?,
-                    ));
+                    scores.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
                 }
                 if scores.len() != expected_out_len {
                     return Err(format!(
                         "Triton output length mismatch: expected {} ({}x{}), got {}",
-                        expected_out_len,
-                        batch_size,
-                        model_metadata.num_candidates,
-                        scores.len()
+                        expected_out_len, batch_size, model_metadata.num_candidates, scores.len()
                     )
                         .into());
                 }
@@ -804,7 +876,6 @@ impl RerankerModelClient {
             }
         }
 
-        // 2. Fallback path: Protobuf `InferTensorContents.fp32_contents`
         if let Some(out_tensor) = inner.outputs.first() {
             if let Some(contents) = &out_tensor.contents {
                 if !contents.fp32_contents.is_empty() {
@@ -825,6 +896,64 @@ impl RerankerModelClient {
 
         Err("Error: Triton ModelInferResponse contained neither raw_output_contents nor fp32_contents".into())
     }
+}
+
+/// Loads `tokenizer.json` from `{models_path}/{model_version}` (falling back to `{models_path}`)
+/// and configures LEFT padding + RIGHT truncation at `max_seq_token_length` to match
+/// `OnnxExportableQwenReranker` and `PipelineRunner._run_onnx_batched_inference`.
+fn load_reranker_tokenizer(
+    models_path: &str,
+    model_version: i64,
+    max_seq_token_length: usize,
+) -> Result<Tokenizer, BoxError> {
+    let models_root = Path::new(models_path);
+    let version_dir = models_root.join(model_version.to_string());
+    let tok_dir = if version_dir.join("tokenizer.json").exists() {
+        version_dir
+    } else {
+        models_root.to_path_buf()
+    };
+
+    let mut tokenizer = Tokenizer::from_file(tok_dir.join("tokenizer.json"))?;
+
+    let cfg_path = tok_dir.join("tokenizer_config.json");
+    let cfg: TokenizerConfig = if cfg_path.exists() {
+        serde_json::from_str(&std::fs::read_to_string(&cfg_path)?)?
+    } else {
+        TokenizerConfig {
+            pad_token: None,
+            eos_token: None,
+        }
+    };
+
+    // Match PipelineRunner: fallback pad_token -> eos_token -> "<|endoftext|>"
+    let pad_token = cfg
+        .pad_token
+        .or(cfg.eos_token)
+        .unwrap_or_else(|| "<|endoftext|>".to_string());
+    let pad_id = tokenizer
+        .token_to_id(&pad_token)
+        .ok_or_else(|| format!("pad_token `{pad_token}` not found in tokenizer.json"))?;
+
+    // CRITICAL: OnnxExportableQwenReranker reads `hidden_states[:, seq_len - 1, :]`,
+    // so batches MUST always be LEFT-padded regardless of `tokenizer_config.json`.
+    tokenizer.with_padding(Some(PaddingParams {
+        strategy: PaddingStrategy::BatchLongest,
+        direction: PaddingDirection::Left,
+        pad_to_multiple_of: None,
+        pad_id,
+        pad_type_id: 0,
+        pad_token,
+    }));
+
+    tokenizer.with_truncation(Some(TruncationParams {
+        max_length: max_seq_token_length,
+        strategy: TruncationStrategy::LongestFirst,
+        stride: 0,
+        direction: TruncationDirection::Right,
+    }))?;
+
+    Ok(tokenizer)
 }
 
 pub fn build_triton_reranker_infer_request(

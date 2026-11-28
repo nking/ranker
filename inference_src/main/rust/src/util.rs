@@ -4,6 +4,10 @@ use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::local::LocalFileSystem;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use std::error::Error;
+use std::fs;
+use std::path::{Path, PathBuf};
+
 /// Helper to split URI into ObjectStore backend and ObjectStore Path
 /// # Arguments
 /// * `uri_string` - The uri of the file to read
@@ -482,4 +486,67 @@ fn test_get_pos_and_top_k_neg_desc_diagnostic() {
     assert_eq!(pos_only_ids, vec![100, 200]);
     assert_eq!(pos_only_scores, vec![-10.0, 0.5]);
     assert_eq!(pos_only_reprs, vec![100.0, -100.0, 200.0, -200.0]);
+}
+
+pub fn resolve_unique_file(
+    dir_path: &Path,
+    pattern: &str,
+) -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
+    let (prefix, suffix) = match pattern.split_once('*') {
+        Some((p, s)) => {
+            if s.contains('*') {
+                return Err(format!("Only one '*' wildcard is supported: '{pattern}'").into());
+            }
+            (p, Some(s))
+        }
+        None => (pattern, None),
+    };
+
+    let mut matched: Option<PathBuf> = None;
+
+    for entry in fs::read_dir(dir_path)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+
+        let is_match = match suffix {
+            Some(suf) => {
+                name.len() >= prefix.len() + suf.len()
+                    && name.starts_with(prefix)
+                    && name.ends_with(suf)
+            }
+            None => name == prefix,
+        };
+        if !is_match {
+            continue;
+        }
+
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        if let Some(prev) = matched {
+            return Err(format!(
+                "Expected 1 file matching '{}' in '{}', found multiple ('{}', '{}')",
+                pattern,
+                dir_path.display(),
+                prev.display(),
+                path.display()
+            )
+                .into());
+        }
+        matched = Some(path);
+    }
+
+    matched.ok_or_else(|| {
+        format!(
+            "No file matching '{}' found in '{}'",
+            pattern,
+            dir_path.display()
+        )
+            .into()
+    })
 }

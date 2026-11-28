@@ -2,10 +2,16 @@
 mod client_tests {
     use std::collections::HashMap;
     use std::error::Error;
-    use std::path::PathBuf;
+    use std::io;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+    use polars::prelude::{col, LazyFrame};
+    use rand::distributions::{Distribution, Uniform};
     use serde_json::Value;
     use inference_engine::app_config::AppConfig;
+    use inference_engine::hard_negative_sampling::{HardNegativeSamplingTransform, SampledCandidates, SamplingStrategy};
     use inference_engine::model_client::{CandidateModelClient, QueryModelClient, RankerModelClient, RerankerModelClient};
+    use inference_engine::movie_db::MovieDb;
     use inference_engine::ranker_graph_builder::{create_fake_padded_super_batch, JraphGraph};
     use inference_engine::tensorflow::serving::model_spec::VersionChoice;
     //use super::*;
@@ -13,12 +19,22 @@ mod client_tests {
     use inference_engine::pb::{UsersRequest, MoviesRequest};
     use inference_engine::query_model_metadata::QueryModelMetadata;
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
+    use inference_engine::recommended_movies::{build_recommended_movies, RecommendedMovies};
+    use inference_engine::user_history::{build_user_history, UserHistory};
+    use inference_engine::reranker_prompt_formatter::{format_batch_with_user_history,
+        write_movielens_genres, write_movielens_title, write_query_time, write_relative_delta,
+        MovieCatalog, PassagesYaml, QueryYaml, RerankerPromptFormatter, from_movie_db_and_yaml_files};
+    use reranker_prompt::reranker_prompt_formatter::FormattedBatch;
 
     mod helper {
         // Tell Rust to literally include the code from helper.rs here
         include!("helper.rs");
+        include!("helper_users.rs");
     }
-    use crate::client_tests::helper::{get_config_json_uri, get_embeddings_metadata_uris, get_embeddings_uris, get_project_dir};
+    use crate::client_tests::helper::{get_config_json_uri, get_embeddings_metadata_uris,
+        get_embeddings_uris, get_project_dir, get_tiny_config_json_uri,
+        get_train_val_test_liked_uris, DataSize, get_recommended_movies_uris,
+        load_and_concat_parquet};
 
     #[tokio::test]
     async fn test_query_model_connection() {
@@ -288,30 +304,31 @@ mod client_tests {
 
     }
 
-
     #[tokio::test]
-    async fn test_reranker_model_connection() -> Result<(), Box<dyn std::error::Error>>{
-
+    async fn test_reranker_model_connection() -> Result<(), Box<dyn std::error::Error>> {
         let ver = 1;
         let version_option = Some(ver);
 
         let config_path = get_config_json_uri();
         let config = AppConfig::load_from_file(&config_path).unwrap();
 
-        let client = RerankerModelClient::new(config.reranker_uri.clone(),
-            config.reranker_models_path.clone()).await;
+        let client = RerankerModelClient::new(
+            config.reranker_uri.clone(),
+            config.reranker_models_path.clone(),
+        ).await;
 
-        let latest_version = client.get_latest_model_version().await.expect("Couldn't get latest model version");
+        let latest_version = client
+            .get_latest_model_version()
+            .await
+            .expect("Couldn't get latest model version");
 
         let expected_latest_version: i64 = std::fs::read_dir(&config.reranker_models_path)
             .expect("Failed to read model repository directory")
             .filter_map(|entry| {
                 let entry = entry.ok()?;
-                // Ignore files; only keep directories
                 if !entry.file_type().ok()?.is_dir() {
                     return None;
                 }
-                // Parse directory name into i64 (ignores non-numeric directory names)
                 entry.file_name().to_str()?.parse::<i64>().ok()
             })
             .max()
@@ -319,28 +336,277 @@ mod client_tests {
 
         assert_eq!(latest_version, expected_latest_version);
 
-        let metadata = client.get_or_fetch_metadata(
-            version_option.clone()
-        ).await;
+        let metadata = client.get_or_fetch_metadata(version_option).await;
         assert!(metadata.is_ok());
-        let metadata = metadata.unwrap();
 
         let r = client.update_latest_model_version().await;
         assert!(r.is_ok());
 
-        let metadata = client.get_or_fetch_metadata(version_option.clone()).await;
-        assert!(metadata.is_ok());
-        let metadata = metadata.unwrap();
+        let metadata = client
+            .get_or_fetch_metadata(version_option)
+            .await
+            .expect("Failed to fetch reranker metadata");
 
         let models_path = client.get_models_path();
         assert_eq!(models_path, config.reranker_models_path);
 
-        let r = client.is_model_ready(version_option.clone()).await);\\;
+        let r = client.is_model_ready(version_option).await;
         assert!(r.is_ok());
 
-        //TODO: get_reranked_scores
+        // Load Hugging Face fast tokenizer from `<models_path>/<ver>/tokenizer.json`
+        //let version_dir = Path::new(&models_path).join(ver.to_string());
+        let tokenizer = client.get_or_fetch_tokenizer(version_option).await?;
+        let placeholder_token_id = tokenizer
+            .token_to_id(&metadata.emb_placeholder_token)
+            .expect("emb_placeholder_token not found as a single special token in tokenizer.json")
+            as i64;
+
+        //===================================================================================
+        //  test for get_reranked_scores
+        //===================================================================================
+
+        let q_ver = 1;
+        let tiny_config_path = get_tiny_config_json_uri().to_string();
+        let tiny_config = AppConfig::load_from_file(&tiny_config_path)
+            .expect("Could not load tiny config json file");
+        let ratings_map = get_train_val_test_liked_uris(DataSize::Full, false);
+        let max_history = 2048;
+        let ratings_uris_all: Vec<&str> = vec![
+            ratings_map.get("train_liked").unwrap(),
+            ratings_map.get("train_3").unwrap(),
+            ratings_map.get("train_disliked").unwrap(),
+            ratings_map.get("val_liked").unwrap(),
+            ratings_map.get("val_3").unwrap(),
+            ratings_map.get("val_disliked").unwrap(),
+        ];
+        let user_history: UserHistory = build_user_history(&ratings_uris_all, max_history).await;
+
+        let ratings_uris_disliked: Vec<&str> = vec![
+            ratings_map.get("train_disliked").unwrap(),
+            ratings_map.get("val_disliked").unwrap(),
+        ];
+        let user_history_disliked: UserHistory =
+            build_user_history(&ratings_uris_disliked, max_history).await;
+
+        let (movies_rec_uri, movies_rec_ts_uri) = get_recommended_movies_uris(q_ver);
+        let recommended_movies =
+            build_recommended_movies(metadata.num_catalog_users, &movies_rec_uri, &movies_rec_ts_uri);
+
+        let (query_yaml_path, passages_yaml_path) = client
+            .get_prompt_yaml_paths(version_option)
+            .await
+            .expect("Error getting prompt yaml paths");
+
+        let movie_db = MovieDb::new(&tiny_config.movies_path).unwrap();
+
+        let hard_negative_sampling = HardNegativeSamplingTransform::new(
+            Arc::new(user_history.clone()),
+            Arc::new(user_history_disliked),
+            movie_db.get_all_movie_ids(),
+            recommended_movies,
+            metadata.num_candidates,
+            SamplingStrategy::WorstRecommended,
+        ).expect("Error constructing HardNegativeSamplingTransform");
+
+        let prompt_formatter = from_movie_db_and_yaml_files(
+            &movie_db,
+            &tiny_config.movie_tiers_path,
+            &query_yaml_path,
+            &passages_yaml_path,
+            metadata.emb_placeholder_token.clone(),
+            metadata.max_prompt_history,
+            metadata.num_candidates,
+        )
+            .expect("Error creating prompt formatter");
+
+        let seed = 42;
+        let preserve_positive = true;
+        // Inference mode keeps candidate order deterministic (no shuffling, no completions)
+        let training = false;
+
+        let pos_test_df: LazyFrame =
+            load_and_concat_parquet(&[&ratings_map.get("test_liked").unwrap().clone()])
+                .expect("error reading test ratings into df");
+        let pos_df = pos_test_df
+            .select([
+                col("user_id"),
+                col("movie_id"),
+                col("rating"),
+                col("timestamp"),
+            ])
+            .collect()?;
+        let user_ids: Vec<i32> = pos_df.column("user_id")?.i32()?.into_no_null_iter().collect();
+        let movie_ids: Vec<i32> = pos_df.column("movie_id")?.i32()?.into_no_null_iter().collect();
+        let _ratings: Vec<i32> = pos_df.column("rating")?.i32()?.into_no_null_iter().collect();
+        let timestamps: Vec<i64> = pos_df.column("timestamp")?.i64()?.into_no_null_iter().collect();
+
+        let emb_dim = metadata.ranker_emb_dim;
+        let mut rng = rand::thread_rng();
+        let dist = Uniform::new_inclusive(-1.0_f32, 1.0_f32);
+
+        // Process 2 small batches (use a small batch size for local Qwen ONNX VRAM/RAM limits)
+        let batch_size = 4;
+        let mut total_scored_rows = 0usize;
+
+        for b in 0..2 {
+            let i0 = b * batch_size;
+            let i1 = (i0 + batch_size).min(user_ids.len());
+            if i0 >= i1 {
+                break;
+            }
+            let cur_batch_size = i1 - i0;
+            let row_indices: Vec<u64> = (i0 as u64..i1 as u64).collect();
+
+            let (hist_movie_ids, hist_ratings, hist_timestamps) = user_history
+                .get_all_history_before_timestamp(
+                    &user_ids[i0..i1],
+                    &timestamps[i0..i1],
+                    metadata.max_prompt_history,
+                    true,
+                );
+
+            let sampled_candidates: SampledCandidates = hard_negative_sampling
+                .sample_candidates_with_pos(
+                    &user_ids[i0..i1],
+                    &movie_ids[i0..i1],
+                    &timestamps[i0..i1],
+                    seed,
+                    false,
+                )
+                .expect("Error during HardNegativeSamplingTransform.sample_candidates_with_pos");
+
+            let candidate_ids_batch: Vec<i32> = sampled_candidates
+                .candidate_ids
+                .iter()
+                .flatten()
+                .copied()
+                .collect();
+
+            // Synthetic scores and embeddings: positive candidate at slot 0 matches user_emb
+            let mut candidate_scores_batch: Vec<f32> =
+                Vec::with_capacity(cur_batch_size * metadata.num_candidates);
+            let mut user_embeddings_batch: Vec<f32> = Vec::with_capacity(cur_batch_size * emb_dim);
+            let mut candidate_embeddings_batch: Vec<f32> =
+                Vec::with_capacity(cur_batch_size * metadata.num_candidates * emb_dim);
+
+            for _ in 0..cur_batch_size {
+                candidate_scores_batch.push(100.0);
+
+                let user_emb: Vec<f32> = dist.sample_iter(&mut rng).take(emb_dim).collect();
+                user_embeddings_batch.extend_from_slice(&user_emb);
+                candidate_embeddings_batch.extend_from_slice(&user_emb);
+
+                for _ in 1..metadata.num_candidates {
+                    candidate_scores_batch.push(10.0);
+                    candidate_embeddings_batch.extend(dist.sample_iter(&mut rng).take(emb_dim));
+                }
+            }
+
+            let formatted_prompts_batch: FormattedBatch = prompt_formatter
+                .format_batch_from_padded_i32(
+                    &user_ids[i0..i1],
+                    &movie_ids[i0..i1],
+                    &timestamps[i0..i1],
+                    &hist_movie_ids,
+                    &hist_ratings,
+                    &hist_timestamps,
+                    metadata.max_prompt_history,
+                    user_history.pad_value,
+                    &candidate_ids_batch,
+                    &candidate_scores_batch,
+                    &user_embeddings_batch,
+                    &candidate_embeddings_batch,
+                    &row_indices,
+                    seed,
+                    training,
+                    preserve_positive,
+                );
+
+            let kept_batch_size = formatted_prompts_batch.kept_indices.len();
+            if kept_batch_size == 0 {
+                continue;
+            }
+
+            // Tokenize kept prompts in parallel and pack into flat [kept_batch_size, seq_len] i64 buffers
+            let prompt_slices: Vec<&str> = formatted_prompts_batch
+                .prompts
+                .iter()
+                .map(String::as_str)
+                .collect();
+            let encodings = tokenizer
+                .encode_batch(prompt_slices, false)
+                .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+
+            let seq_len = encodings[0].len();
+            let expected_placeholders = 1 + formatted_prompts_batch.effective_top_k;
+
+            let mut input_ids = Vec::with_capacity(kept_batch_size * seq_len);
+            let mut attention_mask = Vec::with_capacity(kept_batch_size * seq_len);
+
+            for enc in &encodings {
+                assert_eq!(enc.len(), seq_len, "Batch padding produced uneven sequence lengths");
+                let row_ids = enc.get_ids();
+                let row_mask = enc.get_attention_mask();
+
+                let mut placeholder_count = 0usize;
+                for (&id, &m) in row_ids.iter().zip(row_mask.iter()) {
+                    let id_i64 = id as i64;
+                    if id_i64 == placeholder_token_id {
+                        placeholder_count += 1;
+                    }
+                    input_ids.push(id_i64);
+                    attention_mask.push(m as i64);
+                }
+                assert_eq!(
+                    placeholder_count, expected_placeholders,
+                    "Expected {} `{}` tokens per prompt, found {}",
+                    expected_placeholders, metadata.emb_placeholder_token, placeholder_count
+                );
+            }
+
+            let ranker_embs_opt = metadata
+                .include_ranker_embeddings
+                .then_some(formatted_prompts_batch.ranker_embs.as_slice());
+
+            let scores = client
+                .get_reranked_scores(
+                    &input_ids,
+                    &attention_mask,
+                    ranker_embs_opt,
+                    kept_batch_size,
+                    seq_len,
+                    version_option,
+                )
+                .await
+                .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+
+            assert_eq!(
+                scores.len(),
+                kept_batch_size * metadata.num_candidates,
+                "Unexpected reranker output length"
+            );
+            assert!(
+                scores.iter().all(|s| s.is_finite()),
+                "Reranker returned NaN or Inf scores"
+            );
+            assert!(
+                scores.iter().all(|&s| s <= 1e-4),
+                "Expected candidate log-probabilities <= 0, got max={}",
+                scores.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+            );
+
+            println!(
+                "Batch {b}: kept={kept_batch_size}, seq_len={seq_len}, row 0 log_probs={:?}",
+                &scores[..metadata.num_candidates]
+            );
+            total_scored_rows += kept_batch_size;
+        }
+
+        assert!(
+            total_scored_rows > 0,
+            "Expected at least one non-empty-history row to be scored"
+        );
 
         Ok(())
-
     }
 }

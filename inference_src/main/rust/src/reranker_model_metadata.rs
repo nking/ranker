@@ -34,6 +34,9 @@ pub struct RerankerModelMetadata {
     #[arg(long, env="OUTPUT_NAME", default_value="candidate_log_probs")]
     pub output_name: String,
 
+    #[arg(long, env="EMB_PLACEHOLDER_TOKEN", default_value="<|vision_pad|>")]
+    pub emb_placeholder_token: String,
+
     #[arg(long, env = "NUM_CANDIDATES")]
     pub num_candidates : usize,
 

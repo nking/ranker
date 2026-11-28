@@ -17,13 +17,14 @@ mod hard_negative_sampling_test {
 
     #[test]
     fn sample_negative_candidates_returns_only_negatives() {
-        let (history, disliked, recs, catalog) = make_fixture();
+        let (history, disliked, recs, catalog)
+            = make_fixture();
 
         let transform = HardNegativeSamplingTransform::new(
             history,
             disliked,
             catalog,
-            recs,
+            *recs,
             20,
             SamplingStrategy::MixedHard,
         )
@@ -150,7 +151,7 @@ mod hard_negative_sampling_test {
                 Arc::clone(&history),
                 Arc::clone(&disliked),
                 catalog.clone(),
-                Arc::clone(&recs),
+                *recs,
                 20,
                 strategy,
             )

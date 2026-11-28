@@ -234,6 +234,25 @@ impl RerankerPromptFormatter {
 
     /// Formats a batch from flat padded history slices with `i32` ratings
     /// (matches `inference_engine::user_history::UserHistory::get_all_history_before_timestamp`).
+    /// 
+    /// param: row_indices:
+    /// 
+    ///     example row indices in training:
+    ///         pf = pq.ParquetFile(parquet_path)
+    ///         row_offset = 0
+    ///         for record_batch in pf.iter_batches(batch_size=2048):
+    ///             n = record_batch.num_rows
+    ///             indices = list(range(row_offset, row_offset + n))
+    ///             row_offset += n
+    ///             ...
+    ///             out = rust_fmt.format_batch(
+    ///                 ...,
+    ///                 indices=indices,
+    ///                 seed=42,
+    ///                 training=True,
+    ///                 preserve_positive=True,
+    ///             )
+    /// 
     #[allow(clippy::too_many_arguments)]
     pub fn format_batch_from_padded_i32(
         &self,
