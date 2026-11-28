@@ -51,13 +51,14 @@ impl TestHarness {
         let orchestrator = Orchestrator::new(
             query_uri,
             ranker_uri,
+            config.reranker_uri,
             config.query_models_path,
             config.ranker_models_path,
+            config.reranker_models_path,
             config.ranker_serving_is_batched,
             &movie_embeddings_uri,
             ratings_uris,
             ranker_n_local_devices,
-            ranker_top_k,
             persisted_index_path,
             user_db_path
         ).await.unwrap();
@@ -122,7 +123,8 @@ mod orchestrator_tests {
         let ranker_model_version = Some(VersionChoice::Version(1));
 
         let ranker_metatadata =
-            harness.orchestrator.get_or_fetch_ranker_metadata(ranker_model_version.clone()).expect("error fetching ranker metadata");
+            harness.orchestrator.get_or_fetch_ranker_metadata(ranker_model_version.clone())
+                .await.expect("error fetching ranker metadata");
         let num_candidates = ranker_metatadata.num_candidates;
 
         let borrowed_vec: Vec<&str> = harness.test_uris.iter().map(|s| s.as_str()).collect();

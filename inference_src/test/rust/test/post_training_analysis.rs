@@ -72,13 +72,14 @@ impl TestHarness {
         let orchestrator = Orchestrator::new(
             query_uri,
             ranker_uri,
+            config.reranker_uri,
             config.query_models_path,
             config.ranker_models_path,
+            config.reranker_models_path,
             config.ranker_serving_is_batched,
             &movie_embeddings_uri,
             ratings_uris,
             ranker_n_local_devices,
-            top_k,
             persisted_index_path,
             user_db_path,
         ).await.unwrap();
@@ -117,7 +118,7 @@ impl TestHarness {
 
         let ranker_metadata =
             orchestrator.get_or_fetch_ranker_metadata(Some(VersionChoice::Version(1)))
-                .expect("error fetching ranker metadata");
+                .await.expect("error fetching ranker metadata");
         let movies_offset = ranker_metadata.num_catalog_users; // when subtracted from min(movie_ids), will be 1
         let num_catalog_movies = ranker_metadata.num_catalog_movies;
         let embed_len = ranker_metadata.embed_len;
@@ -278,7 +279,7 @@ mod post_training_analysis {
 
         let ranker_metadata = harness.orchestrator.get_or_fetch_ranker_metadata(
             ranker_model_version.clone()
-        ).expect("error fetching ranker metadata");
+        ).await.expect("error fetching ranker metadata");
         let ranker_batch_size = ranker_metadata.batch_size;
         let num_candidates = ranker_metadata.num_candidates;
 
@@ -869,8 +870,11 @@ mod post_training_analysis {
         // movie_id with value offset with be 0 when offset is subtracted
         movies_request.movie_ids = vec![oov_movie_id; new_movie_ids.len()];
 
+        // NOTE: this assumes that the query and candidate tower versions are in sync
+        let query_model_path = harness.orchestrator.get_query_models_path();
         // create new embeddings with cold start Ids
-        let client = CandidateModelClient::new(harness.candidate_uri.clone(), embed_len).await;
+        let client = CandidateModelClient::new(harness.candidate_uri.clone(),
+            query_model_path.parse()?).await;
 
         let results : Result<Vec<f32>, Box<dyn Error>> = client.get_movies_embeddings(movies_request,
             candidate_model_version).await;

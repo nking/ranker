@@ -2,8 +2,7 @@
 mod client_tests {
     use std::collections::HashMap;
     use std::error::Error;
-    use std::io;
-    use std::path::{Path, PathBuf};
+    use std::path::{PathBuf};
     use std::sync::Arc;
     use polars::prelude::{col, LazyFrame};
     use rand::distributions::{Distribution, Uniform};
@@ -19,11 +18,9 @@ mod client_tests {
     use inference_engine::pb::{UsersRequest, MoviesRequest};
     use inference_engine::query_model_metadata::QueryModelMetadata;
     use inference_engine::ranker_model_metadata::RankerModelMetadata;
-    use inference_engine::recommended_movies::{build_recommended_movies, RecommendedMovies};
+    use inference_engine::recommended_movies::{build_recommended_movies};
     use inference_engine::user_history::{build_user_history, UserHistory};
-    use inference_engine::reranker_prompt_formatter::{format_batch_with_user_history,
-        write_movielens_genres, write_movielens_title, write_query_time, write_relative_delta,
-        MovieCatalog, PassagesYaml, QueryYaml, RerankerPromptFormatter, from_movie_db_and_yaml_files};
+    use inference_engine::reranker_prompt_formatter::{from_movie_db_and_yaml_files};
     use reranker_prompt::reranker_prompt_formatter::FormattedBatch;
 
     mod helper {
@@ -355,7 +352,8 @@ mod client_tests {
 
         // Load Hugging Face fast tokenizer from `<models_path>/<ver>/tokenizer.json`
         //let version_dir = Path::new(&models_path).join(ver.to_string());
-        let tokenizer = client.get_or_fetch_tokenizer(version_option).await?;
+        let tokenizer = client.get_or_fetch_tokenizer(version_option).await
+            .expect("Error getting tokenizer");
         let placeholder_token_id = tokenizer
             .token_to_id(&metadata.emb_placeholder_token)
             .expect("emb_placeholder_token not found as a single special token in tokenizer.json")

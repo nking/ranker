@@ -151,7 +151,8 @@ impl Harness {
             let movie_db: MovieDb = MovieDb::new(config.movies_path).unwrap();
             all_movie_ids = Some(movie_db.get_all_movie_ids());
 
-            let (movies_rec_uri, movies_rec_ts_uri) = get_recommended_movies_uris(Some(q_ver as i32));
+            let (movies_rec_uri, movies_rec_ts_uri) = get_recommended_movies_uris(
+                q_ver as i32);
             let query_model_version = Some(VersionChoice::Version(q_ver as i64));
 
             let query_metadata = orchestrator
@@ -528,7 +529,7 @@ mod write_reranker_parquet {
         // `orchestrator._get_user_history()` returns a cheap cloned `Arc<UserHistory>`;
         // `all_movie_ids` and `recommendations` are owned directly by `HardNegativeSamplingTransform`.
         let hard_negative_sampling = HardNegativeSamplingTransform::new(
-            Arc::new(harness.orchestrator._get_user_history()),
+            harness.orchestrator._get_user_history(),
             harness
                 .user_history_disliked
                 .take()

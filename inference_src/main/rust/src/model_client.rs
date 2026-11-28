@@ -559,14 +559,14 @@ impl CandidateModelClient {
         &self,
         request: MoviesRequest,
         candidate_model_version_choice: Option<VersionChoice>,
-    ) -> Result<Vec<f32>, BoxError> {
+    ) -> Result<Vec<f32>, Box<dyn Error>> {
         let n_valid_movies: usize = request.n_movies as usize;
 
         let predict_req =
             build_candidate_model_inputs(request, candidate_model_version_choice.clone());
         let metadata = self
             .get_or_fetch_metadata(candidate_model_version_choice)
-            .await?;
+            .await.expect("Error getting candidate metadata");
 
         let response = self.client.clone().predict(predict_req).await?;
         let inner_response = response.into_inner();
@@ -577,7 +577,8 @@ impl CandidateModelClient {
             .next()
             .ok_or("Error: TFS response from candidate model contained no outputs")?;
 
-        let mut flat_embedding = extract_f32_from_tensor_proto(tensor_proto, &key)?;
+        let mut flat_embedding = extract_f32_from_tensor_proto(tensor_proto, &key)
+            .expect("Error creating tensor proto");
         let valid_len = n_valid_movies * metadata.embed_len;
         if flat_embedding.len() > valid_len {
             flat_embedding.truncate(valid_len);

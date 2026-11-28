@@ -30,7 +30,7 @@ pub struct Orchestrator {
     reranker_model: RerankerModelClient,
 
     searcher: ArcSwap<Searcher>, // updatable
-    user_history: UserHistory,  // can be made updatable in future
+    user_history: Arc<UserHistory>,  // can be made updatable in future
     user_db: UserDb,
     #[allow(dead_code)]
     ranker_n_local_devices : usize,
@@ -109,13 +109,17 @@ impl Orchestrator {
             reranker_model: reranker_client,
 
             searcher: ArcSwap::from_pointee(initial_searcher),
-            user_history: user_history,
+            user_history: Arc::new(user_history),
             user_db: user_db,
             ranker_n_local_devices: ranker_n_local_devices,
             persisted_index_path: persisted_index_path.as_ref().to_path_buf(),
             ranker_top_k: num_candidates,
             reranker_top_k: reranker_metadata.eval_top_k
         })
+    }
+
+    pub fn get_query_models_path(&self) -> &str {
+        self.query_model.get_models_path().clone()
     }
 
     /// Queries TensorFlow Serving for the latest available Query and Ranker model versions
@@ -125,7 +129,7 @@ impl Orchestrator {
         &self,
     ) -> Result<(i64, i64, i64), Box<dyn std::error::Error + Send + Sync>> {
 
-        //TODO: consider invoking these concurrently.
+        //TODO: consider invoking these concurrently.  need to design failover for it.
         let query_ver = self.query_model.update_latest_model_version().await?;
         let ranker_ver = self.ranker_model.update_latest_model_version().await?;
         let reranker_ver = self.reranker_model.update_latest_model_version().await?;
@@ -641,6 +645,19 @@ impl Orchestrator {
         }))
     }
 
+    /// given the UsereRequest, this method makes hard negative canidate lists for each user
+    /// and scores the results using the ranker model.
+    /// The results are for use in making the reranker training parquet file..
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// * `req`:
+    /// * `query_movie_ids`:
+    /// * `hard_negative_sampling`:
+    /// * `seed`:
+    ///
+    /// returns: Result<Response<RankedMoviesAndRepr>, Status>
     pub async fn _negatives_diagnostic(&self, req: Request<UsersRequest>,
         query_movie_ids: &[i32],
         hard_negative_sampling: &HardNegativeSamplingTransform,
